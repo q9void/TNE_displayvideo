@@ -149,33 +149,50 @@
         return true;
       }
 
-      // Check for cached consent data
+      // FIXED: Check for cached consent data with timeout for async CMPs
       var hasValidConsent = false;
       var checkComplete = false;
 
       try {
-        window.__tcfapi('getTCData', 2, function(tcData, success) {
-          if (success && tcData) {
-            // GDPR doesn't apply - allow FPID
-            if (!tcData.gdprApplies) {
-              hasValidConsent = true;
-            }
-            // GDPR applies - check for valid consent string
-            else if (tcData.tcString && tcData.tcString.length >= 20) {
-              hasValidConsent = true;
-            }
+        // Set timeout to prevent infinite wait
+        var timeoutId = setTimeout(function() {
+          if (!checkComplete) {
+            catalyst.log('CMP consent check timeout for FPID - denying for safety');
+            checkComplete = true;
           }
-          checkComplete = true;
+        }, 100); // 100ms timeout
+
+        window.__tcfapi('getTCData', 2, function(tcData, success) {
+          if (!checkComplete) {
+            clearTimeout(timeoutId);
+            if (success && tcData) {
+              // GDPR doesn't apply - allow FPID
+              if (!tcData.gdprApplies) {
+                hasValidConsent = true;
+              }
+              // GDPR applies - check for valid consent string
+              else if (tcData.tcString && tcData.tcString.length >= 20) {
+                hasValidConsent = true;
+              }
+            }
+            checkComplete = true;
+          }
         });
+
+        // Busy-wait for callback (needed for sync operation, max 100ms)
+        var startTime = Date.now();
+        while (!checkComplete && (Date.now() - startTime < 100)) {
+          // Wait for CMP callback
+        }
+
       } catch (e) {
         catalyst.log('Error checking GDPR consent for FPID:', e);
         // On error, be conservative and deny FPID
         checkComplete = true;
       }
 
-      // If TCF API is synchronous and completed, return result
-      // Otherwise return false (no consent) to be safe
-      return checkComplete ? hasValidConsent : false;
+      // Return consent status (false if timeout or no consent)
+      return hasValidConsent;
     },
 
     // Generate new FPID
@@ -598,6 +615,7 @@
     var xhr = new XMLHttpRequest();
     xhr.open('POST', url, true);
     xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.withCredentials = true; // CRITICAL: Send/receive cookies for user sync
     xhr.timeout = catalyst._config.timeout;
 
     xhr.onload = function() {
@@ -889,9 +907,16 @@
       }
     };
 
-    // Timeout fallback - don't wait forever for consent data
+    // Timeout fallback - fail closed for GDPR compliance
     timeoutId = setTimeout(function() {
-      catalyst.log('Privacy consent timeout, proceeding without full data');
+      catalyst.log('Privacy consent timeout - failing closed for GDPR safety');
+      // CRITICAL: If CMP exists but times out, assume GDPR applies with no consent
+      // This is safer than assuming gdpr=0 which could violate GDPR
+      if (window.__tcfapi && !tcfDone) {
+        bidRequest.user.gdprApplies = true;
+        bidRequest.user.consentGiven = false;
+        catalyst.log('CMP timeout - marking GDPR as applying without consent');
+      }
       tcfDone = true;
       uspDone = true;
       if (callback) callback();
@@ -1005,6 +1030,7 @@
       var xhr = new XMLHttpRequest();
       xhr.open('POST', url, true);
       xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.withCredentials = true; // CRITICAL: Send/receive cookies for user sync
       xhr.timeout = 5000;
 
       xhr.onload = function() {
