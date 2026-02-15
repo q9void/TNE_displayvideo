@@ -374,6 +374,12 @@ func (s *Server) initHandlers() {
 
 	log.Info().Msg("TCF disclosure endpoints registered: /.well-known/tcf-disclosure.json, /tcf-disclosure.json")
 
+	// IAB Sellers.json (supply chain transparency)
+	mux.HandleFunc("/sellers.json", endpoints.HandleSellersJSON)
+	mux.HandleFunc("/.well-known/sellers.json", endpoints.HandleSellersJSON)
+
+	log.Info().Msg("Sellers.json endpoints registered: /sellers.json, /.well-known/sellers.json")
+
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", metrics.Handler())
 
