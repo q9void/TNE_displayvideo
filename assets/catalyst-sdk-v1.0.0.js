@@ -956,22 +956,21 @@
           if (success && uspData && uspData.uspString) {
             bidRequest.user.uspConsent = uspData.uspString;
           } else {
-            // CMP present but no USP string - use permissive default for testing
-            bidRequest.user.uspConsent = '1YNN';
+            // FIXED #9: Use safe default indicating no data available
+            bidRequest.user.uspConsent = '1---';
           }
           checkComplete();
         });
       } catch (e) {
         catalyst.log('Error getting USP consent:', e);
-        // Use permissive default on error
-        bidRequest.user.uspConsent = '1YNN';
+        // FIXED #9: Use safe default on error
+        bidRequest.user.uspConsent = '1---';
         uspDone = true;
         checkComplete();
       }
     } else {
-      // No CMP - use permissive default for testing
-      // TODO PRODUCTION: Remove this default and require proper CMP
-      bidRequest.user.uspConsent = '1YNN';
+      // FIXED #9: Use safe default indicating no CMP/data available
+      bidRequest.user.uspConsent = '1---';
       uspDone = true;
     }
 
@@ -1287,23 +1286,22 @@
             syncRequest.us_privacy = uspData.uspString;
             catalyst.log('Added USP consent string for cookie sync');
           } else {
-            // CMP present but no USP string - use permissive default for testing
-            syncRequest.us_privacy = '1YNN';
+            // FIXED #9: Use safe default indicating no data available
+            syncRequest.us_privacy = '1---';
             catalyst.log('Using default USP string (CMP present but no data)');
           }
           checkComplete();
         });
       } catch (e) {
         catalyst.log('Error getting USP consent for sync:', e);
-        // Use permissive default on error
-        syncRequest.us_privacy = '1YNN';
+        // FIXED #9: Use safe default on error
+        syncRequest.us_privacy = '1---';
         uspDone = true;
         checkComplete();
       }
     } else {
-      // No CMP - use permissive default for testing
-      // TODO PRODUCTION: Remove this default and require proper CMP
-      syncRequest.us_privacy = '1YNN';
+      // FIXED #9: Use safe default indicating no CMP/data available
+      syncRequest.us_privacy = '1---';
       catalyst.log('Using default USP string (no CMP found)');
       uspDone = true;
     }
@@ -1613,7 +1611,8 @@
    * @param {...*} args - Arguments to log
    */
   catalyst.log = function() {
-    if (catalyst._config.debug && console && console.log) {
+    // FIXED #5: typeof guard prevents ReferenceError in old browsers
+    if (catalyst._config.debug && typeof console !== 'undefined' && console.log) {
       console.log.apply(console, ['[Catalyst]'].concat(Array.prototype.slice.call(arguments)));
     }
   };
@@ -1641,6 +1640,7 @@
   };
 
   // Override push to execute commands immediately
+  // FIXED #4: Don't push to queue after execution to prevent double execution
   catalyst.cmd.push = function(cmd) {
     if (typeof cmd === 'function') {
       try {
@@ -1649,7 +1649,8 @@
         catalyst.log('Error executing command:', e);
       }
     }
-    return Array.prototype.push.call(this, cmd);
+    // Return current length without adding to queue (already executed)
+    return this.length;
   };
 
   // Process existing commands

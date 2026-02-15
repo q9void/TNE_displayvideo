@@ -11,7 +11,7 @@
 ### 2. Initialize
 
 ```javascript
-Catalyst.init({
+catalyst.init({
   accountId: 'your-account-id',           // Required: Your MAI Publisher account ID
   serverUrl: 'https://ads.thenexusengine.com',  // Required: Catalyst server URL
   timeout: 2800,                          // Optional: Timeout in ms (default: 2800)
@@ -22,7 +22,7 @@ Catalyst.init({
 ### 3. Request Bids
 
 ```javascript
-Catalyst.requestBids({
+catalyst.requestBids({
   slots: [
     {
       divId: 'ad-slot-1',
@@ -54,7 +54,7 @@ Catalyst.requestBids({
 
 **Solution:** Always specify `serverUrl`:
 ```javascript
-Catalyst.init({
+catalyst.init({
   accountId: 'your-account-id',
   serverUrl: 'https://ads.thenexusengine.com',  // ← Must include this!
   debug: true
@@ -63,7 +63,7 @@ Catalyst.init({
 
 ### Issue: SDK Not Loading
 
-**Symptom:** `Catalyst is not defined`
+**Symptom:** `catalyst is not defined`
 
 **Cause:** Script tag using relative path from wrong domain
 
@@ -124,7 +124,7 @@ Catalyst.init({
 
     <script>
         // Initialize
-        Catalyst.init({
+        catalyst.init({
             accountId: 'my-account-123',
             serverUrl: 'https://ads.thenexusengine.com',
             timeout: 2800,
@@ -133,7 +133,7 @@ Catalyst.init({
 
         // Request bids when page loads
         window.addEventListener('DOMContentLoaded', function() {
-            Catalyst.requestBids({
+            catalyst.requestBids({
                 slots: [
                     {
                         divId: 'leaderboard-ad',
@@ -197,10 +197,10 @@ Catalyst.init({
 
 ```javascript
 // Check SDK version
-console.log('SDK version:', Catalyst.version());
+console.log('SDK version:', catalyst.version());
 
 // Enable debug mode
-Catalyst.init({
+catalyst.init({
     accountId: 'your-account',
     serverUrl: 'https://ads.thenexusengine.com',
     debug: true  // ← Logs all requests/responses
@@ -222,7 +222,7 @@ Request bids for ad slots.
 - `params.page` - Page-level targeting data (optional)
 - `callback(bids)` - Called when bids are ready
 
-#### `Catalyst.version()`
+#### `catalyst.version()`
 Returns SDK version string.
 
 ### Slot Configuration

@@ -98,6 +98,11 @@
       }
     }
 
+    // FIXED #7-8: Remove old script before adding new one to prevent accumulation
+    if (slot.scriptTag && slot.scriptTag.parentNode) {
+      slot.scriptTag.parentNode.removeChild(slot.scriptTag);
+    }
+
     // Load ad script
     var script = document.createElement('script');
     script.src = url;
@@ -109,6 +114,7 @@
     };
 
     document.body.appendChild(script);
+    slot.scriptTag = script; // Track for cleanup
   };
 
   /**
@@ -203,6 +209,11 @@
     if (slot && slot.refreshInterval) {
       clearInterval(slot.refreshInterval);
       slot.refreshInterval = null;
+    }
+
+    // FIXED #7-8: Remove script tag to prevent DOM accumulation
+    if (slot && slot.scriptTag && slot.scriptTag.parentNode) {
+      slot.scriptTag.parentNode.removeChild(slot.scriptTag);
     }
 
     var container = document.getElementById(divId);
