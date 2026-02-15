@@ -168,15 +168,16 @@ type MAIBidResponse struct {
 
 // MAIBid represents a single bid
 type MAIBid struct {
-	DivID      string      `json:"divId"`
-	CPM        float64     `json:"cpm"`
-	Currency   string      `json:"currency"`
-	Width      int         `json:"width"`
-	Height     int         `json:"height"`
-	AdID       string      `json:"adId"`
-	CreativeID string      `json:"creativeId"`
-	DealID     string      `json:"dealId,omitempty"`
-	Meta       *MAIBidMeta `json:"meta,omitempty"`
+	DivID      string            `json:"divId"`
+	CPM        float64           `json:"cpm"`
+	Currency   string            `json:"currency"`
+	Width      int               `json:"width"`
+	Height     int               `json:"height"`
+	AdID       string            `json:"adId"`
+	CreativeID string            `json:"creativeId"`
+	DealID     string            `json:"dealId,omitempty"`
+	Meta       *MAIBidMeta       `json:"meta,omitempty"`
+	Targeting  map[string]string `json:"targeting,omitempty"` // Pre-built GAM targeting key-values
 }
 
 // MAIBidMeta represents bid metadata
@@ -1128,6 +1129,15 @@ func (h *CatalystBidHandler) convertToMAIResponse(auctionResp *exchange.AuctionR
 					AdvertiserDomains: bid.ADomain,
 					NetworkID:         bid.CID,
 					NetworkName:       seatBid.Seat,
+				}
+			}
+
+			// Extract pre-built GAM targeting keys from bid extension
+			// These are set by exchange.buildBidExtension and include _catalyst keys
+			if len(bid.Ext) > 0 {
+				var bidExt openrtb.BidExt
+				if err := json.Unmarshal(bid.Ext, &bidExt); err == nil && bidExt.Prebid != nil && len(bidExt.Prebid.Targeting) > 0 {
+					maiBid.Targeting = bidExt.Prebid.Targeting
 				}
 			}
 
