@@ -1,0 +1,31 @@
+{
+  "contact_email": "scott@thenexusengine.io",
+  "contact_address": "The Nexus Engine LTD, 20 Wenlock Road, London, N1 7GU, United Kingdom",
+  "version": "1.0",
+  "identifiers": [
+    {
+      "name": "GVLID",
+      "value": "1494"
+    }
+  ],
+  "sellers": [
+    {
+      "seller_id": "NXS001",
+      "name": "Bizbudding",
+      "domain": "bizbudding.com",
+      "seller_type": "BOTH"
+    },
+    {
+      "seller_id": "NXS002",
+      "name": "beIN SPORTS",
+      "domain": "beinsports.com",
+      "seller_type": "PUBLISHER"
+    },
+    {
+      "seller_id": "NXS003",
+      "name": "GotDigital Reach, LLC",
+      "domain": "gotsport.com",
+      "seller_type": "PUBLISHER"
+    }
+  ]
+}
