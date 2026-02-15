@@ -1052,12 +1052,14 @@
             }, syncWaitTime);
           } catch (e) {
             catalyst.log('Error parsing sync response:', e);
+            catalyst._userSyncComplete = true; // FIXED #3: Mark complete even on error
             if (typeof onComplete === 'function') {
               onComplete();
             }
           }
         } else {
           catalyst.log('User sync request failed:', xhr.status);
+          catalyst._userSyncComplete = true; // FIXED #3: Mark complete even on failure
           if (typeof onComplete === 'function') {
             onComplete();
           }
@@ -1066,6 +1068,7 @@
 
       xhr.onerror = function() {
         catalyst.log('User sync network error');
+        catalyst._userSyncComplete = true; // FIXED #3: Mark complete even on network error
         if (typeof onComplete === 'function') {
           onComplete();
         }
@@ -1073,6 +1076,7 @@
 
       xhr.ontimeout = function() {
         catalyst.log('User sync timeout');
+        catalyst._userSyncComplete = true; // FIXED #3: Mark complete even on timeout
         if (typeof onComplete === 'function') {
           onComplete();
         }
@@ -1087,6 +1091,7 @@
         xhr.send(JSON.stringify(syncRequest));
       } catch (e) {
         catalyst.log('Error sending sync request:', e);
+        catalyst._userSyncComplete = true; // FIXED #3: Mark complete even on send error
         if (typeof onComplete === 'function') {
           onComplete();
         }

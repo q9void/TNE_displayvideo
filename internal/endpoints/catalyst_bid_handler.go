@@ -926,9 +926,34 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 				})
 			}
 
-			// Build user.ext with eids and consent
-			userExt := map[string]interface{}{
-				"eids": eids,
+			// FIXED #16: Merge with existing user.ext instead of overwriting
+			// Preserve SDK-provided eids and other extensions
+			userExt := make(map[string]interface{})
+
+			// Start with SDK-provided user.ext if it exists
+			if maiBid.User != nil && maiBid.User.Ext != nil {
+				// Copy existing extensions from SDK
+				for k, v := range maiBid.User.Ext {
+					userExt[k] = v
+				}
+			}
+
+			// Merge eids: combine SDK eids with server-side UIDs
+			if existingEids, ok := userExt["eids"].([]interface{}); ok && len(existingEids) > 0 {
+				// SDK provided eids - merge with our server-side UIDs
+				logger.Log.Debug().
+					Int("sdk_eids", len(existingEids)).
+					Int("server_eids", len(eids)).
+					Msg("Merging SDK eids with server UIDs")
+
+				// Append server eids to SDK eids
+				for _, serverEid := range eids {
+					existingEids = append(existingEids, serverEid)
+				}
+				userExt["eids"] = existingEids
+			} else {
+				// No SDK eids, just use server-side UIDs
+				userExt["eids"] = eids
 			}
 
 			// Add consent hash if available (GDPR transparency)

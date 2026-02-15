@@ -54,8 +54,9 @@
     tne.requestAd(slot);
 
     // Setup auto-refresh if configured
+    // FIXED #6: Store interval ID so it can be cleared in destroySlot()
     if (slot.refreshRate > 0) {
-      setInterval(function() {
+      slot.refreshInterval = setInterval(function() {
         tne.refreshAd(slot.divId);
       }, slot.refreshRate * 1000);
     }
@@ -197,6 +198,13 @@
    * @param {string} divId - Container div ID
    */
   tne.destroySlot = function(divId) {
+    // FIXED #6: Clear refresh interval to prevent memory leak
+    var slot = tne._slots[divId];
+    if (slot && slot.refreshInterval) {
+      clearInterval(slot.refreshInterval);
+      slot.refreshInterval = null;
+    }
+
     var container = document.getElementById(divId);
     if (container) {
       container.innerHTML = '';
