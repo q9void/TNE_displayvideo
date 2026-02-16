@@ -23,6 +23,7 @@ deployment/docker-compose.override.yml
 catalyst
 catalyst-server
 server
+server-*
 main
 test-build
 *.exe
