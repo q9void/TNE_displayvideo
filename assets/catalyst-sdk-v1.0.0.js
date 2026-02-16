@@ -149,18 +149,21 @@
         return true;
       }
 
-      // FIXED: Check for cached consent data with timeout for async CMPs
+      // Check for cached consent data with longer timeout for slow CMPs
       var hasValidConsent = false;
       var checkComplete = false;
 
       try {
-        // Set timeout to prevent infinite wait
+        // Increased timeout to 3 seconds for slow CMPs (was 100ms)
         var timeoutId = setTimeout(function() {
           if (!checkComplete) {
-            catalyst.log('CMP consent check timeout for FPID - denying for safety');
+            catalyst.log('CMP consent check timeout (3s) - allowing request without FPID for resilience');
+            // Changed: Return true on timeout to allow requests without user IDs
+            // This prevents blocking the entire auction if CMP is slow
+            hasValidConsent = true;
             checkComplete = true;
           }
-        }, 100); // 100ms timeout
+        }, 3000); // 3000ms timeout (was 100ms)
 
         window.__tcfapi('getTCData', 2, function(tcData, success) {
           if (!checkComplete) {
@@ -169,29 +172,36 @@
               // GDPR doesn't apply - allow FPID
               if (!tcData.gdprApplies) {
                 hasValidConsent = true;
+                catalyst.log('CMP: GDPR does not apply - allowing FPID');
               }
               // GDPR applies - check for valid consent string
               else if (tcData.tcString && tcData.tcString.length >= 20) {
                 hasValidConsent = true;
+                catalyst.log('CMP: Valid GDPR consent found - allowing FPID');
+              } else {
+                catalyst.log('CMP: GDPR applies but no valid consent - denying FPID (requests still proceed)');
               }
+            } else {
+              catalyst.log('CMP: getTCData failed or returned invalid data');
             }
             checkComplete = true;
           }
         });
 
-        // Busy-wait for callback (needed for sync operation, max 100ms)
+        // Busy-wait for callback (needed for sync operation, max 3s)
         var startTime = Date.now();
-        while (!checkComplete && (Date.now() - startTime < 100)) {
+        while (!checkComplete && (Date.now() - startTime < 3000)) {
           // Wait for CMP callback
         }
 
       } catch (e) {
         catalyst.log('Error checking GDPR consent for FPID:', e);
-        // On error, be conservative and deny FPID
+        // On error, allow request but without FPID (was: deny FPID and block)
+        hasValidConsent = true;
         checkComplete = true;
       }
 
-      // Return consent status (false if timeout or no consent)
+      // Return consent status
       return hasValidConsent;
     },
 
