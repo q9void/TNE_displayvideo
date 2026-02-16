@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	defaultEndpoint = "https://prebid-server.rubiconproject.com/openrtb2/auction"
+	defaultEndpoint = "https://fastlane.rubiconproject.com/a/api/fastlane.json"
 )
 
 // Rubicon-specific extension structures

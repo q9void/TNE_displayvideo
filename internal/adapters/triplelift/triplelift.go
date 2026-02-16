@@ -139,6 +139,11 @@ func (a *Adapter) MakeBids(request *openrtb.BidRequest, responseData *adapters.R
 	contentType := responseData.Headers.Get("Content-Type")
 	if contentType != "" {
 		lowerCT := strings.ToLower(contentType)
+		// TripleLift returns JavaScript/JSONP for "no bid" - treat as valid no-bid response
+		if strings.Contains(lowerCT, "application/javascript") {
+			// JavaScript response like: serveDefault("not_loaded","...") means no bid
+			return nil, nil
+		}
 		// Accept: application/json, application/json;charset=utf-8, text/json
 		if !strings.Contains(lowerCT, "application/json") && !strings.Contains(lowerCT, "text/json") {
 			bodyPreview := string(responseData.Body)
