@@ -8,7 +8,6 @@ import (
 
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
-	"github.com/thenexusengine/tne_springwire/pkg/currency"
 )
 
 // TestCurrencyNormalization tests that currency codes are normalized to uppercase
@@ -385,7 +384,7 @@ func TestResponseValidation(t *testing.T) {
 			if tt.expectError {
 				if validErr == nil {
 					t.Errorf("Expected validation error, but got none")
-				} else if tt.errorReason != "" && !contains(validErr.Error(), tt.errorReason) {
+				} else if tt.errorReason != "" && !containsSubstring(validErr.Error(), tt.errorReason) {
 					t.Errorf("Expected error containing %q, got %q", tt.errorReason, validErr.Error())
 				}
 			} else {
@@ -436,7 +435,8 @@ func TestMultiformatBidSelection(t *testing.T) {
 				H:     250,
 			},
 			MediaType:  "banner",
-			BidderCode: "bidder1",
+			BidderName: "bidder1",
+			CPM:        1.50,
 		},
 		{
 			Bid: &openrtb.Bid{
@@ -446,7 +446,8 @@ func TestMultiformatBidSelection(t *testing.T) {
 				Protocol: 2,
 			},
 			MediaType:  "video",
-			BidderCode: "bidder2",
+			BidderName: "bidder2",
+			CPM:        2.00,
 		},
 	}
 
@@ -466,16 +467,4 @@ func TestMultiformatBidSelection(t *testing.T) {
 	}
 }
 
-// Helper function to check if string contains substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || findSubstring(s, substr)))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
+// Note: containsSubstring helper is defined in exchange_test.go
