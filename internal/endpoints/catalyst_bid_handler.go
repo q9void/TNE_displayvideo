@@ -129,6 +129,7 @@ type MAISlot struct {
 	VideoMimes             []string    `json:"videoMimes,omitempty"`             // Supported MIME types
 	Native                 bool        `json:"native,omitempty"`                 // Enable native format
 	MultiformatStrategy    string      `json:"multiformatStrategy,omitempty"`    // Strategy for multiformat
+	PreferredMediaType     string      `json:"preferredMediaType,omitempty"`     // Preferred media type for multiformat
 }
 
 // MAIPage represents page context
@@ -505,27 +506,36 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 			hasMultipleFormats++
 		}
 
-		if hasMultipleFormats > 1 && slot.MultiformatStrategy != "" {
-			// Add multiformat strategy to imp.ext.prebid
-			impExtPrebid := map[string]interface{}{
-				"multiformatRequestStrategy": slot.MultiformatStrategy,
+		if hasMultipleFormats > 1 {
+			// Add multiformat strategy and preferred media type to imp.ext.prebid
+			impExtPrebid := map[string]interface{}{}
+
+			if slot.MultiformatStrategy != "" {
+				impExtPrebid["multiformatRequestStrategy"] = slot.MultiformatStrategy
 			}
-			if len(imp.Ext) > 0 {
-				// Merge with existing ext
-				var extMap map[string]interface{}
-				if err := json.Unmarshal(imp.Ext, &extMap); err == nil {
-					extMap["prebid"] = impExtPrebid
+
+			if slot.PreferredMediaType != "" {
+				impExtPrebid["preferredMediaType"] = slot.PreferredMediaType
+			}
+
+			if len(impExtPrebid) > 0 {
+				if len(imp.Ext) > 0 {
+					// Merge with existing ext
+					var extMap map[string]interface{}
+					if err := json.Unmarshal(imp.Ext, &extMap); err == nil {
+						extMap["prebid"] = impExtPrebid
+						if extBytes, err := json.Marshal(extMap); err == nil {
+							imp.Ext = extBytes
+						}
+					}
+				} else {
+					// Create new ext
+					extMap := map[string]interface{}{
+						"prebid": impExtPrebid,
+					}
 					if extBytes, err := json.Marshal(extMap); err == nil {
 						imp.Ext = extBytes
 					}
-				}
-			} else {
-				// Create new ext
-				extMap := map[string]interface{}{
-					"prebid": impExtPrebid,
-				}
-				if extBytes, err := json.Marshal(extMap); err == nil {
-					imp.Ext = extBytes
 				}
 			}
 		}
@@ -1156,21 +1166,20 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 
 	// Build supply chain object (schain) - REQUIRED for transparency and fraud prevention
 	// Identifies Catalyst as the seller in the supply chain
-	schainJSON := fmt.Sprintf(`{
-		"schain": {
-			"ver": "1.0",
-			"complete": 1,
-			"nodes": [{
-				"asi": "thenexusengine.com",
-				"sid": "%s",
-				"hp": 1,
-				"name": "The Nexus Engine (Catalyst)"
-			}]
-		}
-	}`, maiBid.AccountID)
-
+	// Per OpenRTB 2.5 spec, schain goes in Source.SChain (not Source.Ext)
 	source := &openrtb.Source{
-		Ext: json.RawMessage(schainJSON),
+		SChain: &openrtb.SupplyChain{
+			Ver:      "1.0",
+			Complete: 1,
+			Nodes: []openrtb.SupplyChainNode{
+				{
+					ASI:  "thenexusengine.com",
+					SID:  maiBid.AccountID,
+					HP:   1,
+					Name: "The Nexus Engine (Catalyst)",
+				},
+			},
+		},
 	}
 
 	// Build OpenRTB request

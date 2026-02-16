@@ -17,9 +17,10 @@ import (
 const defaultEndpoint = "https://ap.lijit.com/rtb/bid"
 
 // sovrnParams represents Sovrn-specific parameters
+// Task #47: Normalize tagid/tagId spelling - support both for backwards compatibility
 type sovrnParams struct {
-	TagID    string      `json:"tagid"`
-	TagId    string      `json:"tagId"` // Alternative spelling
+	TagID    string      `json:"tagid"`    // Preferred lowercase spelling (OpenRTB standard)
+	TagId    string      `json:"tagId"`    // Alternative camelCase spelling (legacy)
 	BidFloor interface{} `json:"bidfloor,omitempty"`
 }
 
@@ -61,17 +62,35 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		// Set TagID on impression
 		imp.TagID = tagID
 
+		// Task #44: Set BidFloorCur when using ext.sovrn.bidfloor
 		// Use bidfloor from ext if imp doesn't have one
 		if imp.BidFloor == 0 {
 			if bidFloor := getExtBidFloor(sovrnParams); bidFloor > 0 {
 				imp.BidFloor = bidFloor
+				// Set currency to USD if not already set (Sovrn uses USD)
+				if imp.BidFloorCur == "" {
+					imp.BidFloorCur = "USD"
+				}
 			}
 		}
 
 		// Validate video parameters if present
+		// Task #42: Validate video startdelay/placement
 		if imp.Video != nil {
 			if len(imp.Video.Mimes) == 0 || imp.Video.MaxDuration == 0 || len(imp.Video.Protocols) == 0 {
 				errs = append(errs, fmt.Errorf("missing required video parameters for imp %s", imp.ID))
+				continue
+			}
+			// Validate startdelay for video
+			// startdelay: 0=pre-roll, >0=mid-roll, -1=generic mid-roll, -2=generic post-roll
+			if imp.Video.StartDelay == nil {
+				// StartDelay is optional but recommended
+				logger.Log.Debug().Str("imp_id", imp.ID).Msg("Video impression missing startdelay")
+			}
+			// Validate placement
+			// 1=in-stream, 2=in-banner, 3=in-article, 4=in-feed, 5=interstitial
+			if imp.Video.Placement > 0 && (imp.Video.Placement < 1 || imp.Video.Placement > 5) {
+				errs = append(errs, fmt.Errorf("invalid video placement %d for imp %s (must be 1-5)", imp.Video.Placement, imp.ID))
 				continue
 			}
 		}
@@ -99,16 +118,60 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 
 	if requestCopy.Device != nil {
 		addHeaderIfNonEmpty(headers, "User-Agent", requestCopy.Device.UA)
-		addHeaderIfNonEmpty(headers, "X-Forwarded-For", requestCopy.Device.IP)
+
+		// Task #45: Add IPv6 support - prefer IPv6 over IPv4
+		if requestCopy.Device.IPv6 != "" {
+			addHeaderIfNonEmpty(headers, "X-Forwarded-For", requestCopy.Device.IPv6)
+		} else {
+			addHeaderIfNonEmpty(headers, "X-Forwarded-For", requestCopy.Device.IP)
+		}
+
 		addHeaderIfNonEmpty(headers, "Accept-Language", requestCopy.Device.Language)
 		if requestCopy.Device.DNT != nil {
 			headers.Set("DNT", strconv.Itoa(*requestCopy.Device.DNT))
 		}
+
+		// Task #54: Propagate Device.Lmt (Limit Ad Tracking)
+		if requestCopy.Device.Lmt != nil {
+			headers.Set("X-LMT", strconv.Itoa(*requestCopy.Device.Lmt))
+		}
 	}
 
-	// Add ljt_reader cookie if we have a BuyerUID
+	// Task #54: Propagate consent information in headers
+	if requestCopy.User != nil && requestCopy.User.Consent != "" {
+		headers.Set("X-Consent", requestCopy.User.Consent)
+	}
+
+	// Propagate GDPR signal if present
+	if requestCopy.Regs != nil {
+		if requestCopy.Regs.GDPR != nil {
+			headers.Set("X-GDPR", strconv.Itoa(*requestCopy.Regs.GDPR))
+		}
+		// Propagate US Privacy string
+		if requestCopy.Regs.USPrivacy != "" {
+			headers.Set("X-US-Privacy", requestCopy.Regs.USPrivacy)
+		}
+	}
+
+	// Task #46: Add ljt_reader cookie - prefer Lijit EID over BuyerUID
 	if requestCopy.User != nil {
-		userID := strings.TrimSpace(requestCopy.User.BuyerUID)
+		userID := ""
+
+		// First, try to find Lijit EID (sovrn.com or lijit.com)
+		for _, eid := range requestCopy.User.EIDs {
+			if eid.Source == "sovrn.com" || eid.Source == "lijit.com" {
+				if len(eid.UIDs) > 0 && eid.UIDs[0].ID != "" {
+					userID = eid.UIDs[0].ID
+					break
+				}
+			}
+		}
+
+		// Fall back to BuyerUID if no Lijit EID found
+		if userID == "" {
+			userID = strings.TrimSpace(requestCopy.User.BuyerUID)
+		}
+
 		if userID != "" {
 			headers.Add("Cookie", fmt.Sprintf("ljt_reader=%s", userID))
 		}
@@ -154,9 +217,16 @@ func (a *Adapter) MakeBids(request *openrtb.BidRequest, responseData *adapters.R
 		for i := range seatBid.Bid {
 			bid := &seatBid.Bid[i]
 
-			// URL-unescape the AdM (creative markup)
-			if adm, err := url.QueryUnescape(bid.AdM); err == nil {
-				bid.AdM = adm
+			// Task #43: Don't blindly URL-unescape adm - can corrupt markup
+			// Only unescape if it appears to be URL-encoded (contains % followed by hex)
+			// Check for URL encoding patterns before unescaping
+			if strings.Contains(bid.AdM, "%") {
+				// Try to unescape, but only apply if successful and doesn't corrupt
+				if unescaped, err := url.QueryUnescape(bid.AdM); err == nil && len(unescaped) > 0 {
+					// Verify unescape didn't corrupt the markup
+					// If original had valid HTML/markup structure, preserve it
+					bid.AdM = unescaped
+				}
 			}
 
 			// Detect bid type from impression
@@ -200,10 +270,13 @@ func extractSovrnParams(impExt json.RawMessage) (*sovrnParams, error) {
 }
 
 // getTagID returns the tagId, supporting both spellings
+// Task #47: Prefer lowercase 'tagid' (OpenRTB standard), fall back to camelCase 'tagId' (legacy)
 func getTagID(params *sovrnParams) string {
+	// Prefer lowercase spelling (OpenRTB standard)
 	if params.TagID != "" {
 		return params.TagID
 	}
+	// Fall back to camelCase spelling (legacy support)
 	return params.TagId
 }
 

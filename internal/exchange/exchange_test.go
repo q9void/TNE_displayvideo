@@ -184,6 +184,11 @@ func TestExchangeRunAuctionWithBidders(t *testing.T) {
 		if result.BidderCode != "test-bidder" {
 			t.Errorf("expected bidder code 'test-bidder', got %s", result.BidderCode)
 		}
+		if len(result.Errors) > 0 {
+			for _, err := range result.Errors {
+				t.Errorf("Unexpected error: %v", err)
+			}
+		}
 	}
 }
 
@@ -514,11 +519,10 @@ func TestBidValidation(t *testing.T) {
 		},
 		// NEW: NURL validation tests
 		{
-			name:        "invalid nurl - not https",
-			bid:         &openrtb.Bid{ID: "bid1", ImpID: "imp1", Price: 2.00, NURL: "http://example.com/win"},
+			name:        "valid nurl - http allowed (task #51)",
+			bid:         &openrtb.Bid{ID: "bid1", ImpID: "imp1", Price: 2.00, AdM: "test", NURL: "http://example.com/win"},
 			bidderCode:  "test-bidder",
-			wantErr:     true,
-			errContains: "must use HTTPS",
+			wantErr:     false,
 		},
 		{
 			name:        "invalid nurl - malformed",
@@ -651,6 +655,22 @@ func TestBidDeduplication(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	// Log errors for visibility
+	for bidder, errors := range resp.DebugInfo.Errors {
+		for _, errMsg := range errors {
+			t.Logf("%s error: %s", bidder, errMsg)
+		}
+	}
+
+	// Log bidder results
+	t.Logf("BidderResults count: %d", len(resp.BidderResults))
+	for bidder, result := range resp.BidderResults {
+		t.Logf("Bidder %s: bids=%d, errors=%d", bidder, len(result.Bids), len(result.Errors))
+		for _, err := range result.Errors {
+			t.Logf("  Error: %v", err)
+		}
+	}
+
 	// Only one bid should win (first one seen), the duplicate should be rejected
 	totalBids := 0
 	for _, sb := range resp.BidResponse.SeatBid {
@@ -682,6 +702,8 @@ func TestSecondPriceAuction(t *testing.T) {
 	// Create mock HTTP servers and bidders with different prices
 	bid1 := &openrtb.Bid{ID: "bid1", ImpID: "imp1", Price: 5.00, AdM: "<div>ad1</div>"}
 	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
 		resp := &openrtb.BidResponse{
 			ID:      "test-second-price",
 			SeatBid: []openrtb.SeatBid{{Bid: []openrtb.Bid{*bid1}}},
@@ -692,6 +714,8 @@ func TestSecondPriceAuction(t *testing.T) {
 
 	bid2 := &openrtb.Bid{ID: "bid2", ImpID: "imp1", Price: 3.00, AdM: "<div>ad2</div>"}
 	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
 		resp := &openrtb.BidResponse{
 			ID:      "test-second-price",
 			SeatBid: []openrtb.SeatBid{{Bid: []openrtb.Bid{*bid2}}},
@@ -702,6 +726,8 @@ func TestSecondPriceAuction(t *testing.T) {
 
 	bid3 := &openrtb.Bid{ID: "bid3", ImpID: "imp1", Price: 2.00, AdM: "<div>ad3</div>"}
 	server3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
 		resp := &openrtb.BidResponse{
 			ID:      "test-second-price",
 			SeatBid: []openrtb.SeatBid{{Bid: []openrtb.Bid{*bid3}}},
@@ -746,6 +772,10 @@ func TestSecondPriceAuction(t *testing.T) {
 	resp, err := ex.RunAuction(context.Background(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resp.BidResponse == nil {
+		t.Fatal("BidResponse is nil")
 	}
 
 	// Find the winning bid (highest)

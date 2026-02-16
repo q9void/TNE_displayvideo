@@ -24,12 +24,12 @@ This document explains the bidder parameter mapping from BizBudding Excel to Cat
 | H | `zoneId` | Rubicon/Magnite | int |
 | I | `bidonmultiformat` | Rubicon/Magnite | bool |
 | J | `placementId` | Kargo | string |
-| K | `tagid` | Sovrn | int |
+| K | `tagid` | Sovrn | **string** |
 | L | `publisherId` | OMS (Onemobile) | int |
 | N | `publisherId` | Aniview | string |
 | O | `channelId` | Aniview | string |
-| P | `publisherId` | Pubmatic | int |
-| Q | `adSlot` | Pubmatic | int |
+| P | `publisherId` | Pubmatic | **string** |
+| Q | `adSlot` | Pubmatic | **string** |
 | R | `inventoryCode` | Triplelift | string |
 
 ---
@@ -45,16 +45,16 @@ This document explains the bidder parameter mapping from BizBudding Excel to Cat
   "publisher": {
     "publisherId": "icisic-media",
     "domain": "totalprosports.com",
-    "defaultBidders": ["rubicon", "kargo", "sovrn", "oms", "aniview", "pubmatic", "triplelift"]
+    "defaultBidders": ["rubicon", "kargo", "sovrn", "pubmatic", "triplelift"]
   },
   "adUnits": {
     "<slot-pattern>": {
       "rubicon": { "accountId": 26298, "siteId": 556630, "zoneId": 3767184, "bidonmultiformat": false },
       "kargo": { "placementId": "_o9n8eh8Lsw" },
-      "sovrn": { "tagid": 1277816 },
+      "sovrn": { "tagid": "1277816" },
       "oms": { "publisherId": 21146 },
       "aniview": { "publisherId": "...", "channelId": "..." },
-      "pubmatic": { "publisherId": 166938, "adSlot": 7079290 },
+      "pubmatic": { "publisherId": "166938", "adSlot": "7079290" },
       "triplelift": { "inventoryCode": "BizBudding_RON_HDX_pbc2s" }
     }
   }

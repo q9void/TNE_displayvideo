@@ -68,8 +68,9 @@ type Exchange struct {
 	eidFilter         *fpd.EIDFilter
 	metrics           MetricsRecorder
 	currencyConverter *currency.Converter
-	analytics         analytics.Module // NEW: Analytics module for rich auction transaction data
-	mfProcessor       *MultiformatProcessor // Multiformat bid selection
+	analytics         analytics.Module       // NEW: Analytics module for rich auction transaction data
+	mfProcessor       *MultiformatProcessor  // Multiformat bid selection
+	multibidProcessor *MultibidProcessor     // Task #52: Multibid processing
 
 	// Per-bidder circuit breakers to prevent cascade failures
 	bidderBreakers   map[string]*idr.CircuitBreaker
@@ -141,8 +142,9 @@ type Config struct {
 	CurrencyConverter    *currency.Converter // Currency conversion support
 	Analytics            analytics.Module     // NEW: Analytics module for rich auction transaction data
 	FPD                  *fpd.Config
-	CloneLimits          *CloneLimits // P3-1: Configurable clone limits
+	CloneLimits          *CloneLimits       // P3-1: Configurable clone limits
 	MultiformatConfig    *MultiformatConfig // Multiformat bid selection config
+	MultibidConfig       *MultibidConfig    // Task #52: Multibid processing config
 	// Auction configuration
 	AuctionType    AuctionType
 	PriceIncrement float64 // For second-price auctions (typically 0.01)
@@ -255,6 +257,12 @@ func New(registry *adapters.Registry, config *Config) *Exchange {
 		mfConfig = DefaultMultiformatConfig()
 	}
 
+	// Task #52: Initialize multibid config if not provided
+	multibidConfig := config.MultibidConfig
+	if multibidConfig == nil {
+		multibidConfig = DefaultMultibidConfig()
+	}
+
 	ex := &Exchange{
 		registry:          registry,
 		httpClient:        adapters.NewHTTPClient(config.DefaultTimeout),
@@ -263,8 +271,9 @@ func New(registry *adapters.Registry, config *Config) *Exchange {
 		eidFilter:         fpd.NewEIDFilter(fpdConfig),
 		bidderBreakers:    make(map[string]*idr.CircuitBreaker),
 		currencyConverter: config.CurrencyConverter,
-		analytics:         config.Analytics, // NEW: Set analytics module from config
+		analytics:         config.Analytics,         // NEW: Set analytics module from config
 		mfProcessor:       NewMultiformatProcessor(mfConfig),
+		multibidProcessor: NewMultibidProcessor(multibidConfig), // Task #52: Initialize multibid processor
 	}
 
 	// Initialize circuit breaker for each registered bidder
@@ -552,13 +561,15 @@ func validateURL(urlStr string, requireHTTPS bool) error {
 // the bid must clearly indicate which type it's for
 func validateBidMediaType(bid *openrtb.Bid, imp *openrtb.Imp) error {
 	// Determine which media type the bid is for based on its properties
-	// Priority: Video (has w/h or protocol) > Native > Banner (default)
+	// Priority: Video (has protocol) > Native (no dimensions) > Banner (default)
 
-	// Check if this is a video bid
-	isVideoBid := bid.Protocol > 0 || (bid.W > 0 && bid.H > 0 && imp.Video != nil)
+	// Check if this is a video bid (has protocol field set)
+	isVideoBid := bid.Protocol > 0
 
 	// Check if this is a native bid (typically has no dimensions)
-	isNativeBid := bid.W == 0 && bid.H == 0 && imp.Native != nil && imp.Banner == nil
+	// Issue #10 fix: Removed imp.Banner == nil check to support multiformat (banner + native)
+	// Native bids are identified by lack of dimensions, not by exclusion of other formats
+	isNativeBid := bid.W == 0 && bid.H == 0 && bid.Protocol == 0 && imp.Native != nil
 
 	// Video bid validation
 	if isVideoBid {
@@ -717,9 +728,9 @@ func (e *Exchange) validateBid(bid *openrtb.Bid, bidderCode string, req *openrtb
 	}
 
 	// CRITICAL FIX #2: Validate NURL format if present
-	// OpenRTB 2.5: NURL must be a valid HTTPS URL
+	// Task #51: Allow HTTP for nurl (not just HTTPS) - some bidders use HTTP endpoints
 	if bid.NURL != "" {
-		if err := validateURL(bid.NURL, true); err != nil {
+		if err := validateURL(bid.NURL, false); err != nil {
 			return &BidValidationError{
 				BidID:      bid.ID,
 				ImpID:      bid.ImpID,
@@ -779,6 +790,23 @@ func (e *Exchange) validateBid(bid *openrtb.Bid, bidderCode string, req *openrtb
 func (e *Exchange) buildImpFloorMap(ctx context.Context, req *openrtb.BidRequest) map[string]float64 {
 	impFloors := make(map[string]float64, len(req.Imp))
 
+	// Get target currency for floor validation (issue #15)
+	// Handle nil config gracefully for tests
+	var targetCurrency string
+	if e.config != nil {
+		targetCurrency = e.extractTargetCurrency(req)
+	} else {
+		// Default to USD if no config (test scenario)
+		if len(req.Cur) > 0 && req.Cur[0] != "" {
+			targetCurrency = req.Cur[0]
+		} else {
+			targetCurrency = "USD"
+		}
+	}
+
+	// Extract custom currency rates from ext.prebid.currency (issue #17)
+	customRates, useExternalRates := extractCustomRates(req)
+
 	// Get publisher's bid multiplier
 	var multiplier float64 = 1.0
 	var publisherID string
@@ -792,10 +820,49 @@ func (e *Exchange) buildImpFloorMap(ctx context.Context, req *openrtb.BidRequest
 		}
 	}
 
-	// Build floor map with multiplier applied
+	// Build floor map with currency conversion and multiplier applied
 	floorsAdjusted := 0
+	floorsConverted := 0
 	for _, imp := range req.Imp {
 		baseFloor := imp.BidFloor
+		floorCurrency := imp.BidFloorCur
+		if floorCurrency == "" {
+			floorCurrency = targetCurrency // Default to target currency
+		}
+
+		// Normalize currency code (issue #16: usd → USD)
+		floorCurrency = normalizeIsoCurrency(floorCurrency)
+
+		// Convert floor to target currency if needed (issue #15)
+		if baseFloor > 0 && floorCurrency != targetCurrency {
+			convertedFloor, err := e.convertBidCurrency(
+				baseFloor,
+				floorCurrency,
+				targetCurrency,
+				customRates,
+				useExternalRates,
+			)
+			if err != nil {
+				logger.Log.Warn().
+					Str("impID", imp.ID).
+					Str("floorCurrency", floorCurrency).
+					Str("targetCurrency", targetCurrency).
+					Float64("baseFloor", baseFloor).
+					Err(err).
+					Msg("Failed to convert floor currency, using original floor")
+				// Keep original floor on conversion failure
+			} else {
+				baseFloor = convertedFloor
+				floorsConverted++
+				logger.Log.Debug().
+					Str("impID", imp.ID).
+					Str("from", floorCurrency).
+					Str("to", targetCurrency).
+					Float64("originalFloor", imp.BidFloor).
+					Float64("convertedFloor", baseFloor).
+					Msg("Converted floor currency")
+			}
+		}
 
 		// Validate base floor is non-negative and reasonable
 		if baseFloor < 0 {
@@ -865,6 +932,16 @@ func (e *Exchange) buildImpFloorMap(ctx context.Context, req *openrtb.BidRequest
 			}
 		}
 		e.configMu.RUnlock()
+	}
+
+	// Log summary of floor processing (issues #15, #16, #17)
+	if floorsConverted > 0 || floorsAdjusted > 0 {
+		logger.Log.Info().
+			Int("floors_converted", floorsConverted).
+			Int("floors_adjusted", floorsAdjusted).
+			Int("total_impressions", len(req.Imp)).
+			Str("target_currency", targetCurrency).
+			Msg("Processed floor prices with currency conversion and multipliers")
 	}
 
 	return impFloors
@@ -2260,7 +2337,12 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 	clone := *req
 
 	// Clone Cur slice (we overwrite it)
-	clone.Cur = []string{e.config.DefaultCurrency}
+	// Only set currency if DefaultCurrency is configured, otherwise leave nil to accept any currency
+	if e.config.DefaultCurrency != "" {
+		clone.Cur = []string{e.config.DefaultCurrency}
+	} else {
+		clone.Cur = nil
+	}
 
 	// Deep copy Device to prevent adapter mutations from affecting other bidders
 	if req.Device != nil {
@@ -2628,6 +2710,7 @@ func deepCloneRequest(req *openrtb.BidRequest, limits *CloneLimits) *openrtb.Bid
 // callBidder calls a single bidder
 func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidderCode string, adapter adapters.Adapter, timeout time.Duration) *BidderResult {
 	start := time.Now()
+
 	result := &BidderResult{
 		BidderCode: bidderCode,
 		Selected:   true,
@@ -2692,6 +2775,7 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 
 	// Execute requests (could parallelize for multi-request adapters)
 	allBids := make([]*adapters.TypedBid, 0)
+
 	for _, reqData := range requests {
 		// Check if context has expired before each request to avoid wasted work
 		select {
@@ -2762,6 +2846,7 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 			Msg("bidder HTTP response received")
 
 		bidderResp, errs := adapter.MakeBids(req, resp)
+
 		if len(errs) > 0 {
 			// Log MakeBids errors for visibility
 			for _, err := range errs {
@@ -2812,6 +2897,37 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 			// Update bidderResp with normalized values
 			bidderResp.ResponseID = ortbResp.ID
 			bidderResp.Currency = ortbResp.Cur
+
+			// Task #52: Apply multibid processing to limit bids per bidder
+			if e.multibidProcessor != nil && len(ortbResp.SeatBid) > 0 {
+				processedResp, err := e.multibidProcessor.ProcessBidderResponse(bidderCode, ortbResp)
+				if err != nil {
+					logger.Log.Error().
+						Err(err).
+						Str("bidder", bidderCode).
+						Str("request_id", req.ID).
+						Msg("❌ Multibid processing failed")
+					result.Errors = append(result.Errors, err)
+					continue
+				}
+				ortbResp = processedResp
+
+				// Update bidderResp.Bids to reflect filtered bids
+				// FIX: Save original bids before clearing the array
+				originalBids := bidderResp.Bids
+				bidderResp.Bids = make([]*adapters.TypedBid, 0)
+				for _, seatBid := range ortbResp.SeatBid {
+					for i := range seatBid.Bid {
+						// Find original TypedBid to preserve BidType
+						for _, tb := range originalBids {
+							if tb.Bid.ID == seatBid.Bid[i].ID {
+								bidderResp.Bids = append(bidderResp.Bids, tb)
+								break
+							}
+						}
+					}
+				}
+			}
 		}
 
 		if bidderResp != nil {

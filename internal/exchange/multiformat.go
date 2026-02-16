@@ -41,12 +41,19 @@ func NewMultiformatProcessor(config *MultiformatConfig) *MultiformatProcessor {
 }
 
 // SelectBestBid selects the best bid for a multiformat impression
+// Returns nil if multiformat processing is disabled (caller should keep all bids)
 func (mfp *MultiformatProcessor) SelectBestBid(
 	imp *openrtb.Imp,
 	bids []*BidCandidate,
 	preferredMediaType string,
 ) *BidCandidate {
-	if !mfp.config.Enabled || len(bids) == 0 {
+	if len(bids) == 0 {
+		return nil
+	}
+
+	// If multiformat processing is disabled, return nil to signal caller
+	// should keep all bids unchanged
+	if !mfp.config.Enabled {
 		return nil
 	}
 
@@ -176,6 +183,7 @@ func (mfp *MultiformatProcessor) selectPreferDeal(
 
 // selectPreferMediaType selects bid strictly preferring media type
 // Priority: Preferred Format > Deal ID > Highest CPM
+// When preferMediaType strategy is used, format preference is paramount
 func (mfp *MultiformatProcessor) selectPreferMediaType(
 	bids []*BidCandidate,
 	preferredMediaType string,
@@ -184,29 +192,69 @@ func (mfp *MultiformatProcessor) selectPreferMediaType(
 		return mfp.selectServerBest(bids, "")
 	}
 
-	// First, try to find bid matching preferred type
-	var bestPreferred *BidCandidate
+	var bestPreferredDeal *BidCandidate // Preferred format with deal
+	var bestPreferred *BidCandidate     // Preferred format without deal
+	var bestOtherDeal *BidCandidate     // Other format with deal
+	var bestOther *BidCandidate         // Other format without deal
+
 	for _, bid := range bids {
-		if bid.MediaType == preferredMediaType {
-			if bestPreferred == nil || bid.CPM > bestPreferred.CPM {
-				bestPreferred = bid
+		matchesPreferred := bid.MediaType == preferredMediaType
+
+		if matchesPreferred {
+			if bid.HasDeal {
+				if bestPreferredDeal == nil || bid.CPM > bestPreferredDeal.CPM {
+					bestPreferredDeal = bid
+				}
+			} else {
+				if bestPreferred == nil || bid.CPM > bestPreferred.CPM {
+					bestPreferred = bid
+				}
+			}
+		} else {
+			if bid.HasDeal {
+				if bestOtherDeal == nil || bid.CPM > bestOtherDeal.CPM {
+					bestOtherDeal = bid
+				}
+			} else {
+				if bestOther == nil || bid.CPM > bestOther.CPM {
+					bestOther = bid
+				}
 			}
 		}
 	}
 
+	// Priority: Preferred+Deal > Preferred > Other+Deal > Other
+	// This ensures preferred format wins, but deals get secondary priority
+	if bestPreferredDeal != nil {
+		return bestPreferredDeal
+	}
 	if bestPreferred != nil {
 		return bestPreferred
 	}
-
-	// No bid matches preferred type - fall back to highest CPM
-	return mfp.selectServerBest(bids, "")
+	if bestOtherDeal != nil {
+		return bestOtherDeal
+	}
+	return bestOther
 }
 
 // GetPreferredMediaType extracts preferred media type from impression
 func (mfp *MultiformatProcessor) GetPreferredMediaType(imp *openrtb.Imp) string {
 	// Check imp.ext.prebid.preferredMediaType
-	// For now, use simple heuristic based on what's present
+	if imp.Ext != nil {
+		var prebidExt struct {
+			Prebid struct {
+				PreferredMediaType string `json:"preferredMediaType"`
+			} `json:"prebid"`
+		}
 
+		if err := json.Unmarshal(imp.Ext, &prebidExt); err == nil {
+			if prebidExt.Prebid.PreferredMediaType != "" {
+				return prebidExt.Prebid.PreferredMediaType
+			}
+		}
+	}
+
+	// Fallback to heuristic based on what's present
 	// Priority order: Video > Audio > Native > Banner
 	if imp.Video != nil {
 		return "video"

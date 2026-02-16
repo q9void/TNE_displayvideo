@@ -27,6 +27,9 @@ func TestNew(t *testing.T) {
 func TestMakeRequests(t *testing.T) {
 	adapter := New("")
 
+	// Task #20: Add required kargo.placementId extension
+	impExt := json.RawMessage(`{"kargo":{"placementId":"test-placement-123"}}`)
+
 	request := &openrtb.BidRequest{
 		ID: "test-request-1",
 		Imp: []openrtb.Imp{
@@ -36,6 +39,7 @@ func TestMakeRequests(t *testing.T) {
 					W: 300,
 					H: 250,
 				},
+				Ext: impExt,
 			},
 		},
 		Site: &openrtb.Site{
@@ -431,5 +435,217 @@ func TestInfo(t *testing.T) {
 
 	if info.DemandType != adapters.DemandTypePlatform {
 		t.Errorf("Expected demand type platform, got %s", info.DemandType)
+	}
+}
+
+// Task #20: Test placementId validation
+func TestMakeRequests_MissingPlacementId(t *testing.T) {
+	adapter := New("")
+
+	request := &openrtb.BidRequest{
+		ID: "test-request-1",
+		Imp: []openrtb.Imp{
+			{
+				ID: "imp-1",
+				Banner: &openrtb.Banner{
+					W: 300,
+					H: 250,
+				},
+				// Missing imp.ext entirely
+			},
+		},
+	}
+
+	_, errs := adapter.MakeRequests(request, nil)
+
+	if len(errs) == 0 {
+		t.Fatal("Expected error for missing imp.ext")
+	}
+}
+
+func TestMakeRequests_EmptyPlacementId(t *testing.T) {
+	adapter := New("")
+
+	impExt := json.RawMessage(`{"kargo":{"placementId":""}}`)
+
+	request := &openrtb.BidRequest{
+		ID: "test-request-1",
+		Imp: []openrtb.Imp{
+			{
+				ID: "imp-1",
+				Banner: &openrtb.Banner{
+					W: 300,
+					H: 250,
+				},
+				Ext: impExt,
+			},
+		},
+	}
+
+	_, errs := adapter.MakeRequests(request, nil)
+
+	if len(errs) == 0 {
+		t.Fatal("Expected error for empty placementId")
+	}
+}
+
+// Task #19: Test case-insensitive gzip detection
+func TestMakeBids_GzipCaseInsensitive(t *testing.T) {
+	adapter := New("")
+
+	request := &openrtb.BidRequest{
+		ID: "test-request-1",
+		Imp: []openrtb.Imp{
+			{
+				ID: "imp-1",
+				Banner: &openrtb.Banner{
+					W: 300,
+					H: 250,
+				},
+			},
+		},
+	}
+
+	responseBody := `{
+		"id": "response-1",
+		"cur": "USD",
+		"seatbid": [{
+			"bid": [{
+				"id": "bid-1",
+				"impid": "imp-1",
+				"price": 1.50,
+				"adm": "<div>Ad</div>",
+				"w": 300,
+				"h": 250
+			}]
+		}]
+	}`
+
+	// Compress the response
+	var compressedBody bytes.Buffer
+	gzipWriter := gzip.NewWriter(&compressedBody)
+	gzipWriter.Write([]byte(responseBody))
+	gzipWriter.Close()
+
+	// Test with uppercase GZIP
+	response := &adapters.ResponseData{
+		StatusCode: http.StatusOK,
+		Body:       compressedBody.Bytes(),
+		Headers:    http.Header{"Content-Encoding": []string{"GZIP"}},
+	}
+
+	bidderResponse, errs := adapter.MakeBids(request, response)
+
+	if len(errs) > 0 {
+		t.Fatalf("Unexpected errors: %v", errs)
+	}
+
+	if bidderResponse == nil {
+		t.Fatal("Expected bidder response, got nil")
+	}
+
+	if len(bidderResponse.Bids) != 1 {
+		t.Fatalf("Expected 1 bid, got %d", len(bidderResponse.Bids))
+	}
+}
+
+// Task #17: Test mediaType validation against impression capabilities
+func TestMakeBids_MediaTypeValidation_Valid(t *testing.T) {
+	adapter := New("")
+
+	request := &openrtb.BidRequest{
+		ID: "test-request-1",
+		Imp: []openrtb.Imp{
+			{
+				ID: "imp-1",
+				Video: &openrtb.Video{
+					W: 640,
+					H: 480,
+				},
+			},
+		},
+	}
+
+	// Bid with video mediaType matching video impression
+	responseBody := `{
+		"id": "response-1",
+		"cur": "USD",
+		"seatbid": [{
+			"bid": [{
+				"id": "bid-1",
+				"impid": "imp-1",
+				"price": 2.00,
+				"adm": "<VAST></VAST>",
+				"ext": {"mediaType": "video"}
+			}]
+		}]
+	}`
+
+	response := &adapters.ResponseData{
+		StatusCode: http.StatusOK,
+		Body:       []byte(responseBody),
+	}
+
+	bidderResponse, errs := adapter.MakeBids(request, response)
+
+	if len(errs) > 0 {
+		t.Fatalf("Unexpected errors: %v", errs)
+	}
+
+	if len(bidderResponse.Bids) != 1 {
+		t.Fatalf("Expected 1 bid, got %d", len(bidderResponse.Bids))
+	}
+
+	if bidderResponse.Bids[0].BidType != adapters.BidTypeVideo {
+		t.Errorf("Expected bid type video, got %s", bidderResponse.Bids[0].BidType)
+	}
+}
+
+func TestMakeBids_MediaTypeValidation_Invalid(t *testing.T) {
+	adapter := New("")
+
+	request := &openrtb.BidRequest{
+		ID: "test-request-1",
+		Imp: []openrtb.Imp{
+			{
+				ID: "imp-1",
+				Banner: &openrtb.Banner{
+					W: 300,
+					H: 250,
+				},
+				// Only supports banner
+			},
+		},
+	}
+
+	// Bid claims to be video but imp only supports banner
+	responseBody := `{
+		"id": "response-1",
+		"cur": "USD",
+		"seatbid": [{
+			"bid": [{
+				"id": "bid-1",
+				"impid": "imp-1",
+				"price": 2.00,
+				"adm": "<VAST></VAST>",
+				"ext": {"mediaType": "video"}
+			}]
+		}]
+	}`
+
+	response := &adapters.ResponseData{
+		StatusCode: http.StatusOK,
+		Body:       []byte(responseBody),
+	}
+
+	bidderResponse, errs := adapter.MakeBids(request, response)
+
+	if len(errs) > 0 {
+		t.Fatalf("Unexpected errors: %v", errs)
+	}
+
+	// Bid should be skipped due to validation failure
+	if len(bidderResponse.Bids) != 0 {
+		t.Fatalf("Expected 0 bids (invalid bid skipped), got %d", len(bidderResponse.Bids))
 	}
 }

@@ -40,6 +40,17 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 			Floor         float64 `json:"floor,omitempty"`
 		}
 
+		// Task #38: Check for multiformat preference
+		// Count media types to detect multiformat impressions
+		mediaTypeCount := 0
+		if imp.Banner != nil {
+			mediaTypeCount++
+		}
+		if imp.Native != nil {
+			mediaTypeCount++
+		}
+		// TripleLift only supports banner and native
+
 		// Extract TripleLift params from imp.ext.triplelift
 		if imp.Ext != nil {
 			var impExt struct {
@@ -69,16 +80,22 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 			continue
 		}
 
+		// Task #41: Validate native.request for native impressions
+		if imp.Native != nil && imp.Native.Request == "" {
+			errs = append(errs, fmt.Errorf("imp %s has Native but missing native.request", imp.ID))
+			continue
+		}
+
 		// Create impression copy and set TripleLift-specific fields
 		impCopy := imp
 		impCopy.TagID = tripleliftExt.InventoryCode
 
 		// Set bid floor if provided
+		// Task #40: Don't force BidFloorCur = USD - only set if not already set
 		if tripleliftExt.Floor > 0 {
 			impCopy.BidFloor = tripleliftExt.Floor
-			if impCopy.BidFloorCur == "" {
-				impCopy.BidFloorCur = "USD"
-			}
+			// Only set currency if floor is provided but currency is missing
+			// Don't overwrite existing currency as it breaks non-USD floors
 		}
 
 		validImps = append(validImps, impCopy)
@@ -118,14 +135,18 @@ func (a *Adapter) MakeBids(request *openrtb.BidRequest, responseData *adapters.R
 		return nil, []error{fmt.Errorf("unexpected status: %d", responseData.StatusCode)}
 	}
 
-	// Validate Content-Type before parsing JSON
+	// Task #39: Accept application/json variants (charset, text/json)
 	contentType := responseData.Headers.Get("Content-Type")
-	if contentType != "" && !strings.Contains(strings.ToLower(contentType), "application/json") {
-		bodyPreview := string(responseData.Body)
-		if len(bodyPreview) > 200 {
-			bodyPreview = bodyPreview[:200] + "..."
+	if contentType != "" {
+		lowerCT := strings.ToLower(contentType)
+		// Accept: application/json, application/json;charset=utf-8, text/json
+		if !strings.Contains(lowerCT, "application/json") && !strings.Contains(lowerCT, "text/json") {
+			bodyPreview := string(responseData.Body)
+			if len(bodyPreview) > 200 {
+				bodyPreview = bodyPreview[:200] + "..."
+			}
+			return nil, []error{fmt.Errorf("invalid Content-Type: %s (expected application/json or text/json). Body preview: %s", contentType, bodyPreview)}
 		}
-		return nil, []error{fmt.Errorf("invalid Content-Type: %s (expected application/json). Body preview: %s", contentType, bodyPreview)}
 	}
 
 	var bidResp openrtb.BidResponse

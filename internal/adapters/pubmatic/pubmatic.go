@@ -6,8 +6,10 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -52,7 +54,16 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		displayManager, displayManagerVer = getDisplayManagerAndVer(request.App)
 	}
 
-	// Extract PubMatic-specific request extensions
+	// Extract PubMatic-specific request extensions and preserve original ext
+	var origReqExt map[string]json.RawMessage
+	if len(request.Ext) > 0 {
+		if err := json.Unmarshal(request.Ext, &origReqExt); err != nil {
+			return nil, []error{fmt.Errorf("failed to parse request.ext: %w", err)}
+		}
+	} else {
+		origReqExt = make(map[string]json.RawMessage)
+	}
+
 	newReqExt, err := extractPubmaticExtFromRequest(request)
 	if err != nil {
 		return nil, []error{err}
@@ -73,18 +84,36 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 			continue
 		}
 
-		// Extract wrapper extension from first impression if needed
+		// Extract wrapper extension from each impression if needed (merge/validate consistency)
 		if extractWrapperExtFromImp && wrapperExtFromImp != nil {
 			if wrapperExt == nil {
 				wrapperExt = &PubmaticWrapperExt{}
 			}
-			if wrapperExt.ProfileID == 0 {
+
+			// Merge ProfileID and VersionID from impressions
+			if wrapperExt.ProfileID == 0 && wrapperExtFromImp.ProfileID != 0 {
 				wrapperExt.ProfileID = wrapperExtFromImp.ProfileID
-			}
-			if wrapperExt.VersionID == 0 {
-				wrapperExt.VersionID = wrapperExtFromImp.VersionID
+			} else if wrapperExt.ProfileID != 0 && wrapperExtFromImp.ProfileID != 0 && wrapperExt.ProfileID != wrapperExtFromImp.ProfileID {
+				// Warn if different impressions have conflicting ProfileIDs, use first one
+				logger.Log.Warn().
+					Str("imp_id", imp.ID).
+					Int("existing_profile", wrapperExt.ProfileID).
+					Int("imp_profile", wrapperExtFromImp.ProfileID).
+					Msg("conflicting wrapper ProfileID across impressions, using first")
 			}
 
+			if wrapperExt.VersionID == 0 && wrapperExtFromImp.VersionID != 0 {
+				wrapperExt.VersionID = wrapperExtFromImp.VersionID
+			} else if wrapperExt.VersionID != 0 && wrapperExtFromImp.VersionID != 0 && wrapperExt.VersionID != wrapperExtFromImp.VersionID {
+				// Warn if different impressions have conflicting VersionIDs, use first one
+				logger.Log.Warn().
+					Str("imp_id", imp.ID).
+					Int("existing_version", wrapperExt.VersionID).
+					Int("imp_version", wrapperExtFromImp.VersionID).
+					Msg("conflicting wrapper VersionID across impressions, using first")
+			}
+
+			// Once we have both values, we can stop extracting but continue validating
 			if wrapperExt.ProfileID != 0 && wrapperExt.VersionID != 0 {
 				extractWrapperExtFromImp = false
 			}
@@ -105,9 +134,33 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 	}
 	request.Imp = validImps
 
-	// Set wrapper extension in request
+	// Validate publisherId is non-empty
+	if pubID == "" {
+		return nil, append(errs, fmt.Errorf("publisherId is required"))
+	}
+
+	// Set wrapper extension in request and preserve original fields
 	newReqExt.Wrapper = wrapperExt
-	rawExt, err := json.Marshal(newReqExt)
+
+	// Marshal PubMatic extensions
+	pmExtBytes, err := json.Marshal(newReqExt)
+	if err != nil {
+		return nil, []error{fmt.Errorf("failed to marshal pubmatic extension: %w", err)}
+	}
+
+	// Merge into original request.ext to preserve other fields (currency, floors, etc.)
+	var pmExtMap map[string]json.RawMessage
+	if err := json.Unmarshal(pmExtBytes, &pmExtMap); err != nil {
+		return nil, []error{fmt.Errorf("failed to unmarshal pubmatic extension: %w", err)}
+	}
+
+	// Copy PubMatic fields into original ext
+	for k, v := range pmExtMap {
+		origReqExt[k] = v
+	}
+
+	// Marshal final request.ext
+	rawExt, err := json.Marshal(origReqExt)
 	if err != nil {
 		return nil, []error{fmt.Errorf("failed to marshal request extension: %w", err)}
 	}
@@ -190,8 +243,24 @@ func (a *Adapter) MakeBids(request *openrtb.BidRequest, responseData *adapters.R
 		return nil, []error{fmt.Errorf("unexpected status: %d", responseData.StatusCode)}
 	}
 
+	// Decompress gzip response if needed
+	responseBody := responseData.Body
+	if contentEncoding := responseData.Headers.Get("Content-Encoding"); contentEncoding == "gzip" {
+		gzipReader, err := gzip.NewReader(bytes.NewReader(responseData.Body))
+		if err != nil {
+			return nil, []error{fmt.Errorf("failed to create gzip reader: %w", err)}
+		}
+		defer gzipReader.Close()
+
+		decompressed, err := io.ReadAll(gzipReader)
+		if err != nil {
+			return nil, []error{fmt.Errorf("failed to decompress gzip response: %w", err)}
+		}
+		responseBody = decompressed
+	}
+
 	var bidResp openrtb.BidResponse
-	if err := json.Unmarshal(responseData.Body, &bidResp); err != nil {
+	if err := json.Unmarshal(responseBody, &bidResp); err != nil {
 		return nil, []error{fmt.Errorf("failed to parse response: %w", err)}
 	}
 
@@ -204,13 +273,28 @@ func (a *Adapter) MakeBids(request *openrtb.BidRequest, responseData *adapters.R
 	// Build impression map for O(1) lookups
 	impMap := adapters.BuildImpMap(request.Imp)
 
+	// Extract acat from request for category overriding
+	var acat []string
+	if len(request.Ext) > 0 {
+		var reqExtMap map[string]json.RawMessage
+		if err := json.Unmarshal(request.Ext, &reqExtMap); err == nil {
+			if acatBytes, ok := reqExtMap["acat"]; ok {
+				json.Unmarshal(acatBytes, &acat)
+			}
+		}
+	}
+
 	var errs []error
 	for _, seatBid := range bidResp.SeatBid {
 		for i := range seatBid.Bid {
 			bid := &seatBid.Bid[i]
 
-			// Limit categories to first one if multiple
-			if len(bid.Cat) > 1 {
+			// Override bid categories with acat if present, preserving order
+			if len(acat) > 0 {
+				bid.Cat = make([]string, len(acat))
+				copy(bid.Cat, acat)
+			} else if len(bid.Cat) > 1 {
+				// Limit categories to first one if multiple and no acat override
 				bid.Cat = bid.Cat[0:1]
 			}
 
@@ -248,6 +332,7 @@ func (a *Adapter) MakeBids(request *openrtb.BidRequest, responseData *adapters.R
 
 					// Override media type for in-banner video
 					if bidExt.InBannerVideo {
+						typedBid.BidType = adapters.BidTypeVideo
 						typedBid.BidMeta.MediaType = string(adapters.BidTypeVideo)
 					}
 				}
@@ -275,13 +360,14 @@ func parseImpressionObject(imp *openrtb.Imp, extractWrapperExtFromImp, extractPu
 	var wrapExt *PubmaticWrapperExt
 	var pubID string
 
-	// Validate media types
-	if imp.Banner == nil && imp.Video == nil && imp.Native == nil {
-		return wrapExt, pubID, fmt.Errorf("invalid MediaType. PubMatic only supports Banner, Video and Native. Ignoring ImpID=%s", imp.ID)
+	// Validate media types - only remove Audio if there are other valid types
+	hasValidMediaType := imp.Banner != nil || imp.Video != nil || imp.Native != nil
+	if !hasValidMediaType && imp.Audio != nil {
+		return wrapExt, pubID, fmt.Errorf("invalid MediaType. PubMatic only supports Banner, Video and Native (not Audio). Ignoring ImpID=%s", imp.ID)
 	}
 
-	// Remove audio if present (not supported)
-	if imp.Audio != nil {
+	// Remove audio if other valid media types are present
+	if hasValidMediaType && imp.Audio != nil {
 		imp.Audio = nil
 	}
 
@@ -364,8 +450,18 @@ func parseImpressionObject(imp *openrtb.Imp, extractWrapperExtFromImp, extractPu
 		}
 	}
 
-	// Build impression extension map for PubMatic request
+	// Build impression extension map for PubMatic request - preserve unknown fields
 	finalExtMap := make(map[string]interface{})
+
+	// First, preserve unknown fields from original imp.ext (exclude pubmatic, data, gpid, ae, skadn)
+	for key, val := range extMap {
+		if key != "pubmatic" && key != "data" && key != "gpid" && key != "ae" && key != "skadn" {
+			var rawVal interface{}
+			if err := json.Unmarshal(val, &rawVal); err == nil {
+				finalExtMap[key] = rawVal
+			}
+		}
+	}
 
 	// Add keywords
 	if pubmaticExt.Keywords != nil && len(pubmaticExt.Keywords) != 0 {
@@ -393,7 +489,10 @@ func parseImpressionObject(imp *openrtb.Imp, extractWrapperExtFromImp, extractPu
 		finalExtMap[GPIDKey] = bidderExt.GPID
 	}
 	if bidderExt.SKAdNetwork != nil {
-		finalExtMap[SKAdNetworkKey] = bidderExt.SKAdNetwork
+		var skadnVal interface{}
+		if err := json.Unmarshal(bidderExt.SKAdNetwork, &skadnVal); err == nil {
+			finalExtMap[SKAdNetworkKey] = skadnVal
+		}
 	}
 
 	// Set final extension
@@ -445,6 +544,26 @@ func validateAdSlot(adslot string, imp *openrtb.Imp) error {
 		if imp.Banner != nil {
 			imp.Banner.W = width
 			imp.Banner.H = height
+
+			// Update Banner.Format to include the adSlot size
+			// Prepend to ensure it's the primary size
+			format := openrtb.Format{W: width, H: height}
+			if len(imp.Banner.Format) == 0 {
+				imp.Banner.Format = []openrtb.Format{format}
+			} else {
+				// Check if this size already exists in Format
+				exists := false
+				for _, f := range imp.Banner.Format {
+					if f.W == width && f.H == height {
+						exists = true
+						break
+					}
+				}
+				// Prepend if it doesn't exist
+				if !exists {
+					imp.Banner.Format = append([]openrtb.Format{format}, imp.Banner.Format...)
+				}
+			}
 		}
 	} else {
 		return fmt.Errorf("invalid adSlot %v", adSlotStr)
@@ -603,12 +722,15 @@ func extractPubmaticExtFromRequest(request *openrtb.BidRequest) (ExtRequestPubma
 	// Set bidder code
 	pmReqExt.Wrapper.BidderCode = bidderPubMatic
 
-	// Override bidder code if alias exists
-	if reqExt.Prebid != nil && reqExt.Prebid.Aliases != nil {
+	// Override bidder code if alias exists (use deterministic selection)
+	if reqExt.Prebid != nil && reqExt.Prebid.Aliases != nil && len(reqExt.Prebid.Aliases) > 0 {
+		// Sort aliases for deterministic selection
+		aliases := make([]string, 0, len(reqExt.Prebid.Aliases))
 		for alias := range reqExt.Prebid.Aliases {
-			pmReqExt.Wrapper.BidderCode = alias
-			break
+			aliases = append(aliases, alias)
 		}
+		sort.Strings(aliases)
+		pmReqExt.Wrapper.BidderCode = aliases[0]
 	}
 
 	// Extract acat

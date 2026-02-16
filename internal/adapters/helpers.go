@@ -91,12 +91,66 @@ func BuildImpMap(imps []openrtb.Imp) map[string]*openrtb.Imp {
 }
 
 // P2-3: GetBidTypeFromMap determines bid type using pre-built impression map (O(1))
+// Issue #32 fix: For multiformat imps, checks bid.Ext for explicit mediaType before falling back to imp type
 func GetBidTypeFromMap(bid *openrtb.Bid, impMap map[string]*openrtb.Imp) BidType {
 	imp, ok := impMap[bid.ImpID]
 	if !ok {
 		return BidTypeBanner
 	}
 
+	// For multiformat impressions, check if bid has explicit media type in extension
+	// This handles adapters like Kargo that signal the actual media type in bid.ext.mediaType
+	// Without this, multiformat imps always return video even if bid is banner (#32)
+	if bid.Ext != nil {
+		var bidExt struct {
+			MediaType string `json:"mediaType"`
+		}
+		if err := json.Unmarshal(bid.Ext, &bidExt); err == nil && bidExt.MediaType != "" {
+			switch bidExt.MediaType {
+			case "video":
+				return BidTypeVideo
+			case "native":
+				return BidTypeNative
+			case "audio":
+				return BidTypeAudio
+			case "banner":
+				return BidTypeBanner
+			}
+		}
+	}
+
+	// Count how many media types the impression supports (multiformat detection)
+	mediaTypeCount := 0
+	if imp.Video != nil {
+		mediaTypeCount++
+	}
+	if imp.Native != nil {
+		mediaTypeCount++
+	}
+	if imp.Audio != nil {
+		mediaTypeCount++
+	}
+	if imp.Banner != nil {
+		mediaTypeCount++
+	}
+
+	// For single-format impressions, return the only available type
+	if mediaTypeCount == 1 {
+		if imp.Video != nil {
+			return BidTypeVideo
+		}
+		if imp.Native != nil {
+			return BidTypeNative
+		}
+		if imp.Audio != nil {
+			return BidTypeAudio
+		}
+		return BidTypeBanner
+	}
+
+	// For multiformat impressions without explicit extension, use priority-based fallback
+	// Priority: video > native > audio > banner (matches industry standard behavior)
+	// WARNING: This is best-effort - adapters should include mediaType in bid.ext for accuracy
 	if imp.Video != nil {
 		return BidTypeVideo
 	}

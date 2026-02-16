@@ -51,7 +51,79 @@ func (h *PrivacyConsentHook) ProcessRequest(ctx context.Context, req *openrtb.Bi
 	// These are routing IDs, not SSP IDs. Adapters will set SSP-specific IDs.
 	h.clearInternalIDs(req)
 
+	// Task #53: Map regs to bidder-specific ext fields
+	// Some bidders need privacy signals in ext.prebid or ext.gdpr
+	h.mapRegsToBidderExt(req)
+
 	return nil
+}
+
+// mapRegsToBidderExt maps regs fields to bidder-specific ext fields
+// Task #53: Some bidders expect privacy signals in specific ext locations
+func (h *PrivacyConsentHook) mapRegsToBidderExt(req *openrtb.BidRequest) {
+	if req.Regs == nil {
+		return
+	}
+
+	// Build ext.prebid with privacy signals
+	var reqExt map[string]interface{}
+	if req.Ext != nil && len(req.Ext) > 0 {
+		if err := json.Unmarshal(req.Ext, &reqExt); err != nil {
+			// Failed to parse - create new
+			reqExt = make(map[string]interface{})
+		}
+	} else {
+		reqExt = make(map[string]interface{})
+	}
+
+	// Get or create prebid extension
+	var prebidExt map[string]interface{}
+	if pbData, ok := reqExt["prebid"]; ok {
+		if pbMap, ok := pbData.(map[string]interface{}); ok {
+			prebidExt = pbMap
+		} else {
+			prebidExt = make(map[string]interface{})
+		}
+	} else {
+		prebidExt = make(map[string]interface{})
+	}
+
+	// Map GDPR to ext.prebid.gdpr
+	if req.Regs.GDPR != nil {
+		prebidExt["gdpr"] = *req.Regs.GDPR
+	}
+
+	// Map US Privacy to ext.prebid.us_privacy
+	if req.Regs.USPrivacy != "" {
+		prebidExt["us_privacy"] = req.Regs.USPrivacy
+	}
+
+	// Map GPP to ext.prebid.gpp
+	if req.Regs.GPP != "" {
+		prebidExt["gpp"] = req.Regs.GPP
+		if len(req.Regs.GPPSID) > 0 {
+			prebidExt["gpp_sid"] = req.Regs.GPPSID
+		}
+	}
+
+	// Map COPPA to ext.prebid.coppa
+	if req.Regs.COPPA > 0 {
+		prebidExt["coppa"] = req.Regs.COPPA
+	}
+
+	// Map user consent to ext.prebid.consent
+	if req.User != nil && req.User.Consent != "" {
+		prebidExt["consent"] = req.User.Consent
+	}
+
+	// Update request extension
+	reqExt["prebid"] = prebidExt
+	if extBytes, err := json.Marshal(reqExt); err == nil {
+		req.Ext = extBytes
+		logger.Log.Debug().
+			Str("request_id", req.ID).
+			Msg("✓ Mapped regs to bidder-specific ext fields")
+	}
 }
 
 // stripUserIDs removes all personal identifiers from the request

@@ -57,13 +57,13 @@ func TestCurrencyNormalization(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create exchange with default config
-			ex := &Exchange{
-				config: &Config{
-					DefaultTimeout:  1000 * time.Millisecond,
-					DefaultCurrency: "USD",
-					CloneLimits:     DefaultCloneLimits(),
-				},
-			}
+			registry := adapters.NewRegistry()
+			ex := New(registry, &Config{
+				DefaultTimeout:  1000 * time.Millisecond,
+				DefaultCurrency: "USD",
+				CloneLimits:     DefaultCloneLimits(),
+				IDREnabled:      false,
+			})
 
 			// Create auction request with test currency
 			req := &AuctionRequest{
@@ -282,12 +282,12 @@ func TestSChainNoDuplicatePlatformNode(t *testing.T) {
 
 // TestResponseValidation tests bid response normalization
 func TestResponseValidation(t *testing.T) {
-	ex := &Exchange{
-		config: &Config{
-			DefaultCurrency: "USD",
-			MinBidPrice:     0.01,
-		},
-	}
+	registry := adapters.NewRegistry()
+	ex := New(registry, &Config{
+		DefaultCurrency: "USD",
+		MinBidPrice:     0.01,
+		IDREnabled:      false,
+	})
 
 	tests := []struct {
 		name        string
@@ -334,12 +334,12 @@ func TestResponseValidation(t *testing.T) {
 			errorReason: "must have either adm or nurl",
 		},
 		{
-			name: "Invalid bid - invalid NURL (not HTTPS)",
+			name: "Invalid bid - invalid NURL (malformed URL)",
 			bid: &openrtb.Bid{
 				ID:    "bid4",
 				ImpID: "imp1",
 				Price: 1.00,
-				NURL:  "http://example.com/win",
+				NURL:  "not-a-valid-url",
 			},
 			bidderCode:  "testbidder",
 			impID:       "imp1",

@@ -48,6 +48,14 @@ type rubiconSiteExtRP struct {
 	SiteID int `json:"site_id"`
 }
 
+type rubiconAppExt struct {
+	RP rubiconAppExtRP `json:"rp"`
+}
+
+type rubiconAppExtRP struct {
+	SiteID int `json:"site_id"`
+}
+
 type rubiconPubExt struct {
 	RP rubiconPubExtRP `json:"rp"`
 }
@@ -113,11 +121,60 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		impCopy := imp
 
 		// Transform impression extension to Rubicon's expected format
+		// Task #22: Preserve existing imp.ext.rp.target if it exists
+		var existingImpExt map[string]interface{}
+		var existingTarget json.RawMessage
+
+		if len(impCopy.Ext) > 0 {
+			if err := json.Unmarshal(impCopy.Ext, &existingImpExt); err == nil {
+				if rpData, ok := existingImpExt["rp"].(map[string]interface{}); ok {
+					if target, ok := rpData["target"]; ok {
+						// Re-marshal the target to preserve it
+						if targetBytes, err := json.Marshal(target); err == nil {
+							existingTarget = targetBytes
+						}
+					}
+				}
+			}
+		}
+
+		// Task #26: Check for existing tracking data and preserve if valid
+		var existingTrack *rubiconTrack
+		if existingImpExt != nil {
+			if rpData, ok := existingImpExt["rp"].(map[string]interface{}); ok {
+				if trackData, ok := rpData["track"].(map[string]interface{}); ok {
+					mint, hasMint := trackData["mint"].(string)
+					mintVersion, hasVersion := trackData["mint_version"].(string)
+					// Only preserve if both fields exist and at least one is non-empty
+					if hasMint && hasVersion && (mint != "" || mintVersion != "") {
+						existingTrack = &rubiconTrack{
+							Mint:        mint,
+							MintVersion: mintVersion,
+						}
+					}
+				}
+			}
+		}
+
+		// Build the new rp extension
+		rpExt := rubiconImpExtRP{
+			ZoneID: rubiconParams.ZoneID,
+		}
+
+		// Set tracking data - use existing if valid, otherwise use empty defaults
+		if existingTrack != nil {
+			rpExt.Track = *existingTrack
+		} else {
+			rpExt.Track = rubiconTrack{Mint: "", MintVersion: ""}
+		}
+
+		// Preserve existing target if it was set
+		if len(existingTarget) > 0 {
+			rpExt.Target = existingTarget
+		}
+
 		impExtMap := map[string]interface{}{
-			"rp": rubiconImpExtRP{
-				ZoneID: rubiconParams.ZoneID,
-				Track:  rubiconTrack{Mint: "", MintVersion: ""},
-			},
+			"rp": rpExt,
 		}
 
 		// Preserve bidonmultiformat parameter if enabled
@@ -151,37 +208,93 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 				continue
 			}
 
+			// Task #23: Create Site.Publisher when nil
+			// Task #25: Ensure publisher.id is always set for account context
+			if siteCopy.Publisher == nil {
+				siteCopy.Publisher = &openrtb.Publisher{}
+			}
+
 			// CRITICAL: Set publisher.id to Rubicon's account ID
 			// Rubicon checks this field BEFORE ext.rp.account_id
-			if siteCopy.Publisher != nil {
-				accountIDStr := fmt.Sprintf("%d", rubiconParams.AccountID)
+			accountIDStr := fmt.Sprintf("%d", rubiconParams.AccountID)
 
-				logger.Log.Debug().
-					Str("adapter", "rubicon").
-					Str("before_id", siteCopy.Publisher.ID).
-					Str("setting_to", accountIDStr).
-					Msg("About to set publisher.id")
+			logger.Log.Debug().
+				Str("adapter", "rubicon").
+				Str("before_id", siteCopy.Publisher.ID).
+				Str("setting_to", accountIDStr).
+				Msg("About to set publisher.id")
 
-				siteCopy.Publisher.ID = accountIDStr
+			siteCopy.Publisher.ID = accountIDStr
 
-				logger.Log.Debug().
-					Str("adapter", "rubicon").
-					Str("after_id", siteCopy.Publisher.ID).
-					Msg("After setting publisher.id")
+			logger.Log.Debug().
+				Str("adapter", "rubicon").
+				Str("after_id", siteCopy.Publisher.ID).
+				Msg("After setting publisher.id")
 
-				pubExt := rubiconPubExt{
-					RP: rubiconPubExtRP{
-						AccountID: rubiconParams.AccountID,
-					},
-				}
-				siteCopy.Publisher.Ext, err = json.Marshal(pubExt)
-				if err != nil {
-					errors = append(errors, fmt.Errorf("failed to marshal publisher ext: %w", err))
-					continue
-				}
+			pubExt := rubiconPubExt{
+				RP: rubiconPubExtRP{
+					AccountID: rubiconParams.AccountID,
+				},
+			}
+			siteCopy.Publisher.Ext, err = json.Marshal(pubExt)
+			if err != nil {
+				errors = append(errors, fmt.Errorf("failed to marshal publisher ext: %w", err))
+				continue
 			}
 
 			reqCopy.Site = &siteCopy
+		}
+
+		// Task #21: Add App request handling (parallel to Site logic)
+		// Task #24: Transform App traffic properly
+		if reqCopy.App != nil {
+			appCopy := *reqCopy.App
+
+			// Set Rubicon app extension
+			appExt := rubiconAppExt{
+				RP: rubiconAppExtRP{
+					SiteID: rubiconParams.SiteID,
+				},
+			}
+			appCopy.Ext, err = json.Marshal(appExt)
+			if err != nil {
+				errors = append(errors, fmt.Errorf("failed to marshal app ext: %w", err))
+				continue
+			}
+
+			// Task #25: Create App.Publisher when nil and ensure publisher.id is always set
+			if appCopy.Publisher == nil {
+				appCopy.Publisher = &openrtb.Publisher{}
+			}
+
+			// Set publisher.id to Rubicon's account ID (same as Site)
+			accountIDStr := fmt.Sprintf("%d", rubiconParams.AccountID)
+
+			logger.Log.Debug().
+				Str("adapter", "rubicon").
+				Str("before_id", appCopy.Publisher.ID).
+				Str("setting_to", accountIDStr).
+				Msg("About to set app publisher.id")
+
+			appCopy.Publisher.ID = accountIDStr
+
+			logger.Log.Debug().
+				Str("adapter", "rubicon").
+				Str("after_id", appCopy.Publisher.ID).
+				Msg("After setting app publisher.id")
+
+			pubExt := rubiconPubExt{
+				RP: rubiconPubExtRP{
+					AccountID: rubiconParams.AccountID,
+				},
+			}
+			appCopy.Publisher.Ext, err = json.Marshal(pubExt)
+			if err != nil {
+				errors = append(errors, fmt.Errorf("failed to marshal app publisher ext: %w", err))
+				continue
+			}
+
+			reqCopy.App = &appCopy
 		}
 
 		// NOTE: SetUserID is now handled by Identity Gating hook (no longer needed here)
@@ -301,6 +414,13 @@ func extractRubiconParams(impExt json.RawMessage) (*rubiconParams, error) {
 		}
 	} else {
 		return nil, fmt.Errorf("zoneId is required")
+	}
+
+	// Extract bidonmultiformat (optional)
+	if bidonmultiformat, ok := rubiconData["bidonmultiformat"]; ok {
+		if v, ok := bidonmultiformat.(bool); ok {
+			params.BidOnMultiformat = v
+		}
 	}
 
 	return params, nil

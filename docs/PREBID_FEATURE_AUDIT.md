@@ -172,13 +172,34 @@ The goal is to provide a clear mapping between documented Prebid Server capabili
 - **Gap**: EU transparency requirements not implemented
 
 #### **Multiformat Requests**
-- **Status**: ⚠️ Partial
-- **Notes**: Native priority logic exists but unclear if full multiformat with preferred mediatype selection
-- **Gap**: May need enhanced mediatype preference handling
+- **Status**: ✅ Fully Implemented
+- **Files**:
+  - [`internal/exchange/multiformat.go`](../internal/exchange/multiformat.go)
+  - [`internal/exchange/multiformat_test.go`](../internal/exchange/multiformat_test.go)
+- **Details**:
+  - Preferred media type selection (per-impression via `imp.ext.prebid.preferredMediaType`)
+  - Multiple selection strategies (server, preferDeal, preferMediaType)
+  - Deal ID priority handling
+  - CPM-based bid selection with format preference
+  - Audio support alongside banner/video/native
+  - Format detection and validation
+  - Request-level strategy override via `imp.ext.prebid.multiformatRequestStrategy`
 
 ### ❌ NOT IMPLEMENTED
 
 #### **Multibid**
+- **Status**: ✅ Fully Implemented
+- **Files**: [`internal/exchange/multibid.go`](../internal/exchange/multibid.go)
+- **Details**:
+  - Multiple bids per bidder per impression
+  - Configurable limits (per bidder, per impression)
+  - Automatic bid filtering and prioritization
+  - Targeting key generation for multiple bids
+  - Backward compatible (defaults to 1 bid)
+
+### ❌ NOT IMPLEMENTED
+
+#### **Privacy Sandbox (Topics/FLEDGE)**
 - **Status**: ❌ Not found
 - **Description**: Allow single bidder to return multiple bids for same impression
 - **Impact**: Cannot support multi-creative bidding strategies

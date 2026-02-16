@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
@@ -34,9 +35,50 @@ func New(endpoint string) *Adapter {
 func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.ExtraRequestInfo) ([]*adapters.RequestData, []error) {
 	// Create a copy of the request to modify
 	requestCopy := *request
+	var errs []error
 
 	// NOTE: ID clearing is now handled by Privacy/Consent hook (no longer needed here)
 	// NOTE: SetUserID is now handled by Identity Gating hook (no longer needed here)
+
+	// Task #20: Validate imp.ext.kargo.placementId is present for each impression
+	for _, imp := range requestCopy.Imp {
+		if imp.Ext != nil {
+			var impExt struct {
+				Kargo json.RawMessage `json:"kargo"`
+			}
+			if err := json.Unmarshal(imp.Ext, &impExt); err != nil {
+				errs = append(errs, fmt.Errorf("failed to parse imp.ext for imp %s: %w", imp.ID, err))
+				continue
+			}
+
+			if len(impExt.Kargo) > 0 {
+				var kargoExt struct {
+					PlacementID string `json:"placementId"`
+				}
+				if err := json.Unmarshal(impExt.Kargo, &kargoExt); err != nil {
+					errs = append(errs, fmt.Errorf("failed to parse kargo params for imp %s: %w", imp.ID, err))
+					continue
+				}
+
+				// Validate required parameter
+				if kargoExt.PlacementID == "" {
+					errs = append(errs, fmt.Errorf("imp %s missing required placementId", imp.ID))
+					continue
+				}
+			} else {
+				errs = append(errs, fmt.Errorf("imp %s missing required kargo extension", imp.ID))
+				continue
+			}
+		} else {
+			errs = append(errs, fmt.Errorf("imp %s missing required imp.ext", imp.ID))
+			continue
+		}
+	}
+
+	// If all impressions failed validation, return errors
+	if len(errs) >= len(requestCopy.Imp) {
+		return nil, errs
+	}
 
 	requestBody, err := json.Marshal(requestCopy)
 	if err != nil {
@@ -58,6 +100,8 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 	headers.Set("Content-Encoding", "gzip")
 	headers.Set("Accept", "application/json")
 	headers.Set("Accept-Encoding", "gzip")
+	// Task #18: Set Content-Length for gzipped requests
+	headers.Set("Content-Length", fmt.Sprintf("%d", len(compressedBody.Bytes())))
 
 	return []*adapters.RequestData{{
 		Method:  "POST",
@@ -82,8 +126,10 @@ func (a *Adapter) MakeBids(request *openrtb.BidRequest, responseData *adapters.R
 	}
 
 	// Decompress response if GZIP-encoded
+	// Task #19: Make Content-Encoding detection case-insensitive
 	responseBody := responseData.Body
-	if responseData.Headers.Get("Content-Encoding") == "gzip" {
+	contentEncoding := responseData.Headers.Get("Content-Encoding")
+	if strings.EqualFold(contentEncoding, "gzip") {
 		gzipReader, err := gzip.NewReader(bytes.NewReader(responseData.Body))
 		if err != nil {
 			return nil, []error{fmt.Errorf("failed to create gzip reader: %w", err)}
@@ -114,8 +160,17 @@ func (a *Adapter) MakeBids(request *openrtb.BidRequest, responseData *adapters.R
 	for _, seatBid := range bidResp.SeatBid {
 		for i := range seatBid.Bid {
 			bid := &seatBid.Bid[i]
-			// Check Kargo's extension first for authoritative media type
-			bidType := getMediaTypeForBid(bid, impMap)
+			// Task #17: Check Kargo's extension first for authoritative media type and validate against imp
+			bidType, err := getMediaTypeForBid(bid, impMap)
+			if err != nil {
+				// Skip bids with invalid media types
+				logger.Log.Warn().
+					Str("bidId", bid.ID).
+					Str("impId", bid.ImpID).
+					Err(err).
+					Msg("skipping bid with invalid mediaType")
+				continue
+			}
 
 			response.Bids = append(response.Bids, &adapters.TypedBid{
 				Bid:     bid,
@@ -129,26 +184,50 @@ func (a *Adapter) MakeBids(request *openrtb.BidRequest, responseData *adapters.R
 
 // getMediaTypeForBid determines bid type by checking Kargo's extension first
 // Falls back to impression-based detection if extension not present
-func getMediaTypeForBid(bid *openrtb.Bid, impMap map[string]*openrtb.Imp) adapters.BidType {
+// Task #17: Validates that mediaType matches impression capabilities
+func getMediaTypeForBid(bid *openrtb.Bid, impMap map[string]*openrtb.Imp) (adapters.BidType, error) {
+	// Get the impression to validate against
+	imp, ok := impMap[bid.ImpID]
+	if !ok {
+		// If impression not found, use default but don't error
+		return adapters.BidTypeBanner, nil
+	}
+
 	// Check Kargo's extension first (authoritative signal)
 	if bid.Ext != nil {
 		var kargoExt struct {
 			MediaType string `json:"mediaType"`
 		}
 		if err := json.Unmarshal(bid.Ext, &kargoExt); err == nil && kargoExt.MediaType != "" {
+			var bidType adapters.BidType
 			switch kargoExt.MediaType {
 			case "video":
-				return adapters.BidTypeVideo
+				bidType = adapters.BidTypeVideo
+				// Validate impression supports video
+				if imp.Video == nil {
+					return "", fmt.Errorf("bid.ext.mediaType is 'video' but imp %s does not support video", bid.ImpID)
+				}
 			case "native":
-				return adapters.BidTypeNative
+				bidType = adapters.BidTypeNative
+				// Validate impression supports native
+				if imp.Native == nil {
+					return "", fmt.Errorf("bid.ext.mediaType is 'native' but imp %s does not support native", bid.ImpID)
+				}
 			case "banner":
-				return adapters.BidTypeBanner
+				bidType = adapters.BidTypeBanner
+				// Validate impression supports banner
+				if imp.Banner == nil {
+					return "", fmt.Errorf("bid.ext.mediaType is 'banner' but imp %s does not support banner", bid.ImpID)
+				}
+			default:
+				return "", fmt.Errorf("unknown mediaType '%s' in bid.ext for bid %s", kargoExt.MediaType, bid.ID)
 			}
+			return bidType, nil
 		}
 	}
 
 	// Fallback to impression-based detection
-	return adapters.GetBidTypeFromMap(bid, impMap)
+	return adapters.GetBidTypeFromMap(bid, impMap), nil
 }
 
 // Info returns bidder information
