@@ -123,6 +123,30 @@ echo "  Mode:         ${DRY_RUN:-${TEST_RUN:-LIVE}}"
 echo "============================================="
 echo ""
 
+# Step 1: Create key-values in GAM first (idempotent - safe to re-run)
+echo "Step 1: Creating GAM custom targeting key-values..."
+echo ""
+KEY_VALUES_SCRIPT="${SCRIPT_DIR}/create_gam_key_values.py"
+if [[ -f "$KEY_VALUES_SCRIPT" ]]; then
+    KV_FLAGS=("--network-code" "$NETWORK_CODE" "--key-file" "$CREDS_FILE")
+    [[ -n "$DRY_RUN" ]] && KV_FLAGS+=("--dry-run")
+    [[ -n "$VERBOSE" ]] && KV_FLAGS+=("--verbose")
+
+    python3 "$KEY_VALUES_SCRIPT" "${KV_FLAGS[@]}"
+
+    if [[ $? -ne 0 ]]; then
+        echo "Error: Key-value creation failed. Fix issues above before continuing."
+        exit 1
+    fi
+    echo ""
+    echo "Step 2: Creating GAM orders, line items, and creatives..."
+    echo ""
+else
+    echo "Warning: Key-value script not found at $KEY_VALUES_SCRIPT"
+    echo "         Skipping key-value creation. Create them manually in GAM."
+    echo ""
+fi
+
 if [[ -z "$DRY_RUN" && -z "$TEST_RUN" ]]; then
     echo "WARNING: This will create GAM orders, line items, and creatives."
     echo "         Run with --dry-run first to preview changes."
