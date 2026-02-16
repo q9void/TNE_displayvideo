@@ -16,7 +16,8 @@ services:
       - LOG_LEVEL=debug
       - PBS_TIMEOUT=2500ms
       - TZ=America/New_York
-      - CORS_ALLOWED_ORIGINS=*
+      - CORS_ORIGINS=*
+      - CORS_ALLOW_CREDENTIALS=true
       - IDR_ENABLED=false
       - DB_HOST=catalyst-postgres
       - DB_PORT=5432
