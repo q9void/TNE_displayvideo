@@ -1,0 +1,166 @@
+# =============================================================================
+# Catalyst GAM Line Item Manager Configuration
+# =============================================================================
+# Tool: prebid/line-item-manager (pip install line-item-manager)
+#
+# Usage:
+#   line_item_manager create scripts/gam/catalyst_gam_config.yml \
+#     --private-key-file scripts/gam/gam_creds.json \
+#     --network-code <YOUR_GAM_NETWORK_CODE> \
+#     --network-name "<YOUR_GAM_NETWORK_NAME>" \
+#     --single-order
+#
+# Dry run first:
+#   Add --dry-run flag to preview without creating anything
+#
+# Test run (creates only 2 line items for visual inspection):
+#   Add --test-run flag
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Advertiser
+# -----------------------------------------------------------------------------
+# Creates or reuses an advertiser in GAM for all Catalyst line items.
+advertiser:
+  name: "The Nexus Engine (Catalyst)"
+
+# -----------------------------------------------------------------------------
+# Order
+# -----------------------------------------------------------------------------
+# GAM orders group line items. Max 450 line items per order.
+# The tool auto-creates multiple orders if needed (e.g., dense granularity).
+order:
+  name: "Catalyst S2S HB - {{ media_type }} - {{ time }} {{ cpm_min }}-{{ cpm_max }}"
+
+# -----------------------------------------------------------------------------
+# Line Item
+# -----------------------------------------------------------------------------
+# Each line item targets a specific CPM price bucket.
+# price_priority ensures Catalyst competes fairly with other demand.
+line_item:
+  name: "Catalyst-{{ media_type }}-{{ time }} @ {{ cpm }}"
+  item_type: "price_priority"
+  priority: 12
+
+# -----------------------------------------------------------------------------
+# Rate / Price Granularity
+# -----------------------------------------------------------------------------
+# Defines how many line items are created and at what price points.
+#
+# Options:
+#   low    - $0.50 increments, $0.50-$5.00   (10 line items)
+#   med    - $0.10 increments, $0.10-$20.00   (200 line items)
+#   high   - $0.01 increments, $0.01-$20.00   (2000 line items, ~5 orders)
+#   auto   - mixed increments up to $20.00     (200 line items)
+#   dense  - $0.01-$3, $0.05-$8, $0.50-$20    (423 line items)
+#   custom - define your own buckets below
+#
+# Recommendation: Start with "med" for testing, move to "dense" for production.
+rate:
+  currency: "USD"
+  granularity:
+    type: "dense"
+
+# -----------------------------------------------------------------------------
+# Targeting
+# -----------------------------------------------------------------------------
+# Custom key-value targeting to match Catalyst's _catalyst suffixed keys.
+# These keys are set server-side by exchange.buildBidExtension and client-side
+# by the Catalyst SDK.
+targeting:
+  custom:
+    - name: "hb_bidder_catalyst"
+      operator: "IS"
+      values:
+        - "thenexusengine"
+      reportableType: "ON"
+    - name: "hb_source_catalyst"
+      operator: "IS"
+      values:
+        - "s2s"
+      reportableType: "ON"
+
+# -----------------------------------------------------------------------------
+# Creatives - Banner
+# -----------------------------------------------------------------------------
+# The creative snippet renders the winning Catalyst bid inside GAM.
+# It reads the bid ad markup from the Catalyst server using the targeting
+# keys that GAM passes via %%PATTERN%% macros.
+creative:
+  name: "Catalyst S2S {{ media_type }}"
+  banner:
+    safe_frame: False
+    size_override: True
+    sizes:
+      - width: 300
+        height: 250
+      - width: 728
+        height: 90
+      - width: 970
+        height: 250
+      - width: 320
+        height: 50
+      - width: 300
+        height: 600
+      - width: 160
+        height: 600
+      - width: 970
+        height: 90
+    snippet: |
+      <script>
+      (function() {
+        try {
+          // Catalyst S2S Creative Renderer
+          // Reads targeting from GAM macros set by Catalyst SDK / server-side
+          var defined = function(v) { return v && v !== '' && v.indexOf('%%') === -1; };
+
+          var catalystBidId = '%%PATTERN:hb_adid_catalyst%%';
+          var catalystCreativeId = '%%PATTERN:hb_creative_catalyst%%';
+          var catalystSize = '%%PATTERN:hb_size_catalyst%%';
+          var catalystPb = '%%PATTERN:hb_pb_catalyst%%';
+
+          if (!defined(catalystBidId)) {
+            // No Catalyst bid won - collapse slot
+            document.write('<div style="display:none"></div>');
+            return;
+          }
+
+          // Fetch the winning creative from Catalyst ad server
+          var serverUrl = 'https://ads.thenexusengine.com';
+          var w = 0, h = 0;
+          if (defined(catalystSize)) {
+            var parts = catalystSize.split('x');
+            w = parseInt(parts[0], 10) || 0;
+            h = parseInt(parts[1], 10) || 0;
+          }
+
+          var adUrl = serverUrl + '/ad/gam?bid=' + encodeURIComponent(catalystBidId)
+            + '&creative=' + encodeURIComponent(catalystCreativeId)
+            + '&w=' + w + '&h=' + h
+            + '&pb=' + encodeURIComponent(catalystPb);
+
+          var script = document.createElement('script');
+          script.src = adUrl;
+          script.async = true;
+          document.body.appendChild(script);
+        } catch (e) {
+          // Fail silently - do not break the page
+          if (typeof console !== 'undefined') {
+            console.warn('Catalyst creative render error:', e);
+          }
+        }
+      })();
+      </script>
+
+# -----------------------------------------------------------------------------
+# Bidder Key Map (Override)
+# -----------------------------------------------------------------------------
+# Maps standard Prebid key names to Catalyst's _catalyst suffixed keys.
+# This tells line-item-manager which GAM key-values to create and target.
+#
+# When using --single-order, the tool uses the base keys (hb_pb, hb_cache_id).
+# We override them to point to our Catalyst-specific keys.
+bidder_key_map:
+  thenexusengine:
+    hb_pb: hb_pb_catalyst
+    hb_bidder: hb_bidder_catalyst
