@@ -1,0 +1,3 @@
+# GAM setup script dependencies
+googleads>=40.0.0
+line-item-manager>=0.2.13

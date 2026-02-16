@@ -3186,6 +3186,27 @@ func (e *Exchange) buildBidExtension(vb ValidatedBid) *openrtb.BidExt {
 		targeting["hb_deal_"+displayBidderCode] = bid.DealID
 	}
 
+	// Catalyst GAM targeting keys (_catalyst suffix to avoid conflicts with client-side Prebid.js)
+	// These are set server-side so GAM line items can target Catalyst bids directly
+	targeting["hb_pb_catalyst"] = priceBucket
+	targeting["hb_bidder_catalyst"] = displayBidderCode
+	targeting["hb_partner"] = displayBidderCode
+	targeting["hb_source_catalyst"] = "s2s"
+	targeting["hb_format_catalyst"] = bidType
+	if bid.CRID != "" {
+		targeting["hb_adid_catalyst"] = bid.ID
+		targeting["hb_creative_catalyst"] = bid.CRID
+	}
+	if bid.W > 0 && bid.H > 0 {
+		targeting["hb_size_catalyst"] = fmt.Sprintf("%dx%d", bid.W, bid.H)
+	}
+	if bid.DealID != "" {
+		targeting["hb_deal_catalyst"] = bid.DealID
+	}
+	if len(bid.ADomain) > 0 {
+		targeting["hb_adomain_catalyst"] = bid.ADomain[0]
+	}
+
 	return &openrtb.BidExt{
 		Prebid: &openrtb.ExtBidPrebid{
 			Type:      bidType,
