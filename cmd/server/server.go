@@ -142,24 +142,9 @@ func (s *Server) initDatabase() error {
 	log.Info().Msg("User sync store initialized")
 
 	// Load and log bidders from database
-	bidders, err := s.db.ListActive(ctx)
-	if err != nil {
-		log.Warn().Err(err).Msg("Failed to load bidders from database")
-	} else {
-		log.Info().
-			Int("count", len(bidders)).
-			Msg("Bidders loaded from PostgreSQL")
-	}
-
-	// Test publisher store
-	publishers, err := s.publisher.List(ctx)
-	if err != nil {
-		log.Warn().Err(err).Msg("Failed to load publishers from database")
-	} else {
-		log.Info().
-			Int("count", len(publishers)).
-			Msg("Publishers loaded from PostgreSQL")
-	}
+	// Old schema table queries removed - now using new schema
+	// (accounts → publishers_new → ad_slots → slot_bidder_configs)
+	// Bidder and publisher data loaded on-demand via GetSlotBidderConfigs
 
 	return nil
 }
