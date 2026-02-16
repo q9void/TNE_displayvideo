@@ -19,12 +19,23 @@ func AdminAuth(next http.Handler) http.Handler {
 
 		// Get admin API key from environment
 		adminAPIKey := os.Getenv("ADMIN_API_KEY")
+		authRequired := os.Getenv("ADMIN_AUTH_REQUIRED") != "false" // Default: true
+
 		if adminAPIKey == "" {
-			// If no API key configured, log warning and allow (backward compatibility)
+			if authRequired {
+				// FAIL CLOSED - reject when key not configured
+				logger.Log.Error().
+					Str("path", r.URL.Path).
+					Str("remote_addr", r.RemoteAddr).
+					Msg("Admin endpoint access denied - ADMIN_API_KEY not set")
+				http.Error(w, "Admin endpoints disabled - ADMIN_API_KEY not set", http.StatusForbidden)
+				return
+			}
+			// Dev mode - log warning and allow
 			logger.Log.Warn().
 				Str("path", r.URL.Path).
 				Str("remote_addr", r.RemoteAddr).
-				Msg("ADMIN_API_KEY not set - admin endpoints are unprotected!")
+				Msg("ADMIN_API_KEY not set - endpoints unprotected (dev mode)")
 			next.ServeHTTP(w, r)
 			return
 		}

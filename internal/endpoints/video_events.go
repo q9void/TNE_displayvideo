@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -296,23 +297,40 @@ func (h *VideoEventHandler) handleSpecificEvent(w http.ResponseWriter, r *http.R
 
 // getClientIP extracts the client IP from the request
 func getClientIP(r *http.Request) string {
-	// Try X-Forwarded-For first (for proxied requests)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
-		// Take the first (leftmost) IP which is the original client
-		ips := strings.Split(xff, ",")
-		if len(ips) > 0 {
-			return strings.TrimSpace(ips[0])
+	// Only trust X-Forwarded-For when explicitly enabled
+	trustXFF := os.Getenv("TRUST_X_FORWARDED_FOR") == "true"
+
+	if trustXFF {
+		// Try X-Forwarded-For first (for proxied requests)
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
+			// Take the first (leftmost) IP which is the original client
+			ips := strings.Split(xff, ",")
+			if len(ips) > 0 {
+				ip := strings.TrimSpace(ips[0])
+
+				// Validate IP format to prevent injection
+				if net.ParseIP(ip) != nil {
+					return ip
+				}
+			}
+		}
+
+		// Try X-Real-IP
+		if xri := r.Header.Get("X-Real-IP"); xri != "" {
+			// Validate IP format
+			if net.ParseIP(xri) != nil {
+				return xri
+			}
 		}
 	}
 
-	// Try X-Real-IP
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
-	}
-
-	// Fall back to RemoteAddr (strip port if present)
+	// Fall back to RemoteAddr (always trusted, strip port if present)
 	ip, _, _ := net.SplitHostPort(r.RemoteAddr) //nolint:errcheck // RemoteAddr may not have port
+	if ip == "" {
+		// RemoteAddr didn't have port, use as-is
+		ip = r.RemoteAddr
+	}
 	return ip
 }
 

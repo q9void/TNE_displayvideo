@@ -703,6 +703,11 @@ func (s *PublisherStore) GetSlotBidderConfigs(ctx context.Context, accountID, do
 		result[bidderCode] = params
 	}
 
+	// Check for iteration errors
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating bidder configs: %w", err)
+	}
+
 	return result, nil
 }
 

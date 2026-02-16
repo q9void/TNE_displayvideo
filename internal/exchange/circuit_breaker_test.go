@@ -145,8 +145,9 @@ func TestExchange_CircuitBreakerSkipsBidderWhenOpen(t *testing.T) {
 		t.Error("Expected error in result when circuit breaker is open")
 	}
 
-	if !result.TimedOut {
-		t.Error("Expected TimedOut=true when circuit breaker is open")
+	// Circuit breaker failures should NOT be marked as timeouts
+	if result.TimedOut {
+		t.Error("Expected TimedOut=false when circuit breaker is open, got TimedOut=true")
 	}
 }
 

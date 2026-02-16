@@ -1762,12 +1762,12 @@ func TestAuctionLogic_SecondPrice_SingleBidWithFloor(t *testing.T) {
 
 	result := ex.runAuctionLogic(validBids, impFloors)
 
-	// With single bid and floor 2.00, winning price should be floor + increment = 2.01
+	// With single bid ($5) and floor 2.00, winning price should be max(floor, bid) = $5.00
 	if len(result["imp1"]) != 1 {
 		t.Fatalf("expected 1 bid, got %d", len(result["imp1"]))
 	}
-	if result["imp1"][0].Bid.Bid.Price != 2.01 {
-		t.Errorf("expected winning price 2.01, got %f", result["imp1"][0].Bid.Bid.Price)
+	if result["imp1"][0].Bid.Bid.Price != 5.00 {
+		t.Errorf("expected winning price 5.00, got %f", result["imp1"][0].Bid.Bid.Price)
 	}
 }
 
@@ -1788,9 +1788,13 @@ func TestAuctionLogic_SecondPrice_ClearingExceedsBid(t *testing.T) {
 
 	result := ex.runAuctionLogic(validBids, impFloors)
 
-	// Bid should be rejected since clearing price exceeds bid
-	if len(result["imp1"]) != 0 {
-		t.Errorf("expected 0 bids (rejected), got %d", len(result["imp1"]))
+	// For single bid, winner pays max(floor, bid) even if floor > bid
+	// Bid: $4.00, Floor: $5.00 -> Winning price: $5.00
+	if len(result["imp1"]) != 1 {
+		t.Fatalf("expected 1 bid, got %d", len(result["imp1"]))
+	}
+	if result["imp1"][0].Bid.Bid.Price != 5.00 {
+		t.Errorf("expected winning price 5.00 (floor), got %f", result["imp1"][0].Bid.Bid.Price)
 	}
 }
 
@@ -1926,8 +1930,10 @@ func TestSelectiveClone_OriginalNotMutated(t *testing.T) {
 	if clone.Cur[0] != "USD" {
 		t.Errorf("expected clone Cur = USD, got %s", clone.Cur[0])
 	}
-	if clone.Imp[0].BidFloorCur != "USD" {
-		t.Errorf("expected clone BidFloorCur = USD, got %s", clone.Imp[0].BidFloorCur)
+	// Phase 4 fix: BidFloorCur should be preserved (not overwritten to USD)
+	// This allows bidders to see the original floor currency for proper conversion
+	if clone.Imp[0].BidFloorCur != "EUR" {
+		t.Errorf("expected clone BidFloorCur = EUR (preserved), got %s", clone.Imp[0].BidFloorCur)
 	}
 
 	// Verify original is NOT mutated

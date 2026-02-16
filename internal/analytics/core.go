@@ -155,7 +155,9 @@ type GDPRData struct {
 // CCPAData contains CCPA consent information
 type CCPAData struct {
 	Applies       bool
-	ConsentString string
+	OptOut        bool   // User has opted out
+	USPrivacy     string // IAB US Privacy string (e.g., "1YNN")
+	ConsentString string // Legacy field (deprecated, use USPrivacy)
 }
 
 // VideoObject contains video-specific analytics

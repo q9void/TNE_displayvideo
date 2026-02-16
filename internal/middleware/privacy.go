@@ -51,39 +51,40 @@ const (
 	RegulationNone   PrivacyRegulation = "NONE"   // No applicable regulation
 )
 
-// GDPR Countries (EU/EEA + UK) - ISO 3166-1 alpha-3 codes
+// GDPR Countries (EU/EEA + UK) - ISO 3166-1 alpha-2 codes
+// NOTE: geo.Lookup() returns alpha-2 codes (US, GB, DE, etc.)
 var gdprCountries = map[string]bool{
-	"AUT": true, // Austria
-	"BEL": true, // Belgium
-	"BGR": true, // Bulgaria
-	"HRV": true, // Croatia
-	"CYP": true, // Cyprus
-	"CZE": true, // Czech Republic
-	"DNK": true, // Denmark
-	"EST": true, // Estonia
-	"FIN": true, // Finland
-	"FRA": true, // France
-	"DEU": true, // Germany
-	"GRC": true, // Greece
-	"HUN": true, // Hungary
-	"IRL": true, // Ireland
-	"ITA": true, // Italy
-	"LVA": true, // Latvia
-	"LTU": true, // Lithuania
-	"LUX": true, // Luxembourg
-	"MLT": true, // Malta
-	"NLD": true, // Netherlands
-	"POL": true, // Poland
-	"PRT": true, // Portugal
-	"ROU": true, // Romania
-	"SVK": true, // Slovakia
-	"SVN": true, // Slovenia
-	"ESP": true, // Spain
-	"SWE": true, // Sweden
-	"GBR": true, // United Kingdom
-	"ISL": true, // Iceland (EEA)
-	"LIE": true, // Liechtenstein (EEA)
-	"NOR": true, // Norway (EEA)
+	"AT": true, // Austria
+	"BE": true, // Belgium
+	"BG": true, // Bulgaria
+	"HR": true, // Croatia
+	"CY": true, // Cyprus
+	"CZ": true, // Czech Republic
+	"DK": true, // Denmark
+	"EE": true, // Estonia
+	"FI": true, // Finland
+	"FR": true, // France
+	"DE": true, // Germany
+	"GR": true, // Greece
+	"HU": true, // Hungary
+	"IE": true, // Ireland
+	"IT": true, // Italy
+	"LV": true, // Latvia
+	"LT": true, // Lithuania
+	"LU": true, // Luxembourg
+	"MT": true, // Malta
+	"NL": true, // Netherlands
+	"PL": true, // Poland
+	"PT": true, // Portugal
+	"RO": true, // Romania
+	"SK": true, // Slovakia
+	"SI": true, // Slovenia
+	"ES": true, // Spain
+	"SE": true, // Sweden
+	"GB": true, // United Kingdom
+	"IS": true, // Iceland (EEA)
+	"LI": true, // Liechtenstein (EEA)
+	"NO": true, // Norway (EEA)
 }
 
 // US States with privacy laws - Two-letter state codes
@@ -288,7 +289,7 @@ func (m *PrivacyMiddleware) detectApplicableRegulation(req *openrtb.BidRequest) 
 	}
 
 	// Check US state privacy laws
-	if geo.Country == "USA" && geo.Region != "" {
+	if geo.Country == "US" && geo.Region != "" {
 		if regulation, exists := usPrivacyStates[geo.Region]; exists {
 			return regulation
 		}
@@ -296,13 +297,13 @@ func (m *PrivacyMiddleware) detectApplicableRegulation(req *openrtb.BidRequest) 
 		return RegulationNone
 	}
 
-	// Check other countries with privacy laws
+	// Check other countries with privacy laws (alpha-2 codes)
 	switch geo.Country {
-	case "BRA": // Brazil
+	case "BR": // Brazil
 		return RegulationLGPD
-	case "CAN": // Canada
+	case "CA": // Canada
 		return RegulationPIPEDA
-	case "SGP": // Singapore
+	case "SG": // Singapore
 		return RegulationPDPA
 	}
 
@@ -739,7 +740,7 @@ func DetectRegulationFromGeo(geo *openrtb.Geo) PrivacyRegulation {
 	}
 
 	// Check US state privacy laws
-	if geo.Country == "USA" && geo.Region != "" {
+	if geo.Country == "US" && geo.Region != "" {
 		if regulation, exists := usPrivacyStates[geo.Region]; exists {
 			return regulation
 		}
@@ -748,11 +749,11 @@ func DetectRegulationFromGeo(geo *openrtb.Geo) PrivacyRegulation {
 
 	// Check other countries with privacy laws
 	switch geo.Country {
-	case "BRA":
+	case "BR":
 		return RegulationLGPD
-	case "CAN":
+	case "CA":
 		return RegulationPIPEDA
-	case "SGP":
+	case "SG":
 		return RegulationPDPA
 	}
 

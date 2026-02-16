@@ -294,7 +294,8 @@ func TestDoS_OversizedURL(t *testing.T) {
 	}
 }
 
-// TestDoS_UnknownContentLength tests rejection of unknown content length
+// TestDoS_UnknownContentLength tests that chunked encoding is allowed for small bodies
+// but MaxBytesReader still protects against large bodies
 func TestDoS_UnknownContentLength(t *testing.T) {
 	config := &SizeLimitConfig{
 		Enabled:      true,
@@ -305,22 +306,24 @@ func TestDoS_UnknownContentLength(t *testing.T) {
 	limiter := NewSizeLimiter(config)
 
 	handler := limiter.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Try to read the body to trigger MaxBytesReader limit
+		_, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	// Create request with unknown content length (-1)
+	// Test 1: Small body with chunked encoding should be allowed
 	req := httptest.NewRequest(http.MethodPost, "/openrtb2/auction", bytes.NewReader([]byte("test")))
-	req.ContentLength = -1 // Simulate chunked encoding or unknown length
+	req.ContentLength = -1 // Simulate chunked encoding
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
 
-	// Should reject unknown content length to prevent memory exhaustion attacks
-	if w.Code != http.StatusRequestEntityTooLarge {
-		t.Errorf("Expected rejection of unknown content length (-1), got status %d", w.Code)
+	// Should allow chunked encoding for small bodies
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected chunked encoding to be allowed for small body, got status %d", w.Code)
 	}
 
-	t.Log("Successfully blocked request with unknown content length (prevents memory exhaustion)")
+	t.Log("Successfully allowed chunked encoding for small body (MaxBytesReader still enforces limit)")
 }
 
 // TestDoS_SlowlorisProtection tests timeout behavior

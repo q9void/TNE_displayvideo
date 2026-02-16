@@ -31,29 +31,7 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 	var errs []error
 	var validImps []openrtb.Imp
 
-	// Remove Catalyst internal IDs from Site (prevent ID leakage)
-	if requestCopy.Site != nil {
-		siteCopy := *requestCopy.Site
-		siteCopy.ID = ""
-		if siteCopy.Publisher != nil {
-			pubCopy := *siteCopy.Publisher
-			pubCopy.ID = ""
-			siteCopy.Publisher = &pubCopy
-		}
-		requestCopy.Site = &siteCopy
-	}
-
-	// Remove Catalyst internal IDs from App (if present)
-	if requestCopy.App != nil {
-		appCopy := *requestCopy.App
-		appCopy.ID = ""
-		if appCopy.Publisher != nil {
-			pubCopy := *appCopy.Publisher
-			pubCopy.ID = ""
-			appCopy.Publisher = &pubCopy
-		}
-		requestCopy.App = &appCopy
-	}
+	// NOTE: ID clearing is now handled by Privacy/Consent hook (no longer needed here)
 
 	// Process each impression - extract TripleLift parameters
 	for _, imp := range requestCopy.Imp {
@@ -116,15 +94,7 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 
 	requestCopy.Imp = validImps
 
-	// Extract TripleLift user ID from user.ext.eids and set in user.id
-	// TripleLift uses user.id for user matching and frequency capping
-	if requestCopy.User != nil {
-		requestCopy.User = adapters.SetUserID(requestCopy.User, "triplelift.com")
-		logger.Log.Debug().
-			Str("adapter", "triplelift").
-			Str("user_id", requestCopy.User.ID).
-			Msg("Set TripleLift user ID from eids")
-	}
+	// NOTE: SetUserID is now handled by Identity Gating hook (no longer needed here)
 
 	requestBody, err := json.Marshal(requestCopy)
 	if err != nil {

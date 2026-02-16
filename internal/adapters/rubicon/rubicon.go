@@ -113,13 +113,19 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		impCopy := imp
 
 		// Transform impression extension to Rubicon's expected format
-		impExt := rubiconImpExt{
-			RP: rubiconImpExtRP{
+		impExtMap := map[string]interface{}{
+			"rp": rubiconImpExtRP{
 				ZoneID: rubiconParams.ZoneID,
 				Track:  rubiconTrack{Mint: "", MintVersion: ""},
 			},
 		}
-		impCopy.Ext, err = json.Marshal(impExt)
+
+		// Preserve bidonmultiformat parameter if enabled
+		if rubiconParams.BidOnMultiformat {
+			impExtMap["bidonmultiformat"] = true
+		}
+
+		impCopy.Ext, err = json.Marshal(impExtMap)
 		if err != nil {
 			errors = append(errors, fmt.Errorf("failed to marshal imp ext for imp %s: %w", imp.ID, err))
 			continue
@@ -131,14 +137,7 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		if reqCopy.Site != nil {
 			siteCopy := *reqCopy.Site
 
-			// Remove Catalyst internal IDs from Site (prevent ID leakage)
-			siteCopy.ID = "" // Clear Catalyst internal site ID
-
-			if siteCopy.Publisher != nil {
-				pubCopy := *siteCopy.Publisher
-				pubCopy.ID = "" // Clear Catalyst internal publisher ID
-				siteCopy.Publisher = &pubCopy
-			}
+			// NOTE: ID clearing is now handled by Privacy/Consent hook (no longer needed here)
 
 			// Set Rubicon site extension
 			siteExt := rubiconSiteExt{
@@ -185,15 +184,7 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 			reqCopy.Site = &siteCopy
 		}
 
-		// Extract Rubicon user ID from user.ext.eids and set in user.id
-		// Rubicon expects user.id to contain their user ID for frequency capping and targeting
-		if reqCopy.User != nil {
-			reqCopy.User = adapters.SetUserID(reqCopy.User, "rubiconproject.com")
-			logger.Log.Debug().
-				Str("adapter", "rubicon").
-				Str("user_id", reqCopy.User.ID).
-				Msg("Set Rubicon user ID from eids")
-		}
+		// NOTE: SetUserID is now handled by Identity Gating hook (no longer needed here)
 
 		requestBody, err := json.Marshal(reqCopy)
 		if err != nil {
@@ -247,6 +238,11 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 
 // extractRubiconParams extracts Rubicon-specific parameters from impression extension
 func extractRubiconParams(impExt json.RawMessage) (*rubiconParams, error) {
+	// Handle nil or empty imp.ext
+	if len(impExt) == 0 {
+		return nil, fmt.Errorf("imp.ext is empty or nil")
+	}
+
 	var extMap map[string]interface{}
 	if err := json.Unmarshal(impExt, &extMap); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal imp.ext: %w", err)

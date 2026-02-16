@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/pprof"
+	"os"
 	"time"
 
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
@@ -328,9 +329,9 @@ func (s *Server) initHandlers() {
 	mux.Handle("/setuid", setuidHandler)
 	mux.Handle("/optout", optoutHandler)
 
-	// Video endpoints
-	mux.HandleFunc("/video/vast", videoHandler.HandleVASTRequest)
-	mux.HandleFunc("/video/openrtb", videoHandler.HandleOpenRTBVideo)
+	// Video endpoints (protected by privacy middleware)
+	mux.Handle("/video/vast", privacyMiddleware(http.HandlerFunc(videoHandler.HandleVASTRequest)))
+	mux.Handle("/video/openrtb", privacyMiddleware(http.HandlerFunc(videoHandler.HandleOpenRTBVideo)))
 	endpoints.RegisterVideoEventRoutes(mux, videoEventHandler)
 
 	log.Info().Msg("Video endpoints registered: /video/vast, /video/openrtb, /video/event/*")
@@ -357,7 +358,7 @@ func (s *Server) initHandlers() {
 		Msg("Loaded bidder mapping configuration")
 
 	catalystBidHandler := endpoints.NewCatalystBidHandler(s.exchange, bidderMapping, s.publisher, s.userSyncStore)
-	mux.HandleFunc("/v1/bid", catalystBidHandler.HandleBidRequest)
+	mux.Handle("/v1/bid", privacyMiddleware(http.HandlerFunc(catalystBidHandler.HandleBidRequest)))
 
 	log.Info().
 		Bool("hierarchical_config", s.publisher != nil).
@@ -401,14 +402,27 @@ func (s *Server) initHandlers() {
 	// Version endpoint (similar to Prebid Server)
 	mux.HandleFunc("/version", versionHandler)
 
-	// pprof debugging endpoints (similar to Prebid Server)
-	mux.HandleFunc("/debug/pprof/", pprof.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	// pprof debugging endpoints (only enabled with PPROF_ENABLED=true)
+	if os.Getenv("PPROF_ENABLED") == "true" {
+		// Wrap pprof with admin auth middleware
+		adminAuth := middleware.AdminAuth
+		pprofMux := http.NewServeMux()
+		pprofMux.HandleFunc("/debug/pprof/", pprof.Index)
+		pprofMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		pprofMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		pprofMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
-	log.Info().Msg("pprof debugging endpoints registered: /debug/pprof/*")
+		mux.Handle("/debug/pprof/", adminAuth(pprofMux))
+		mux.Handle("/debug/pprof/cmdline", adminAuth(http.HandlerFunc(pprof.Cmdline)))
+		mux.Handle("/debug/pprof/profile", adminAuth(http.HandlerFunc(pprof.Profile)))
+		mux.Handle("/debug/pprof/symbol", adminAuth(http.HandlerFunc(pprof.Symbol)))
+		mux.Handle("/debug/pprof/trace", adminAuth(http.HandlerFunc(pprof.Trace)))
+
+		log.Info().Msg("pprof debugging endpoints enabled with admin auth: /debug/pprof/*")
+	} else {
+		log.Info().Msg("pprof debugging endpoints disabled (set PPROF_ENABLED=true to enable)")
+	}
 
 	// Build middleware chain
 	handler := s.buildHandler(mux)

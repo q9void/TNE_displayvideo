@@ -69,8 +69,9 @@ func (sl *SizeLimiter) Middleware(next http.Handler) http.Handler {
 		}
 
 		// Check Content-Length header if present
-		// SECURITY: Also reject -1 (unknown length) to prevent OOM attacks (CVE-2026-XXXX)
-		if r.ContentLength < 0 || r.ContentLength > maxBodySize {
+		// Allow chunked encoding (ContentLength = -1)
+		// SECURITY: MaxBytesReader enforces limit for both chunked and non-chunked
+		if r.ContentLength > maxBodySize {
 			http.Error(w, `{"error":"request body too large"}`, http.StatusRequestEntityTooLarge)
 			return
 		}

@@ -24,7 +24,7 @@ type CORSConfig struct {
 
 // DefaultCORSConfig returns production-ready CORS configuration for Prebid.js
 func DefaultCORSConfig() *CORSConfig {
-	allowedOrigins := parseCommaSeparated(os.Getenv("CORS_ALLOWED_ORIGINS"))
+	allowedOrigins := parseCommaSeparated(os.Getenv("CORS_ORIGINS"))
 
 	// P1-3: In production, require explicit origins for security
 	// Only allow wildcard in development mode

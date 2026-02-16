@@ -140,15 +140,9 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		request.App = &appCopy
 	}
 
-	// Extract PubMatic user ID from user.ext.eids and set in user.id
-	// PubMatic uses user.id for frequency capping and user-level targeting
-	if request.User != nil {
-		request.User = adapters.SetUserID(request.User, "pubmatic.com")
-		logger.Log.Debug().
-			Str("adapter", "pubmatic").
-			Str("user_id", request.User.ID).
-			Msg("Set PubMatic user ID from eids")
-	}
+	// NOTE: SetUserID is now handled by Identity Gating hook (no longer needed here)
+	// NOTE: site.id/app.id clearing is handled by Privacy/Consent hook
+	// This adapter sets PubMatic-specific publisher.id (lines above) which is correct
 
 	// Marshal final request
 	requestJSON, err := json.Marshal(request)

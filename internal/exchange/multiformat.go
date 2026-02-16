@@ -2,6 +2,8 @@
 package exchange
 
 import (
+	"encoding/json"
+
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
 )
 
@@ -70,8 +72,21 @@ func (mfp *MultiformatProcessor) getStrategy(
 	imp *openrtb.Imp,
 	preferredMediaType string,
 ) string {
-	// Check if strategy specified in imp.ext.prebid.multiformatrequestStrategy
-	// For now, use default
+	// Check if strategy specified in imp.ext.prebid.multiformatRequestStrategy
+	if imp.Ext != nil {
+		var prebidExt struct {
+			Prebid struct {
+				MultiformatRequestStrategy string `json:"multiformatRequestStrategy"`
+			} `json:"prebid"`
+		}
+
+		if err := json.Unmarshal(imp.Ext, &prebidExt); err == nil {
+			if prebidExt.Prebid.MultiformatRequestStrategy != "" {
+				return prebidExt.Prebid.MultiformatRequestStrategy
+			}
+		}
+	}
+
 	return mfp.config.DefaultStrategy
 }
 
@@ -192,9 +207,12 @@ func (mfp *MultiformatProcessor) GetPreferredMediaType(imp *openrtb.Imp) string 
 	// Check imp.ext.prebid.preferredMediaType
 	// For now, use simple heuristic based on what's present
 
-	// Priority order: Video > Native > Banner
+	// Priority order: Video > Audio > Native > Banner
 	if imp.Video != nil {
 		return "video"
+	}
+	if imp.Audio != nil {
+		return "audio"
 	}
 	if imp.Native != nil {
 		return "native"
@@ -217,6 +235,9 @@ func (mfp *MultiformatProcessor) IsMultiformat(imp *openrtb.Imp) bool {
 		formatCount++
 	}
 	if imp.Native != nil {
+		formatCount++
+	}
+	if imp.Audio != nil {
 		formatCount++
 	}
 

@@ -13,6 +13,7 @@ import (
 	"github.com/thenexusengine/tne_springwire/internal/device"
 	"github.com/thenexusengine/tne_springwire/internal/exchange"
 	"github.com/thenexusengine/tne_springwire/internal/geo"
+	"github.com/thenexusengine/tne_springwire/internal/hooks"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
 	"github.com/thenexusengine/tne_springwire/internal/storage"
 	"github.com/thenexusengine/tne_springwire/internal/usersync"
@@ -117,11 +118,17 @@ type MAIBidRequest struct {
 
 // MAISlot represents an ad slot
 type MAISlot struct {
-	DivID          string      `json:"divId"`
-	Sizes          [][]int     `json:"sizes"`
-	AdUnitPath     string      `json:"adUnitPath,omitempty"`
-	Position       string      `json:"position,omitempty"`
-	EnabledBidders []string    `json:"enabled_bidders,omitempty"`
+	DivID                  string      `json:"divId"`
+	Sizes                  [][]int     `json:"sizes"`                            // Banner sizes
+	AdUnitPath             string      `json:"adUnitPath,omitempty"`
+	Position               string      `json:"position,omitempty"`
+	EnabledBidders         []string    `json:"enabled_bidders,omitempty"`
+	Video                  bool        `json:"video,omitempty"`                  // Enable video format
+	VideoWidth             int         `json:"videoWidth,omitempty"`             // Video player width
+	VideoHeight            int         `json:"videoHeight,omitempty"`            // Video player height
+	VideoMimes             []string    `json:"videoMimes,omitempty"`             // Supported MIME types
+	Native                 bool        `json:"native,omitempty"`                 // Enable native format
+	MultiformatStrategy    string      `json:"multiformatStrategy,omitempty"`    // Strategy for multiformat
 }
 
 // MAIPage represents page context
@@ -275,6 +282,29 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Execute request-level hooks (BEFORE auction)
+	// Hook execution order is critical:
+	// 1. Request Validation - validates and normalizes request
+	// 2. Privacy/Consent - enforces GDPR/CCPA/GPP, strips IDs without consent
+	hookExecutor := hooks.NewHookExecutor()
+	hookExecutor.RegisterRequestHook(hooks.NewRequestValidationHook())
+	hookExecutor.RegisterRequestHook(hooks.NewPrivacyConsentHook())
+
+	if err := hookExecutor.ExecuteRequestHooks(r.Context(), ortbReq); err != nil {
+		log.Error().
+			Err(err).
+			Str("account_id", maiBidReq.AccountID).
+			Str("request_id", ortbReq.ID).
+			Msg("❌ Request hook failed")
+		h.writeErrorResponse(w, fmt.Sprintf("Request validation failed: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	log.Debug().
+		Str("request_id", ortbReq.ID).
+		Str("account_id", maiBidReq.AccountID).
+		Msg("✓ Request hooks executed successfully")
+
 	// Run auction with 2500ms timeout (MAI Publisher requirement)
 	ctx, cancel := context.WithTimeout(r.Context(), 2500*time.Millisecond)
 	defer cancel()
@@ -417,11 +447,87 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		imp := openrtb.Imp{
 			ID:     impID,
 			Secure: &secureFlag,
-			Banner: &openrtb.Banner{
+		}
+
+		// Add banner if sizes are provided (default format)
+		if len(slot.Sizes) > 0 {
+			imp.Banner = &openrtb.Banner{
 				W:      slot.Sizes[0][0], // Use first size as primary
 				H:      slot.Sizes[0][1],
 				Format: formats,
-			},
+			}
+		}
+
+		// Add video if enabled
+		if slot.Video {
+			videoWidth := slot.VideoWidth
+			videoHeight := slot.VideoHeight
+			if videoWidth == 0 || videoHeight == 0 {
+				// Default to first banner size if available
+				if len(slot.Sizes) > 0 {
+					videoWidth = slot.Sizes[0][0]
+					videoHeight = slot.Sizes[0][1]
+				} else {
+					videoWidth = 640
+					videoHeight = 480
+				}
+			}
+
+			mimes := slot.VideoMimes
+			if len(mimes) == 0 {
+				mimes = []string{"video/mp4", "video/webm"}
+			}
+
+			imp.Video = &openrtb.Video{
+				W:     videoWidth,
+				H:     videoHeight,
+				Mimes: mimes,
+			}
+		}
+
+		// Add native if enabled
+		if slot.Native {
+			imp.Native = &openrtb.Native{
+				Request: "", // Native request would be built based on requirements
+				Ver:     "1.2",
+			}
+		}
+
+		// Set multiformat strategy if multiple formats present
+		hasMultipleFormats := 0
+		if imp.Banner != nil {
+			hasMultipleFormats++
+		}
+		if imp.Video != nil {
+			hasMultipleFormats++
+		}
+		if imp.Native != nil {
+			hasMultipleFormats++
+		}
+
+		if hasMultipleFormats > 1 && slot.MultiformatStrategy != "" {
+			// Add multiformat strategy to imp.ext.prebid
+			impExtPrebid := map[string]interface{}{
+				"multiformatRequestStrategy": slot.MultiformatStrategy,
+			}
+			if len(imp.Ext) > 0 {
+				// Merge with existing ext
+				var extMap map[string]interface{}
+				if err := json.Unmarshal(imp.Ext, &extMap); err == nil {
+					extMap["prebid"] = impExtPrebid
+					if extBytes, err := json.Marshal(extMap); err == nil {
+						imp.Ext = extBytes
+					}
+				}
+			} else {
+				// Create new ext
+				extMap := map[string]interface{}{
+					"prebid": impExtPrebid,
+				}
+				if extBytes, err := json.Marshal(extMap); err == nil {
+					imp.Ext = extBytes
+				}
+			}
 		}
 
 	// Look up bidder parameters using hierarchical config (DB first, then mapping file fallback)

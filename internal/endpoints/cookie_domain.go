@@ -1,6 +1,7 @@
 package endpoints
 
 import (
+	"net"
 	"strings"
 )
 
@@ -13,11 +14,14 @@ func GetCookieDomain(host string) string {
 		host = host[:idx]
 	}
 
-	// Handle localhost and IP addresses
-	if host == "localhost" ||
-		strings.Contains(host, "127.0.0.1") ||
-		strings.Contains(host, "::1") ||
-		strings.Count(host, ".") == 0 {
+	// Handle localhost and empty host
+	if host == "localhost" || host == "" {
+		return host
+	}
+
+	// Handle IP addresses (both IPv4 and IPv6)
+	// Cookies should not have domain set for IP addresses
+	if ip := net.ParseIP(host); ip != nil {
 		return host
 	}
 

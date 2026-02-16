@@ -35,45 +35,8 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 	// Create a copy of the request to modify
 	requestCopy := *request
 
-	// Remove Catalyst internal IDs from Site
-	if requestCopy.Site != nil {
-		siteCopy := *requestCopy.Site
-		siteCopy.ID = "" // Remove site.id
-
-		// Remove publisher.id if exists
-		if siteCopy.Publisher != nil {
-			pubCopy := *siteCopy.Publisher
-			pubCopy.ID = "" // Remove publisher.id
-			siteCopy.Publisher = &pubCopy
-		}
-
-		requestCopy.Site = &siteCopy
-	}
-
-	// Remove Catalyst internal IDs from App (if present)
-	if requestCopy.App != nil {
-		appCopy := *requestCopy.App
-		appCopy.ID = "" // Remove app.id
-
-		// Remove publisher.id if exists
-		if appCopy.Publisher != nil {
-			pubCopy := *appCopy.Publisher
-			pubCopy.ID = "" // Remove publisher.id
-			appCopy.Publisher = &pubCopy
-		}
-
-		requestCopy.App = &appCopy
-	}
-
-	// Extract Kargo user ID from user.ext.eids and set in user.id
-	// Kargo uses user.id for frequency capping and user matching
-	if requestCopy.User != nil {
-		requestCopy.User = adapters.SetUserID(requestCopy.User, "kargo.com")
-		logger.Log.Debug().
-			Str("adapter", "kargo").
-			Str("user_id", requestCopy.User.ID).
-			Msg("Set Kargo user ID from eids")
-	}
+	// NOTE: ID clearing is now handled by Privacy/Consent hook (no longer needed here)
+	// NOTE: SetUserID is now handled by Identity Gating hook (no longer needed here)
 
 	requestBody, err := json.Marshal(requestCopy)
 	if err != nil {

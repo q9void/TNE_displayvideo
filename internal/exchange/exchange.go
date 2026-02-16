@@ -15,6 +15,7 @@ import (
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/analytics"
 	"github.com/thenexusengine/tne_springwire/internal/fpd"
+	"github.com/thenexusengine/tne_springwire/internal/hooks"
 	"github.com/thenexusengine/tne_springwire/internal/middleware"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
 	"github.com/thenexusengine/tne_springwire/pkg/currency"
@@ -68,6 +69,7 @@ type Exchange struct {
 	metrics           MetricsRecorder
 	currencyConverter *currency.Converter
 	analytics         analytics.Module // NEW: Analytics module for rich auction transaction data
+	mfProcessor       *MultiformatProcessor // Multiformat bid selection
 
 	// Per-bidder circuit breakers to prevent cascade failures
 	bidderBreakers   map[string]*idr.CircuitBreaker
@@ -140,6 +142,7 @@ type Config struct {
 	Analytics            analytics.Module     // NEW: Analytics module for rich auction transaction data
 	FPD                  *fpd.Config
 	CloneLimits          *CloneLimits // P3-1: Configurable clone limits
+	MultiformatConfig    *MultiformatConfig // Multiformat bid selection config
 	// Auction configuration
 	AuctionType    AuctionType
 	PriceIncrement float64 // For second-price auctions (typically 0.01)
@@ -246,6 +249,12 @@ func New(registry *adapters.Registry, config *Config) *Exchange {
 		fpdConfig = fpd.DefaultConfig()
 	}
 
+	// Initialize multiformat config if not provided
+	mfConfig := config.MultiformatConfig
+	if mfConfig == nil {
+		mfConfig = DefaultMultiformatConfig()
+	}
+
 	ex := &Exchange{
 		registry:          registry,
 		httpClient:        adapters.NewHTTPClient(config.DefaultTimeout),
@@ -255,6 +264,7 @@ func New(registry *adapters.Registry, config *Config) *Exchange {
 		bidderBreakers:    make(map[string]*idr.CircuitBreaker),
 		currencyConverter: config.CurrencyConverter,
 		analytics:         config.Analytics, // NEW: Set analytics module from config
+		mfProcessor:       NewMultiformatProcessor(mfConfig),
 	}
 
 	// Initialize circuit breaker for each registered bidder
@@ -926,8 +936,8 @@ func (e *Exchange) runAuctionLogic(validBids []ValidatedBid, impFloors map[strin
 				} else {
 					winningPrice = roundToCents(secondPrice + e.config.PriceIncrement)
 				}
-			} else {
-				// P0-6: Single bid - use floor as "second price" for consistent auction semantics
+			} else if len(bids) == 1 {
+				// Single bid: winner pays their bid or floor, whichever is higher
 				floor := impFloors[impID]
 
 				// Validate floor is reasonable
@@ -935,20 +945,11 @@ func (e *Exchange) runAuctionLogic(validBids []ValidatedBid, impFloors map[strin
 					floor = 0
 				}
 
-				if floor > 0 {
-					// Check for overflow in addition
-					if floor > maxReasonableCPM-e.config.PriceIncrement {
-						winningPrice = maxReasonableCPM
-					} else {
-						winningPrice = roundToCents(floor + e.config.PriceIncrement)
-					}
+				// Winner pays max(floor, bidPrice)
+				if floor > originalBidPrice {
+					winningPrice = roundToCents(floor)
 				} else {
-					// No floor - winner pays minimum bid price + increment
-					if e.config.MinBidPrice > maxReasonableCPM-e.config.PriceIncrement {
-						winningPrice = maxReasonableCPM
-					} else {
-						winningPrice = roundToCents(e.config.MinBidPrice + e.config.PriceIncrement)
-					}
+					winningPrice = originalBidPrice
 				}
 			}
 
@@ -965,9 +966,9 @@ func (e *Exchange) runAuctionLogic(validBids []ValidatedBid, impFloors map[strin
 				winningPrice = maxReasonableCPM
 			}
 
-			// P2-2: If winning price exceeds bid, reject the bid entirely
-			// A bid that can't meet the second-price threshold shouldn't win
-			if winningPrice > originalBidPrice {
+			// P2-2: For multiple bids, reject if winning price exceeds bid
+			// For single bids, this check was already handled above
+			if len(bids) > 1 && winningPrice > originalBidPrice {
 				// P2-3: Log bid rejection for debugging auction behavior
 				logger.Log.Debug().
 					Str("impID", impID).
@@ -1312,6 +1313,19 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 				return nil, NewValidationError("invalid bid request: impression[%d] banner must have either w/h or format array (OpenRTB 2.5)", i)
 			}
 		}
+
+		// Normalize and validate currency codes (uppercase per ISO 4217)
+		if imp.BidFloorCur != "" {
+			// Normalize to uppercase
+			normalized := strings.ToUpper(imp.BidFloorCur)
+			req.BidRequest.Imp[i].BidFloorCur = normalized
+
+			// Validate against common currencies (optional - could be configurable)
+			// For now, accept any 3-letter uppercase code
+			if len(normalized) != 3 {
+				return nil, NewValidationError("invalid bid request: impression[%d] has invalid currency code %q (must be 3-letter ISO 4217)", i, imp.BidFloorCur)
+			}
+		}
 	}
 
 	response := &AuctionResponse{
@@ -1614,6 +1628,11 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 
 	// Apply auction logic (first-price or second-price)
 	auctionedBids := e.runAuctionLogic(validBids, impFloors)
+
+	// Apply multiformat bid selection if enabled
+	if e.mfProcessor != nil && e.mfProcessor.config.Enabled {
+		auctionedBids = e.applyMultiformatSelection(req.BidRequest, auctionedBids)
+	}
 
 	// Apply bid multiplier if publisher is configured with one
 	auctionedBids = e.applyBidMultiplier(ctx, auctionedBids)
@@ -1978,10 +1997,30 @@ func (e *Exchange) buildAuctionObject(
 
 	// Extract CCPA data
 	var ccpaData *analytics.CCPAData
-	if req.BidRequest.Regs != nil && req.BidRequest.Regs.Ext != nil {
-		// CCPA data is in regs.ext.us_privacy
-		ccpaData = &analytics.CCPAData{
-			Applies: false, // Would need to parse regs.ext
+	if req.BidRequest.Regs != nil {
+		usPrivacy := ""
+
+		// Check top-level USPrivacy field first (OpenRTB 2.5)
+		if req.BidRequest.Regs.USPrivacy != "" {
+			usPrivacy = req.BidRequest.Regs.USPrivacy
+		} else if req.BidRequest.Regs.Ext != nil {
+			// Fallback to ext location (older implementations)
+			var regsExt struct {
+				USPrivacy string `json:"us_privacy"`
+			}
+			if err := json.Unmarshal(req.BidRequest.Regs.Ext, &regsExt); err == nil {
+				usPrivacy = regsExt.USPrivacy
+			}
+		}
+
+		// Parse US Privacy string if present
+		if usPrivacy != "" && len(usPrivacy) >= 4 {
+			// Format: "1YNN" where position 2 is opt-out flag
+			ccpaData = &analytics.CCPAData{
+				Applies:   true,
+				OptOut:    usPrivacy[2:3] == "Y",  // Position 2 (0-indexed)
+				USPrivacy: usPrivacy,
+			}
 		}
 	}
 
@@ -2018,7 +2057,7 @@ func (e *Exchange) buildAuctionObject(
 		GDPR:             gdprData,
 		CCPA:             ccpaData,
 		COPPA:            req.BidRequest.Regs != nil && req.BidRequest.Regs.COPPA == 1,
-		ConsentOK:        true, // TODO: Check actual consent status
+		ConsentOK:        e.checkConsentOK(ctx),
 		ValidationErrors: []analytics.ValidationError{},
 		RequestErrors:    []string{},
 		BidderErrors:     extractBidderErrors(resp.DebugInfo),
@@ -2043,6 +2082,23 @@ func extractBidderErrors(debug *DebugInfo) map[string][]string {
 		return nil
 	}
 	return debug.Errors
+}
+
+// checkConsentOK determines if consent is valid based on privacy context
+func (e *Exchange) checkConsentOK(ctx context.Context) bool {
+	// Check GDPR consent
+	if middleware.GDPRApplies(ctx) {
+		if !middleware.GDPRConsentValidated(ctx) {
+			return false
+		}
+	}
+
+	// Check CCPA opt-out
+	if middleware.CCPAOptOut(ctx) {
+		return false
+	}
+
+	return true
 }
 
 // callBiddersWithFPD calls all selected bidders in parallel with FPD support
@@ -2072,7 +2128,7 @@ func (e *Exchange) callBiddersWithFPD(ctx context.Context, req *openrtb.BidReque
 			result := &BidderResult{
 				BidderCode: bidderCode,
 				Errors:     []error{fmt.Errorf("circuit breaker open")},
-				TimedOut:   true, // Treat as timeout
+				TimedOut:   false, // NOT a timeout - circuit breaker state
 			}
 			results.Store(bidderCode, result)
 
@@ -2252,7 +2308,11 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 		clone.Imp = make([]openrtb.Imp, impCount)
 		for i := 0; i < impCount; i++ {
 			clone.Imp[i] = req.Imp[i] // Shallow copy of Imp struct
-			clone.Imp[i].BidFloorCur = e.config.DefaultCurrency
+
+			// Only set BidFloorCur if not already set (preserve original currency)
+			if clone.Imp[i].BidFloorCur == "" {
+				clone.Imp[i].BidFloorCur = e.config.DefaultCurrency
+			}
 
 			// Deep copy pointer fields to prevent data corruption (CVE-2026-XXXX)
 			if req.Imp[i].Banner != nil {
@@ -2312,7 +2372,66 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 		_ = e.fpdProcessor.ApplyFPDToRequest(&clone, bidderCode, fpdData) //nolint:errcheck
 	}
 
+	// Augment supply chain with platform and bidder nodes
+	e.augmentSChain(&clone, bidderCode)
+
 	return &clone
+}
+
+// augmentSChain augments the supply chain with platform and bidder nodes
+// per OpenRTB 2.5 section 3.2.2 (Supply Chain Object)
+func (e *Exchange) augmentSChain(req *openrtb.BidRequest, bidderCode string) {
+	// Ensure Source exists
+	if req.Source == nil {
+		req.Source = &openrtb.Source{}
+	}
+
+	// Move SChain from source.ext if present (legacy location)
+	if req.Source.SChain == nil && req.Source.Ext != nil {
+		var sourceExt struct {
+			SChain *openrtb.SupplyChain `json:"schain"`
+		}
+		if err := json.Unmarshal(req.Source.Ext, &sourceExt); err == nil && sourceExt.SChain != nil {
+			req.Source.SChain = sourceExt.SChain
+			// Note: We don't remove from ext to maintain backward compatibility
+		}
+	}
+
+	// Create SChain if missing
+	if req.Source.SChain == nil {
+		req.Source.SChain = &openrtb.SupplyChain{
+			Complete: 1, // We know the complete chain
+			Ver:      "1.0",
+			Nodes:    []openrtb.SupplyChainNode{},
+		}
+	}
+
+	// Append platform node if not already present
+	platformASI := "thenexusengine.com"
+	platformSID := "tne-platform" // Platform seller ID
+
+	// Check if platform node already exists (avoid duplicates)
+	hasPlatformNode := false
+	for _, node := range req.Source.SChain.Nodes {
+		if node.ASI == platformASI {
+			hasPlatformNode = true
+			break
+		}
+	}
+
+	if !hasPlatformNode {
+		platformNode := openrtb.SupplyChainNode{
+			ASI: platformASI,
+			SID: platformSID,
+			HP:  1, // We are a direct seller (not reseller)
+			RID: req.ID,
+		}
+		req.Source.SChain.Nodes = append(req.Source.SChain.Nodes, platformNode)
+	}
+
+	// Optionally append bidder node (if bidder is acting as intermediary)
+	// For now, we don't add bidder nodes as they receive the request directly
+	// This could be configured per-bidder if needed
 }
 
 // deepCloneRequest creates a deep copy of the BidRequest to avoid race conditions
@@ -2514,6 +2633,32 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 		Selected:   true,
 	}
 
+	// Execute per-bidder request hooks (BEFORE adapter)
+	// Hook execution order is critical:
+	// 1. Identity Gating - sets user.id from eids (only if consent permits)
+	// 2. SChain Augmentation - appends platform node to supply chain
+	hookExecutor := hooks.NewHookExecutor()
+	hookExecutor.RegisterBidderRequestHook(hooks.NewIdentityGatingHook())
+
+	// Get account ID from request for schain
+	// Extract from site.publisher.name or default to request ID
+	accountID := req.ID
+	if req.Site != nil && req.Site.Publisher != nil && req.Site.Publisher.Name != "" {
+		accountID = req.Site.Publisher.Name
+	}
+	hookExecutor.RegisterBidderRequestHook(hooks.NewSChainAugmentationHook("thenexusengine.com", accountID))
+
+	if err := hookExecutor.ExecuteBidderRequestHooks(ctx, req, bidderCode); err != nil {
+		logger.Log.Error().
+			Err(err).
+			Str("bidder", bidderCode).
+			Str("request_id", req.ID).
+			Msg("❌ Bidder request hook failed")
+		result.Errors = append(result.Errors, err)
+		result.Latency = time.Since(start)
+		return result
+	}
+
 	// Build requests
 	extraInfo := &adapters.ExtraRequestInfo{
 		BidderCoreName: bidderCode,
@@ -2626,6 +2771,47 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 					Msg("bidder MakeBids error")
 			}
 			result.Errors = append(result.Errors, errs...)
+		}
+
+		// Execute bidder response hook (AFTER MakeBids, BEFORE validation)
+		// This normalizes and validates the bid response
+		if bidderResp != nil {
+			// Convert BidderResponse to OpenRTB BidResponse for hook
+			ortbResp := &openrtb.BidResponse{
+				ID:  bidderResp.ResponseID,
+				Cur: bidderResp.Currency,
+			}
+
+			// Build SeatBid array from TypedBids
+			if len(bidderResp.Bids) > 0 {
+				seatBid := openrtb.SeatBid{
+					Bid: make([]openrtb.Bid, 0, len(bidderResp.Bids)),
+				}
+				for _, typedBid := range bidderResp.Bids {
+					if typedBid != nil && typedBid.Bid != nil {
+						seatBid.Bid = append(seatBid.Bid, *typedBid.Bid)
+					}
+				}
+				ortbResp.SeatBid = []openrtb.SeatBid{seatBid}
+			}
+
+			// Execute response normalization hook
+			responseHookExecutor := hooks.NewHookExecutor()
+			responseHookExecutor.RegisterBidderResponseHook(hooks.NewResponseNormalizationHook())
+
+			if err := responseHookExecutor.ExecuteBidderResponseHooks(ctx, req, ortbResp, bidderCode); err != nil {
+				logger.Log.Error().
+					Err(err).
+					Str("bidder", bidderCode).
+					Str("request_id", req.ID).
+					Msg("❌ Bidder response hook failed - rejecting bids")
+				result.Errors = append(result.Errors, err)
+				continue // Skip this response
+			}
+
+			// Update bidderResp with normalized values
+			bidderResp.ResponseID = ortbResp.ID
+			bidderResp.Currency = ortbResp.Cur
 		}
 
 		if bidderResp != nil {
@@ -2762,6 +2948,86 @@ func (e *Exchange) buildEmptyResponse(req *openrtb.BidRequest, nbr openrtb.NoBid
 		SeatBid: []openrtb.SeatBid{},
 		Cur:     e.config.DefaultCurrency,
 		NBR:     int(nbr),
+	}
+}
+
+// applyMultiformatSelection applies multiformat bid selection logic
+// For impressions that support multiple formats, selects the best bid
+func (e *Exchange) applyMultiformatSelection(
+	bidRequest *openrtb.BidRequest,
+	bidsByImp map[string][]ValidatedBid,
+) map[string][]ValidatedBid {
+	// Build impression map for quick lookups
+	impMap := make(map[string]*openrtb.Imp)
+	for i := range bidRequest.Imp {
+		impMap[bidRequest.Imp[i].ID] = &bidRequest.Imp[i]
+	}
+
+	result := make(map[string][]ValidatedBid)
+
+	for impID, bids := range bidsByImp {
+		imp, exists := impMap[impID]
+		if !exists || len(bids) == 0 {
+			result[impID] = bids
+			continue
+		}
+
+		// Check if this is a multiformat impression
+		if !e.mfProcessor.IsMultiformat(imp) {
+			// Not multiformat, keep all bids
+			result[impID] = bids
+			continue
+		}
+
+		// Convert ValidatedBids to BidCandidates
+		candidates := make([]*BidCandidate, 0, len(bids))
+		for i := range bids {
+			vb := &bids[i]
+			mediaType := e.detectBidMediaType(vb.Bid)
+			candidate := NewBidCandidate(vb.Bid.Bid, mediaType, vb.BidderCode)
+			candidates = append(candidates, candidate)
+		}
+
+		// Get preferred media type from impression
+		preferredType := e.mfProcessor.GetPreferredMediaType(imp)
+
+		// Select best bid using multiformat logic
+		selectedCandidate := e.mfProcessor.SelectBestBid(imp, candidates, preferredType)
+
+		if selectedCandidate != nil {
+			// Find the original ValidatedBid that matches the selected candidate
+			for i := range bids {
+				if bids[i].Bid.Bid.ID == selectedCandidate.Bid.ID {
+					result[impID] = []ValidatedBid{bids[i]}
+					break
+				}
+			}
+		} else {
+			// No bid selected, keep original list
+			result[impID] = bids
+		}
+	}
+
+	return result
+}
+
+// detectBidMediaType detects the media type of a bid
+func (e *Exchange) detectBidMediaType(bid *adapters.TypedBid) string {
+	if bid == nil {
+		return ""
+	}
+
+	switch bid.BidType {
+	case adapters.BidTypeBanner:
+		return "banner"
+	case adapters.BidTypeVideo:
+		return "video"
+	case adapters.BidTypeAudio:
+		return "audio"
+	case adapters.BidTypeNative:
+		return "native"
+	default:
+		return ""
 	}
 }
 
