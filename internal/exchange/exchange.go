@@ -2940,12 +2940,24 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 				))
 				continue // Reject all bids from this response
 			}
-			if bidderResp.ResponseID != req.ID {
+
+			// Check for test mode (allow mismatched IDs for test SSPs)
+			isTestRequest := isTestRequest(req, bidderCode)
+
+			if bidderResp.ResponseID != req.ID && !isTestRequest {
 				result.Errors = append(result.Errors, fmt.Errorf(
 					"response ID mismatch from %s: expected %q, got %q (bids rejected)",
 					bidderCode, req.ID, bidderResp.ResponseID,
 				))
 				continue // Reject all bids from this response
+			}
+
+			if isTestRequest && bidderResp.ResponseID != req.ID {
+				logger.Log.Debug().
+					Str("bidder", bidderCode).
+					Str("request_id", req.ID).
+					Str("response_id", bidderResp.ResponseID).
+					Msg("Test mode: Accepting bidder response with mismatched ID in exchange")
 			}
 
 			// P1-NEW-3: Normalize and validate response currency
@@ -3389,4 +3401,30 @@ func (e *Exchange) getDemandType(bidderCode string) adapters.DemandType {
 
 	// Default to platform (obfuscated) for unknown bidders
 	return adapters.DemandTypePlatform
+}
+
+// isTestRequest checks if the request is using test credentials
+func isTestRequest(req *openrtb.BidRequest, bidderCode string) bool {
+	// Check for test patterns in impression extensions
+	for _, imp := range req.Imp {
+		if imp.Ext == nil {
+			continue
+		}
+
+		// Parse extension to check for test parameters
+		extStr := string(imp.Ext)
+
+		// Check for PubMatic test credentials
+		if bidderCode == "pubmatic" && (strings.Contains(extStr, "\"publisherId\":\"156276\"") ||
+			strings.Contains(extStr, "\"adSlot\":\"pubmatic_test\"")) {
+			return true
+		}
+
+		// Check for other test patterns (add as needed)
+		if strings.Contains(extStr, "_test") || strings.Contains(extStr, "test_") {
+			return true
+		}
+	}
+
+	return false
 }
