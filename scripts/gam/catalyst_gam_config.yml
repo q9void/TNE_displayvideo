@@ -30,7 +30,7 @@ advertiser:
 # GAM orders group line items. Max 450 line items per order.
 # The tool auto-creates multiple orders if needed (e.g., dense granularity).
 order:
-  name: "Catalyst S2S HB - {{ media_type }} - {{ time }} {{ cpm_min }}-{{ cpm_max }}"
+  name: "Catalyst S2S HB - {{ media_type }} - {{ cpm_min }}-{{ cpm_max }}"
 
 # -----------------------------------------------------------------------------
 # Line Item
@@ -161,6 +161,6 @@ creative:
 # When using --single-order, the tool uses the base keys (hb_pb, hb_cache_id).
 # We override them to point to our Catalyst-specific keys.
 bidder_key_map:
-  thenexusengine:
+  rubicon:
     hb_pb: hb_pb_catalyst
     hb_bidder: hb_bidder_catalyst

@@ -180,7 +180,7 @@ def find_key_by_name(targeting_service, key_name):
     from googleads import ad_manager
 
     statement = (
-        ad_manager.StatementBuilder(version="v202408")
+        ad_manager.StatementBuilder(version="v202502")
         .Where("name = :name")
         .WithBindVariable("name", key_name)
     )
@@ -189,7 +189,7 @@ def find_key_by_name(targeting_service, key_name):
         statement.ToStatement()
     )
 
-    results = getattr(response, "results", None) or response.get("results", [])
+    results = getattr(response, "results", [])
     if results and len(results) > 0:
         return results[0]
     return None
@@ -205,7 +205,7 @@ def get_existing_values(targeting_service, key_id):
 
     while True:
         statement = (
-            ad_manager.StatementBuilder(version="v202408")
+            ad_manager.StatementBuilder(version="v202502")
             .Where("customTargetingKeyId = :keyId AND status = 'ACTIVE'")
             .WithBindVariable("keyId", key_id)
             .Limit(page_size)
@@ -216,7 +216,7 @@ def get_existing_values(targeting_service, key_id):
             statement.ToStatement()
         )
 
-        results = getattr(response, "results", None) or response.get("results", [])
+        results = getattr(response, "results", [])
         if not results:
             break
 
@@ -395,7 +395,7 @@ def main():
     try:
         client = get_gam_client(args.key_file, args.network_code)
         targeting_service = client.GetService(
-            "CustomTargetingService", version="v202408"
+            "CustomTargetingService", version="v202502"
         )
     except ImportError:
         log.error("Missing dependency: pip install googleads")

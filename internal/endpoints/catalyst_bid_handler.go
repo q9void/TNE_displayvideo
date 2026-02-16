@@ -410,11 +410,24 @@ func normalizeSlotPattern(domain, divID, adUnitPath string) []string {
 		simpleDivID := strings.TrimPrefix(divID, "mai-ad-")
 		patterns = append(patterns, fmt.Sprintf("%s/%s", domain, simpleDivID))
 
-		// 4. Try without "-wide" or "-narrow" suffixes
-		for _, suffix := range []string{"-wide", "-narrow", "-tablet"} {
-			if strings.HasSuffix(simpleDivID, suffix) {
-				baseDivID := strings.TrimSuffix(simpleDivID, suffix)
-				patterns = append(patterns, fmt.Sprintf("%s/%s", domain, baseDivID))
+		// 4. Progressively remove compound suffixes
+		// Examples: "leaderboard-wide-adhesion" → "leaderboard-wide" → "leaderboard"
+		//           "rectangle-medium" → "rectangle"
+		suffixes := []string{"-wide", "-narrow", "-tablet", "-adhesion", "-medium", "-large", "-small"}
+
+		current := simpleDivID
+		for {
+			removed := false
+			for _, suffix := range suffixes {
+				if strings.HasSuffix(current, suffix) {
+					current = strings.TrimSuffix(current, suffix)
+					patterns = append(patterns, fmt.Sprintf("%s/%s", domain, current))
+					removed = true
+					break // Try removing another suffix from the new current
+				}
+			}
+			if !removed {
+				break // No more suffixes to remove
 			}
 		}
 	}
