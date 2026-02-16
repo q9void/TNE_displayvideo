@@ -2934,6 +2934,12 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 			// HIGH FIX #1: Validate BidResponse.ID is present and matches BidRequest.ID
 			// OpenRTB 2.5 Section 4.2.1: BidResponse.id is REQUIRED and must echo BidRequest.id
 			if bidderResp.ResponseID == "" {
+				bidCount := len(bidderResp.Bids)
+				logger.Log.Error().
+					Str("bidder", bidderCode).
+					Str("request_id", req.ID).
+					Int("bids_rejected", bidCount).
+					Msg("❌ Response missing required ID - rejecting all bids (OpenRTB 2.5 §4.2.1)")
 				result.Errors = append(result.Errors, fmt.Errorf(
 					"missing required response ID from %s (OpenRTB 2.5 section 4.2.1)",
 					bidderCode,
@@ -2945,6 +2951,13 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 			isTestRequest := isTestRequest(req, bidderCode)
 
 			if bidderResp.ResponseID != req.ID && !isTestRequest {
+				bidCount := len(bidderResp.Bids)
+				logger.Log.Error().
+					Str("bidder", bidderCode).
+					Str("request_id", req.ID).
+					Str("response_id", bidderResp.ResponseID).
+					Int("bids_rejected", bidCount).
+					Msg("❌ Response ID mismatch - rejecting all bids (OpenRTB 2.5 §4.2.1)")
 				result.Errors = append(result.Errors, fmt.Errorf(
 					"response ID mismatch from %s: expected %q, got %q (bids rejected)",
 					bidderCode, req.ID, bidderResp.ResponseID,
@@ -2957,6 +2970,7 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 					Str("bidder", bidderCode).
 					Str("request_id", req.ID).
 					Str("response_id", bidderResp.ResponseID).
+					Int("bids_accepted", len(bidderResp.Bids)).
 					Msg("Test mode: Accepting bidder response with mismatched ID in exchange")
 			}
 
@@ -2978,6 +2992,14 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 					}
 				}
 				if !currencyAllowed {
+					bidCount := len(bidderResp.Bids)
+					logger.Log.Error().
+						Str("bidder", bidderCode).
+						Str("request_id", req.ID).
+						Str("response_currency", responseCurrency).
+						Strs("allowed_currencies", req.Cur).
+						Int("bids_rejected", bidCount).
+						Msg("❌ Response currency not in request allowlist - rejecting all bids")
 					result.Errors = append(result.Errors, fmt.Errorf(
 						"currency %s from %s not in request allowlist %v (bids rejected)",
 						responseCurrency, bidderCode, req.Cur,
@@ -2995,6 +3017,14 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 			// Convert currency if needed
 			if responseCurrency != exchangeCurrency {
 				if e.currencyConverter == nil {
+					bidCount := len(bidderResp.Bids)
+					logger.Log.Error().
+						Str("bidder", bidderCode).
+						Str("request_id", req.ID).
+						Str("response_currency", responseCurrency).
+						Str("exchange_currency", exchangeCurrency).
+						Int("bids_rejected", bidCount).
+						Msg("❌ Currency converter not available - rejecting all bids")
 					// No converter available - reject bids
 					result.Errors = append(result.Errors, fmt.Errorf(
 						"currency mismatch from %s: expected %s, got %s (no converter available, bids rejected)",
