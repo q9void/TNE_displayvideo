@@ -2,13 +2,25 @@
 
 This directory contains comprehensive integration guides for publishers to connect with the TNE Catalyst ad exchange platform.
 
-## Available Integration Methods
+## Publisher Integration (Start Here)
+
+**[Publisher Integration Guide](./PUBLISHER_INTEGRATION_GUIDE.md)** — Two methods to get running:
+
+| Method | What It Is | Best For |
+|--------|-----------|----------|
+| **Method 1: SDK + GAM** | Drop in our SDK, we run the auction, bids flow into GAM | Publishers who want a managed solution with minimal code |
+| **Method 2: Prebid.js S2S** | Point your existing Prebid.js at our Prebid Server endpoint | Publishers already running Prebid.js who want server-side speed |
+
+Both support managed demand (we handle SSP relationships) or bring-your-own seats (use your existing SSP credentials).
+
+## All Integration Methods
 
 | Method | Status | Difficulty | Timeline | Best For |
 |--------|--------|-----------|----------|----------|
+| [SDK + GAM](./PUBLISHER_INTEGRATION_GUIDE.md#method-1-catalyst-sdk--google-ad-manager) | ✅ Production Ready | Easy | Immediate | Display publishers using GAM |
+| [Prebid.js S2S](./PUBLISHER_INTEGRATION_GUIDE.md#method-2-prebidjs-server-to-server) | ✅ Production Ready | Easy | Immediate | Publishers already on Prebid.js |
 | [OpenRTB Direct](#openrtb-direct) | ✅ Production Ready | Medium | Immediate | DSPs, SSPs, Direct integration |
 | [Video VAST](#video-vast) | ✅ Production Ready | Easy | Immediate | Video publishers, CTV/OTT platforms |
-| [Web via Prebid](#web-prebid) | ⚠️ Needs Examples | Easy | 1-2 weeks | Display publishers using Prebid.js |
 | [Video via Prebid](#video-prebid) | ⚠️ Needs Examples | Medium | 1-2 weeks | Video publishers using Prebid.js |
 | [In-App SDK](#in-app-sdk) | ❌ SDK Missing | Hard | 4-6 weeks | Mobile app developers |
 
