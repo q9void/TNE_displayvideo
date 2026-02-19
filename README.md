@@ -84,8 +84,8 @@ Catalyst is the server-side auction engine that powers The Nexus Engine's transp
 
 ```bash
 # Clone the repository
-git clone https://github.com/thenexusengine/tne_springwire.git
-cd tne-catalyst
+git clone git@github.com:StreetsDigital/TNE_displayvideo.git
+cd TNE_displayvideo
 
 # Install dependencies
 go mod download
@@ -105,9 +105,9 @@ The server will start on `http://localhost:8000`.
 
 For production deployment to **ads.thenexusengine.com**:
 
-- **[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)** - Quick start guide (~30 minutes)
+- **[DEPLOYMENT_GUIDE.md](docs/deployment/DEPLOYMENT_GUIDE.md)** - Quick start guide (~30 minutes)
 - **[deployment/README.md](deployment/README.md)** - Comprehensive deployment documentation
-- **[deployment/DEPLOYMENT-CHECKLIST.md](deployment/DEPLOYMENT-CHECKLIST.md)** - Pre-deployment checklist
+- **[DEPLOYMENT-CHECKLIST.md](docs/deployment/DEPLOYMENT-CHECKLIST.md)** - Pre-deployment checklist
 
 All deployment is via Docker Compose on ads.thenexusengine.com.
 
@@ -170,7 +170,7 @@ All deployment is via Docker Compose on ads.thenexusengine.com.
 | `IVT_BLOCKED_COUNTRIES` | string | `""` | Comma-separated country codes (blacklist) |
 | `IVT_REQUIRE_REFERER` | bool | `false` | Strict mode - require referer header |
 
-**Note**: `IVT_CHECK_GEO=true` requires MaxMind GeoLite2 database. See [GEOIP_SETUP.md](internal/middleware/GEOIP_SETUP.md) for setup instructions.
+**Note**: `IVT_CHECK_GEO=true` requires MaxMind GeoLite2 database. See [GEOIP_SETUP.md](docs/development/GEOIP_SETUP.md) for setup instructions.
 
 #### Database Configuration
 
@@ -178,9 +178,9 @@ All deployment is via Docker Compose on ads.thenexusengine.com.
 |----------|------|---------|-------------|
 | `DB_HOST` | string | `"localhost"` | PostgreSQL hostname |
 | `DB_PORT` | string | `"5432"` | PostgreSQL port |
-| `DB_USER` | string | `"catalyst"` | PostgreSQL username |
+| `DB_USER` | string | `"catalyst_prod"` | PostgreSQL username |
 | `DB_PASSWORD` | string | `""` | PostgreSQL password |
-| `DB_NAME` | string | `"catalyst"` | PostgreSQL database name |
+| `DB_NAME` | string | `"catalyst_production"` | PostgreSQL database name |
 | `DB_SSL_MODE` | string | `"disable"` | PostgreSQL SSL mode (disable, require, verify-full) |
 | `DB_MAX_OPEN_CONNS` | int | `25` | Maximum open database connections |
 | `DB_MAX_IDLE_CONNS` | int | `5` | Maximum idle database connections |
@@ -197,7 +197,7 @@ All deployment is via Docker Compose on ads.thenexusengine.com.
 | `PBS_PRIVACY_STRICT_MODE` | bool | `true` | Reject invalid consent (false = strip PII) |
 | `PBS_DISABLE_GDPR_ENFORCEMENT` | bool | `false` | Disable GDPR for testing only |
 
-**Note**: Privacy middleware checks both `device.geo` and `user.geo` for regulation enforcement (audit fix Jan 2026). See [GEO-CONSENT-GUIDE.md](GEO-CONSENT-GUIDE.md) for details.
+**Note**: Privacy middleware checks both `device.geo` and `user.geo` for regulation enforcement (audit fix Jan 2026). See [GEO-CONSENT-GUIDE.md](docs/privacy/GEO-CONSENT-GUIDE.md) for details.
 
 #### Publisher Authentication
 
@@ -320,13 +320,13 @@ docker run -p 80:80 \
 - `ANOMALY_THRESHOLD`: Score threshold for blocking (default: 5)
 - `MODSEC_AUDIT_LOG`: Full audit log path for investigation
 
-**See full documentation**: [deployment/WAF-README.md](deployment/WAF-README.md)
+**See full documentation**: [WAF-README.md](docs/deployment/readmes/WAF-README.md)
 
 ---
 
 ### Invalid Traffic (IVT) Detection
 
-Catalyst includes built-in fraud detection with configurable blocking. See full documentation: [docs/ivt-detection.md](docs/ivt-detection.md)
+Catalyst includes built-in fraud detection with configurable blocking.
 
 **Key Features:**
 - User agent analysis (bots, scrapers, headless browsers)
@@ -457,7 +457,7 @@ async function addPublisher(id, domains) {
 }
 ```
 
-See **[PUBLISHER-CONFIG-GUIDE.md](PUBLISHER-CONFIG-GUIDE.md)** for complete documentation.
+See **[PUBLISHER-CONFIG-GUIDE.md](docs/guides/PUBLISHER-CONFIG-GUIDE.md)** for complete documentation.
 
 ---
 
@@ -567,7 +567,7 @@ open tests/catalyst_sdk_test.html
 **Documentation:**
 - [Integration Specification](docs/integrations/BB_NEXUS-ENGINE-INTEGRATION-SPEC.md)
 - [Deployment Guide](docs/integrations/CATALYST_DEPLOYMENT_GUIDE.md)
-- Test Account: `mai-staging-test` (staging)
+- Test Account: `12345` (BizBudding / TotalProSports dev)
 
 ---
 
@@ -610,7 +610,7 @@ curl -X POST https://ads.thenexusengine.com/openrtb2/auction \
 - `examples/multi-bidder-request.json` - Multiple bidders (Rubicon, AppNexus, PubMatic)
 - `examples/test-rubicon-params.sh` - Automated test script
 
-See **[BIDDER-PARAMS-GUIDE.md](BIDDER-PARAMS-GUIDE.md)** for complete documentation on all bidders.
+See **[BIDDER-PARAMS-GUIDE.md](docs/guides/BIDDER-PARAMS-GUIDE.md)** for complete documentation on all bidders.
 
 ### Intelligent Demand Router (IDR) Integration
 
@@ -702,8 +702,8 @@ PBS_DISABLE_GDPR_ENFORCEMENT=true  # ⚠️ Testing only!
 
 #### Compliance Documentation
 
-- **[GEO-CONSENT-GUIDE.md](GEO-CONSENT-GUIDE.md)** - Geographic enforcement rules
-- **[TCF-VENDOR-CONSENT-GUIDE.md](TCF-VENDOR-CONSENT-GUIDE.md)** - TCF 2.0 implementation
+- **[GEO-CONSENT-GUIDE.md](docs/privacy/GEO-CONSENT-GUIDE.md)** - Geographic enforcement rules
+- **[TCF-VENDOR-CONSENT-GUIDE.md](docs/privacy/TCF-VENDOR-CONSENT-GUIDE.md)** - TCF 2.0 implementation
 
 #### Recent Improvements (Audit Fixes - Jan 2026)
 
@@ -869,17 +869,33 @@ IVT_CHECK_REFERER=false    # Referer validation adds ~1ms
 
 **View Active Publishers:**
 ```bash
-redis-cli HGETALL tne_catalyst:publishers
+docker exec catalyst-postgres psql -U catalyst_prod -d catalyst_production \
+  -c "SELECT account_id, name, status FROM accounts;"
 ```
 
-**Add Publisher:**
+**View Publisher Domains:**
 ```bash
-redis-cli HSET tne_catalyst:publishers pub-123 "example.com|*.example.com"
+docker exec catalyst-postgres psql -U catalyst_prod -d catalyst_production \
+  -c "SELECT p.domain, p.status FROM publishers_new p JOIN accounts a ON a.id = p.account_id WHERE a.account_id = '12345';"
 ```
 
-**Remove Publisher:**
+**View Slot Bidder Configs for a Publisher:**
 ```bash
-redis-cli HDEL tne_catalyst:publishers pub-123
+docker exec catalyst-postgres psql -U catalyst_prod -d catalyst_production \
+  -c "SELECT s.slot_pattern, s.slot_name, COUNT(sbc.id) as bidder_count FROM ad_slots s LEFT JOIN slot_bidder_configs sbc ON s.id = sbc.ad_slot_id JOIN publishers_new p ON s.publisher_id = p.id JOIN accounts a ON a.id = p.account_id WHERE a.account_id = '12345' GROUP BY s.slot_pattern, s.slot_name;"
+```
+
+**Add a Publisher via Script:**
+```bash
+# Deploy a publisher configuration
+./deployment/deploy_publisher_12345.sh
+```
+
+**Add Publisher via REST API:**
+```bash
+curl -X POST https://ads.thenexusengine.com/admin/publishers \
+  -H "Content-Type: application/json" \
+  -d '{"id":"pub123","allowed_domains":"example.com|*.example.com"}'
 ```
 
 **Check IVT Stats:**
@@ -888,9 +904,9 @@ grep "IVT detected" /var/log/catalyst.log | wc -l
 grep "Request blocked" /var/log/catalyst.log | wc -l
 ```
 
-**Restart Without Downtime (Fly.io):**
+**Restart Without Downtime:**
 ```bash
-fly deploy --strategy rolling
+ssh catalyst "cd /home/ec2-user/catalyst && docker compose up -d --no-deps catalyst-server"
 ```
 
 ### Troubleshooting
@@ -925,18 +941,31 @@ fly deploy --strategy rolling
 ### Project Structure
 
 ```
-tne-catalyst/
+TNE_displayvideo/
 ├── cmd/
 │   └── server/          # Main server entry point
 ├── internal/
-│   ├── api/             # HTTP handlers
-│   ├── auction/         # Auction core logic
+│   ├── endpoints/       # HTTP handlers (bid, cookie sync, admin)
+│   ├── exchange/        # Auction core logic
+│   ├── adapters/        # Bidder adapters (25+)
 │   ├── middleware/      # Auth, IVT, logging
-│   ├── adapters/        # Bidder adapters
+│   ├── storage/         # PostgreSQL & Redis clients
+│   ├── privacy/         # GDPR/CCPA/COPPA enforcement
+│   ├── hooks/           # PBS hook architecture
+│   ├── usersync/        # Cookie sync logic
+│   ├── fpd/             # First-party data processing
+│   ├── analytics/       # Metrics and event tracking
+│   ├── openrtb/         # OpenRTB 2.5 models
+│   ├── geo/             # Geographic detection
+│   ├── metrics/         # Prometheus metrics
+│   └── validation/      # Request validation
+├── pkg/
 │   ├── idr/             # IDR client
-│   └── storage/         # Redis, PostgreSQL
-├── scripts/             # Test scripts
+│   └── currency/        # Currency conversion
+├── scripts/             # Setup and test scripts
 ├── docs/                # Documentation
+├── deployment/          # Docker Compose, migrations, env files
+├── config/              # Publisher bidder mappings
 ├── go.mod
 └── Dockerfile
 ```
@@ -945,7 +974,9 @@ tne-catalyst/
 
 > **Note**: As of January 2026, the system uses **static bidders only**. Dynamic bidder loading from PostgreSQL was removed for performance and security.
 
-**Current Static Bidders**: `rubicon`, `pubmatic`, `appnexus`, `demo`
+**Active Bidders**: `rubicon`, `pubmatic`, `sovrn`, `triplelift`, `kargo`
+
+**All Available Adapters**: `rubicon`, `pubmatic`, `sovrn`, `triplelift`, `kargo`, `appnexus`, `ix`, `criteo`, `medianet`, `33across`, `adform`, `beachfront`, `conversant`, `gumgum`, `improvedigital`, `onetag`, `openx`, `outbrain`, `sharethrough`, `smartadserver`, `spotx`, `taboola`, `teads`, `unruly`, `demo`
 
 To add a new bidder, create a static adapter and register it in the exchange:
 
@@ -978,7 +1009,7 @@ func (e *Exchange) initializeStaticBidders() {
 
 3. **Publishers configure params** in their bidder_params JSONB field
 
-For detailed migration guide, see [BIDDER-MANAGEMENT.md](deployment/BIDDER-MANAGEMENT.md)
+For detailed migration guide, see [BIDDER-MANAGEMENT.md](docs/guides/BIDDER-MANAGEMENT.md)
 
 ### Running Tests
 
@@ -1004,11 +1035,13 @@ go run scripts/test_ivt.go
 ## Support
 
 ### Documentation
-- **IVT Detection Guide**: [docs/ivt-detection.md](docs/ivt-detection.md)
 - **OpenRTB Spec**: https://www.iab.com/guidelines/real-time-bidding-rtb-project/
+- **Deployment Guide**: [docs/deployment/DEPLOYMENT_GUIDE.md](docs/deployment/DEPLOYMENT_GUIDE.md)
+- **Publisher Config**: [docs/guides/PUBLISHER-CONFIG-GUIDE.md](docs/guides/PUBLISHER-CONFIG-GUIDE.md)
+- **Bidder Params**: [docs/guides/BIDDER-PARAMS-GUIDE.md](docs/guides/BIDDER-PARAMS-GUIDE.md)
 
 ### Community
-- **GitHub Issues**: https://github.com/thenexusengine/tne_springwire/issues
+- **GitHub Issues**: https://github.com/StreetsDigital/TNE_displayvideo/issues
 
 ### Related Projects
 - **TNE Engine** - Publisher-facing SDK
