@@ -1,0 +1,4 @@
+# GAM credentials - NEVER commit these
+gam_creds.json
+*.json
+!package.json

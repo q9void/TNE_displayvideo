@@ -34,6 +34,7 @@ func TestMakeRequests(t *testing.T) {
 					W: 300,
 					H: 250,
 				},
+				Ext: json.RawMessage(`{"triplelift":{"inventoryCode":"test-inventory-123","floor":0.50}}`),
 			},
 		},
 		Site: &openrtb.Site{
@@ -58,7 +59,19 @@ func TestMakeRequests(t *testing.T) {
 
 	var parsed openrtb.BidRequest
 	if err := json.Unmarshal(req.Body, &parsed); err != nil {
-		t.Errorf("Request body is not valid JSON: %v", err)
+		t.Fatalf("Request body is not valid JSON: %v", err)
+	}
+
+	// Verify TagID was set from inventoryCode
+	if len(parsed.Imp) != 1 {
+		t.Fatalf("Expected 1 impression, got %d", len(parsed.Imp))
+	}
+	if parsed.Imp[0].TagID != "test-inventory-123" {
+		t.Errorf("Expected TagID 'test-inventory-123', got '%s'", parsed.Imp[0].TagID)
+	}
+	// Verify floor was set
+	if parsed.Imp[0].BidFloor != 0.50 {
+		t.Errorf("Expected BidFloor 0.50, got %f", parsed.Imp[0].BidFloor)
 	}
 }
 

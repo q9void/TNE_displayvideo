@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"strconv"
 	"strings"
@@ -288,6 +289,11 @@ func (h *AdTagHandler) writeJavaScriptResponse(w http.ResponseWriter, params *Ad
 	// Render ad creative
 	creative := sanitizeHTML(bid.AdM)
 
+	// Sanitize all user-controlled parameters to prevent XSS
+	safeDivID := sanitizeForJS(params.DivID)
+	safeBidID := sanitizeForJS(bid.ID)
+	safePlacementID := sanitizeForJS(params.PlacementID)
+
 	script := fmt.Sprintf(`(function() {
   var container = document.getElementById('%s');
   if (container) {
@@ -297,7 +303,7 @@ func (h *AdTagHandler) writeJavaScriptResponse(w http.ResponseWriter, params *Ad
       tne.trackImpression('%s', '%s');
     }
   }
-})();`, params.DivID, toJSONString(creative), bid.ID, params.PlacementID)
+})();`, safeDivID, toJSONString(creative), safeBidID, safePlacementID)
 
 	w.Write([]byte(script))
 }
@@ -374,12 +380,15 @@ func (h *AdTagHandler) writeNoAdResponse(w http.ResponseWriter, divID string) {
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 
+	// Sanitize divID to prevent XSS
+	safeDivID := sanitizeForJS(divID)
+
 	script := fmt.Sprintf(`(function() {
   var container = document.getElementById('%s');
   if (container) {
     container.style.display = 'none';
   }
-})();`, divID)
+})();`, safeDivID)
 
 	w.Write([]byte(script))
 }
@@ -437,11 +446,26 @@ func (h *AdTagHandler) HandleAdTracking(w http.ResponseWriter, r *http.Request) 
 }
 
 // sanitizeHTML sanitizes HTML to prevent XSS
-func sanitizeHTML(html string) string {
+func sanitizeHTML(htmlStr string) string {
 	// Basic sanitization - in production, use a proper HTML sanitizer
-	html = strings.ReplaceAll(html, "<script>", "&lt;script&gt;")
-	html = strings.ReplaceAll(html, "</script>", "&lt;/script&gt;")
-	return html
+	htmlStr = strings.ReplaceAll(htmlStr, "<script>", "&lt;script&gt;")
+	htmlStr = strings.ReplaceAll(htmlStr, "</script>", "&lt;/script&gt;")
+	return htmlStr
+}
+
+// sanitizeForJS sanitizes a string for safe embedding in JavaScript context
+// Prevents XSS attacks via user-controlled parameters in ad tags
+func sanitizeForJS(s string) string {
+	// HTML escape first
+	s = html.EscapeString(s)
+	// Escape quotes and special chars for JavaScript string context
+	s = strings.ReplaceAll(s, "'", "\\'")
+	s = strings.ReplaceAll(s, "\"", "\\\"")
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	s = strings.ReplaceAll(s, "\r", "\\r")
+	s = strings.ReplaceAll(s, "\t", "\\t")
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	return s
 }
 
 // toJSONString converts string to JSON-safe string literal
@@ -460,7 +484,26 @@ func extractDomain(urlStr string) string {
 	urlStr = strings.TrimPrefix(urlStr, "https://")
 	parts := strings.Split(urlStr, "/")
 	if len(parts) > 0 {
-		return strings.Split(parts[0], ":")[0]
+		domain := strings.Split(parts[0], ":")[0]
+		// Strip subdomain (e.g., "dev.totalprosports.com" -> "totalprosports.com")
+		return stripSubdomain(domain)
 	}
 	return ""
+}
+
+// stripSubdomain removes subdomains, keeping only the root domain
+// Examples: "dev.totalprosports.com" -> "totalprosports.com"
+//           "www.example.com" -> "example.com"
+//           "totalprosports.com" -> "totalprosports.com"
+func stripSubdomain(domain string) string {
+	parts := strings.Split(domain, ".")
+
+	// If it's already a root domain (e.g., "com" or "example.com"), return as-is
+	if len(parts) <= 2 {
+		return domain
+	}
+
+	// Return the last two parts (root domain + TLD)
+	// e.g., ["dev", "totalprosports", "com"] -> "totalprosports.com"
+	return strings.Join(parts[len(parts)-2:], ".")
 }

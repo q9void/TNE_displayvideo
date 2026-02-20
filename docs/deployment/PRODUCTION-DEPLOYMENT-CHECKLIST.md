@@ -131,6 +131,28 @@
   grep -A3 "limits:" docker-compose.yml
   ```
 
+- [ ] **SDK caching re-enabled** (nginx config)
+  ```bash
+  # ⚠️ CRITICAL: Remove DEV-ONLY no-cache block before production
+  # Edit nginx/conf.d/catalyst.conf and remove this section:
+  #
+  #   # DEV ONLY: Disable caching for SDK during development
+  #   # TODO PRODUCTION: Remove this block before production deployment
+  #   location ~* /assets/catalyst-sdk.*\.js$ {
+  #       ...
+  #   }
+  #
+  # The SDK should use the default /assets/ caching behavior:
+  #   expires 1h;
+  #   add_header Cache-Control "public, immutable";
+  #
+  # After removing, restart nginx:
+  docker-compose restart nginx
+  # Verify SDK is cached:
+  curl -I https://ads.thenexusengine.com/assets/catalyst-sdk-v1.0.0.js | grep Cache-Control
+  # Should show: Cache-Control: public, immutable
+  ```
+
 ### ✅ Monitoring & Observability
 
 - [ ] **Prometheus configured** and accessible

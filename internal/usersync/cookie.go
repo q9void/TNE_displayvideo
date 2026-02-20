@@ -26,6 +26,7 @@ type ConsentData struct {
 
 // Cookie holds all bidder user IDs and consent data
 type Cookie struct {
+	FPID    string         `json:"fpid,omitempty"`    // First-party identifier
 	UIDs    map[string]UID `json:"uids"`
 	Consent *ConsentData   `json:"consent,omitempty"` // TCF consent data
 	OptOut  bool           `json:"optout,omitempty"`
@@ -119,6 +120,25 @@ func (c *Cookie) HasUID(bidderCode string) bool {
 	return c.GetUID(bidderCode) != ""
 }
 
+// GetFPID returns the first-party identifier
+func (c *Cookie) GetFPID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.FPID
+}
+
+// SetFPID sets the first-party identifier
+func (c *Cookie) SetFPID(fpid string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.FPID = fpid
+}
+
+// HasFPID returns true if FPID is set
+func (c *Cookie) HasFPID() bool {
+	return c.GetFPID() != ""
+}
+
 // SyncCount returns the number of synced bidders
 func (c *Cookie) SyncCount() int {
 	c.mu.RLock()
@@ -141,6 +161,7 @@ func (c *Cookie) SetOptOut(optOut bool) {
 
 	c.OptOut = optOut
 	if optOut {
+		c.FPID = ""
 		c.UIDs = make(map[string]UID)
 	}
 }

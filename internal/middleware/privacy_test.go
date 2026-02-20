@@ -835,67 +835,67 @@ func TestDetectRegulationFromGeo(t *testing.T) {
 		},
 		{
 			"Germany (GDPR)",
-			&openrtb.Geo{Country: "DEU"},
+			&openrtb.Geo{Country: "DE"},
 			RegulationGDPR,
 		},
 		{
 			"France (GDPR)",
-			&openrtb.Geo{Country: "FRA"},
+			&openrtb.Geo{Country: "FR"},
 			RegulationGDPR,
 		},
 		{
 			"United Kingdom (GDPR)",
-			&openrtb.Geo{Country: "GBR"},
+			&openrtb.Geo{Country: "GB"},
 			RegulationGDPR,
 		},
 		{
 			"California (CCPA)",
-			&openrtb.Geo{Country: "USA", Region: "CA"},
+			&openrtb.Geo{Country: "US", Region: "CA"},
 			RegulationCCPA,
 		},
 		{
 			"Virginia (VCDPA)",
-			&openrtb.Geo{Country: "USA", Region: "VA"},
+			&openrtb.Geo{Country: "US", Region: "VA"},
 			RegulationVCDPA,
 		},
 		{
 			"Colorado (CPA)",
-			&openrtb.Geo{Country: "USA", Region: "CO"},
+			&openrtb.Geo{Country: "US", Region: "CO"},
 			RegulationCPA,
 		},
 		{
 			"Connecticut (CTDPA)",
-			&openrtb.Geo{Country: "USA", Region: "CT"},
+			&openrtb.Geo{Country: "US", Region: "CT"},
 			RegulationCTDPA,
 		},
 		{
 			"Utah (UCPA)",
-			&openrtb.Geo{Country: "USA", Region: "UT"},
+			&openrtb.Geo{Country: "US", Region: "UT"},
 			RegulationUCPA,
 		},
 		{
 			"Texas (no regulation)",
-			&openrtb.Geo{Country: "USA", Region: "TX"},
+			&openrtb.Geo{Country: "US", Region: "TX"},
 			RegulationNone,
 		},
 		{
 			"Brazil (LGPD)",
-			&openrtb.Geo{Country: "BRA"},
+			&openrtb.Geo{Country: "BR"},
 			RegulationLGPD,
 		},
 		{
 			"Canada (PIPEDA)",
-			&openrtb.Geo{Country: "CAN"},
+			&openrtb.Geo{Country: "CA"},
 			RegulationPIPEDA,
 		},
 		{
 			"Singapore (PDPA)",
-			&openrtb.Geo{Country: "SGP"},
+			&openrtb.Geo{Country: "SG"},
 			RegulationPDPA,
 		},
 		{
 			"Japan (no regulation)",
-			&openrtb.Geo{Country: "JPN"},
+			&openrtb.Geo{Country: "JP"},
 			RegulationNone,
 		},
 		{
@@ -948,7 +948,7 @@ func TestShouldFilterBidderByGeo_GDPR(t *testing.T) {
 			&openrtb.BidRequest{
 				ID: "test",
 				Device: &openrtb.Device{
-					Geo: &openrtb.Geo{Country: "DEU"},
+					Geo: &openrtb.Geo{Country: "DE"},
 				},
 				Regs: &openrtb.Regs{GDPR: &gdpr},
 				User: &openrtb.User{Consent: validConsent},
@@ -962,7 +962,7 @@ func TestShouldFilterBidderByGeo_GDPR(t *testing.T) {
 			&openrtb.BidRequest{
 				ID: "test",
 				Device: &openrtb.Device{
-					Geo: &openrtb.Geo{Country: "FRA"},
+					Geo: &openrtb.Geo{Country: "FR"},
 				},
 				Regs: &openrtb.Regs{GDPR: &gdpr},
 				User: &openrtb.User{Consent: ""},
@@ -976,7 +976,7 @@ func TestShouldFilterBidderByGeo_GDPR(t *testing.T) {
 			&openrtb.BidRequest{
 				ID: "test",
 				Device: &openrtb.Device{
-					Geo: &openrtb.Geo{Country: "DEU"},
+					Geo: &openrtb.Geo{Country: "DE"},
 				},
 			},
 			123,
@@ -988,7 +988,7 @@ func TestShouldFilterBidderByGeo_GDPR(t *testing.T) {
 			&openrtb.BidRequest{
 				ID: "test",
 				Device: &openrtb.Device{
-					Geo: &openrtb.Geo{Country: "DEU"},
+					Geo: &openrtb.Geo{Country: "DE"},
 				},
 				Regs: &openrtb.Regs{GDPR: &gdpr},
 				User: &openrtb.User{Consent: validConsent},
@@ -1023,7 +1023,7 @@ func TestShouldFilterBidderByGeo_CCPA(t *testing.T) {
 			&openrtb.BidRequest{
 				ID: "test",
 				Device: &openrtb.Device{
-					Geo: &openrtb.Geo{Country: "USA", Region: "CA"},
+					Geo: &openrtb.Geo{Country: "US", Region: "CA"},
 				},
 				Regs: &openrtb.Regs{
 					USPrivacy: "1YYN", // User opted out
@@ -1038,7 +1038,7 @@ func TestShouldFilterBidderByGeo_CCPA(t *testing.T) {
 			&openrtb.BidRequest{
 				ID: "test",
 				Device: &openrtb.Device{
-					Geo: &openrtb.Geo{Country: "USA", Region: "CA"},
+					Geo: &openrtb.Geo{Country: "US", Region: "CA"},
 				},
 				Regs: &openrtb.Regs{
 					USPrivacy: "1YNN", // User did NOT opt out
@@ -1053,7 +1053,7 @@ func TestShouldFilterBidderByGeo_CCPA(t *testing.T) {
 			&openrtb.BidRequest{
 				ID: "test",
 				Device: &openrtb.Device{
-					Geo: &openrtb.Geo{Country: "USA", Region: "VA"},
+					Geo: &openrtb.Geo{Country: "US", Region: "VA"},
 				},
 				Regs: &openrtb.Regs{
 					USPrivacy: "1YYN",
@@ -1068,7 +1068,7 @@ func TestShouldFilterBidderByGeo_CCPA(t *testing.T) {
 			&openrtb.BidRequest{
 				ID: "test",
 				Device: &openrtb.Device{
-					Geo: &openrtb.Geo{Country: "USA", Region: "CO"},
+					Geo: &openrtb.Geo{Country: "US", Region: "CO"},
 				},
 				Regs: &openrtb.Regs{
 					USPrivacy: "1YYN",
@@ -1083,7 +1083,7 @@ func TestShouldFilterBidderByGeo_CCPA(t *testing.T) {
 			&openrtb.BidRequest{
 				ID: "test",
 				Device: &openrtb.Device{
-					Geo: &openrtb.Geo{Country: "USA", Region: "CA"},
+					Geo: &openrtb.Geo{Country: "US", Region: "CA"},
 				},
 			},
 			123,
@@ -1095,7 +1095,7 @@ func TestShouldFilterBidderByGeo_CCPA(t *testing.T) {
 			&openrtb.BidRequest{
 				ID: "test",
 				Device: &openrtb.Device{
-					Geo: &openrtb.Geo{Country: "USA", Region: "CA"},
+					Geo: &openrtb.Geo{Country: "US", Region: "CA"},
 				},
 				Regs: &openrtb.Regs{
 					USPrivacy: "1Y", // Too short
@@ -1124,10 +1124,10 @@ func TestShouldFilterBidderByGeo_OtherRegulations(t *testing.T) {
 		geo         *openrtb.Geo
 		shouldFilter bool
 	}{
-		{"Brazil (LGPD)", &openrtb.Geo{Country: "BRA"}, false},
-		{"Canada (PIPEDA)", &openrtb.Geo{Country: "CAN"}, false},
-		{"Singapore (PDPA)", &openrtb.Geo{Country: "SGP"}, false},
-		{"No regulation country", &openrtb.Geo{Country: "JPN"}, false},
+		{"Brazil (LGPD)", &openrtb.Geo{Country: "BR"}, false},
+		{"Canada (PIPEDA)", &openrtb.Geo{Country: "CA"}, false},
+		{"Singapore (PDPA)", &openrtb.Geo{Country: "SG"}, false},
+		{"No regulation country", &openrtb.Geo{Country: "JP"}, false},
 	}
 
 	for _, tt := range tests {
@@ -1161,7 +1161,7 @@ func TestValidateGeoConsent_EUWithoutGDPR(t *testing.T) {
 		ID:  "test-geo-1",
 		Imp: []openrtb.Imp{{ID: "imp1", Banner: &openrtb.Banner{}}},
 		Device: &openrtb.Device{
-			Geo: &openrtb.Geo{Country: "DEU"}, // Germany
+			Geo: &openrtb.Geo{Country: "DE"}, // Germany
 		},
 		// Missing: Regs.GDPR = 1
 	}
@@ -1202,7 +1202,7 @@ func TestValidateGeoConsent_CaliforniaWithoutUSPrivacy(t *testing.T) {
 		ID:  "test-geo-2",
 		Imp: []openrtb.Imp{{ID: "imp1", Banner: &openrtb.Banner{}}},
 		Device: &openrtb.Device{
-			Geo: &openrtb.Geo{Country: "USA", Region: "CA"}, // California
+			Geo: &openrtb.Geo{Country: "US", Region: "CA"}, // California
 		},
 		// Missing: Regs.USPrivacy
 	}
@@ -1243,7 +1243,7 @@ func TestValidateGeoConsent_GeoEnforcementDisabled(t *testing.T) {
 		ID:  "test-geo-3",
 		Imp: []openrtb.Imp{{ID: "imp1", Banner: &openrtb.Banner{}}},
 		Device: &openrtb.Device{
-			Geo: &openrtb.Geo{Country: "DEU"}, // Germany
+			Geo: &openrtb.Geo{Country: "DE"}, // Germany
 		},
 		// No GDPR flag, but geo enforcement is disabled
 	}
@@ -1279,7 +1279,7 @@ func TestValidateGeoConsent_UserGeoFallback(t *testing.T) {
 		Imp: []openrtb.Imp{{ID: "imp1", Banner: &openrtb.Banner{}}},
 		// No device.geo
 		User: &openrtb.User{
-			Geo: &openrtb.Geo{Country: "FRA"}, // France
+			Geo: &openrtb.Geo{Country: "FR"}, // France
 		},
 		// Missing: Regs.GDPR = 1
 	}

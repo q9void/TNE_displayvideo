@@ -30,8 +30,8 @@ func createTestPublisher(publisherID string) *Publisher {
 		Status:        "active",
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
-		Notes:         "Test notes",
-		ContactEmail:  "test@example.com",
+		Notes:         sql.NullString{String: "Test notes", Valid: true},
+		ContactEmail:  sql.NullString{String: "test@example.com", Valid: true},
 	}
 }
 

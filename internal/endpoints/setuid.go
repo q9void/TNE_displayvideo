@@ -4,23 +4,28 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/thenexusengine/tne_springwire/internal/storage"
 	"github.com/thenexusengine/tne_springwire/internal/usersync"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 )
 
 // SetUIDHandler handles the /setuid endpoint for storing bidder user IDs
 type SetUIDHandler struct {
-	validBidders map[string]bool
+	validBidders  map[string]bool
+	idGraphStore  *storage.IDGraphStore
+	userSyncStore *storage.UserSyncStore
 }
 
 // NewSetUIDHandler creates a new setuid handler
-func NewSetUIDHandler(validBidders []string) *SetUIDHandler {
+func NewSetUIDHandler(validBidders []string, idGraphStore *storage.IDGraphStore, userSyncStore *storage.UserSyncStore) *SetUIDHandler {
 	bidderMap := make(map[string]bool)
 	for _, b := range validBidders {
 		bidderMap[strings.ToLower(b)] = true
 	}
 	return &SetUIDHandler{
-		validBidders: bidderMap,
+		validBidders:  bidderMap,
+		idGraphStore:  idGraphStore,
+		userSyncStore: userSyncStore,
 	}
 }
 
@@ -81,17 +86,95 @@ func (h *SetUIDHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		cookie.DeleteUID(bidderLower)
 		logger.Log.Debug().Str("bidder", bidder).Msg("Deleted UID (empty value received)")
 	} else {
-		// Store the UID
+		// Store the UID in cookie
 		cookie.SetUID(bidderLower, uid)
 		logger.Log.Debug().
 			Str("bidder", bidder).
 			Int("uid_length", len(uid)).
 			Int("total_syncs", cookie.SyncCount()).
-			Msg("Stored UID")
+			Msg("Stored UID in cookie")
+
+		// Store UID in database if FPID and userSyncStore are available
+		if h.userSyncStore != nil && cookie.GetFPID() != "" {
+			// Enhanced logging: Log actual UID value and all details for debugging
+			logger.Log.Info().
+				Str("fpid", cookie.GetFPID()).
+				Str("bidder", bidderLower).
+				Str("uid", uid).
+				Int("uid_length", len(uid)).
+				Msg("SetUID callback received - storing in database")
+
+			if err := h.userSyncStore.UpdateUID(r.Context(), cookie.GetFPID(), bidderLower, uid); err != nil {
+				// Change from Warn to Error for database storage failures
+				logger.Log.Error().
+					Err(err).
+					Str("fpid", cookie.GetFPID()).
+					Str("bidder", bidderLower).
+					Str("uid", uid).
+					Msg("FAILED to update UID in database")
+			} else {
+				logger.Log.Info().
+					Str("fpid", cookie.GetFPID()).
+					Str("bidder", bidderLower).
+					Str("uid", uid).
+					Msg("Successfully updated UID in database")
+			}
+		}
+
+		// Record ID graph mapping (GDPR-compliant)
+		// Only record if:
+		// 1. ID graph store is available
+		// 2. FPID exists in cookie
+		// 3. Either GDPR doesn't apply OR valid consent is provided
+		if h.idGraphStore != nil && cookie.GetFPID() != "" {
+			// Check GDPR compliance
+			hasConsent := gdpr != "1" || (gdprConsent != "" && len(gdprConsent) >= 20)
+
+			if hasConsent {
+				metadata := &storage.MappingMetadata{
+					ConsentGiven: hasConsent,
+					GDPRApplies:  gdpr == "1",
+					IPAddress:    r.RemoteAddr,
+					UserAgent:    r.UserAgent(),
+				}
+
+				if err := h.idGraphStore.RecordMapping(
+					r.Context(),
+					cookie.GetFPID(),
+					bidderLower,
+					uid,
+					metadata,
+				); err != nil {
+					logger.Log.Warn().
+						Err(err).
+						Str("fpid", cookie.GetFPID()).
+						Str("bidder", bidderLower).
+						Msg("Failed to store ID graph mapping")
+				} else {
+					logger.Log.Debug().
+						Str("fpid", cookie.GetFPID()).
+						Str("bidder", bidderLower).
+						Str("uid", uid).
+						Bool("gdpr_applies", gdpr == "1").
+						Msg("ID graph mapping recorded with valid consent")
+				}
+			} else {
+				logger.Log.Warn().
+					Str("fpid", cookie.GetFPID()).
+					Str("bidder", bidderLower).
+					Msg("ID graph mapping blocked - GDPR applies but no valid TCF consent")
+			}
+		}
 	}
 
 	// Set the updated cookie
 	domain := h.getCookieDomain(r)
+	logger.Log.Debug().
+		Str("host", r.Host).
+		Str("domain", domain).
+		Str("bidder", bidder).
+		Msg("Setting cookie domain")
+
 	if httpCookie, err := cookie.ToHTTPCookie(domain); err == nil {
 		http.SetCookie(w, httpCookie)
 	} else {
@@ -104,11 +187,7 @@ func (h *SetUIDHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // getCookieDomain extracts the domain for cookies
 func (h *SetUIDHandler) getCookieDomain(r *http.Request) string {
-	host := r.Host
-	if idx := strings.Index(host, ":"); idx != -1 {
-		host = host[:idx]
-	}
-	return host
+	return GetCookieDomain(r.Host)
 }
 
 // respondWithPixel returns a 1x1 transparent GIF
@@ -154,11 +233,7 @@ func (h *OptOutHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cookie.SetOptOut(true)
 
 	// Set the updated cookie
-	domain := r.Host
-	if idx := strings.Index(domain, ":"); idx != -1 {
-		domain = domain[:idx]
-	}
-
+	domain := GetCookieDomain(r.Host)
 	if httpCookie, err := cookie.ToHTTPCookie(domain); err == nil {
 		http.SetCookie(w, httpCookie)
 	}

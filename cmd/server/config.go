@@ -60,7 +60,8 @@ func ParseConfig() *ServerConfig {
 	port := flag.String("port", getEnvOrDefault("PBS_PORT", "8000"), "Server port")
 	idrURL := flag.String("idr-url", getEnvOrDefault("IDR_URL", "http://localhost:5050"), "IDR service URL")
 	idrEnabled := flag.Bool("idr-enabled", getEnvBoolOrDefault("IDR_ENABLED", true), "Enable IDR integration")
-	timeout := flag.Duration("timeout", 1000*time.Millisecond, "Default auction timeout")
+	defaultTimeout := getEnvDurationOrDefault("PBS_TIMEOUT", 2500*time.Millisecond)
+	timeout := flag.Duration("timeout", defaultTimeout, "Default auction timeout")
 	flag.Parse()
 
 	cfg := &ServerConfig{
@@ -150,6 +151,19 @@ func getEnvIntOrDefault(key string, defaultValue int) int {
 		return defaultValue
 	}
 	return intVal
+}
+
+// getEnvDurationOrDefault returns the environment variable as duration or a default
+func getEnvDurationOrDefault(key string, defaultValue time.Duration) time.Duration {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		return defaultValue
+	}
+	return duration
 }
 
 // splitAndTrim splits a string by delimiter and trims whitespace from each part

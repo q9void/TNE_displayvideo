@@ -8,7 +8,6 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - PBS_DISABLE_GDPR_ENFORCEMENT=true
       - PBS_ENFORCE_GDPR=false
       - PBS_ENFORCE_CCPA=false
       - PBS_ENFORCE_COPPA=false
@@ -17,8 +16,15 @@ services:
       - LOG_LEVEL=debug
       - PBS_TIMEOUT=2500ms
       - TZ=America/New_York
-      - CORS_ALLOW_ALL=true
+      - CORS_ORIGINS=*
+      - CORS_ALLOW_CREDENTIALS=true
       - IDR_ENABLED=false
+      - DB_HOST=catalyst-postgres
+      - DB_PORT=5432
+      - DB_NAME=catalyst_production
+      - DB_USER=catalyst_prod
+      - DB_PASSWORD=ttlJRsJK7myCehgKyswnZP82v6L57xT5
+      - DB_SSL_MODE=disable
     volumes:
       - ./logs:/app/logs
       - ./config:/app/config:ro

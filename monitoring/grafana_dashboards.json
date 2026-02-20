@@ -1,0 +1,324 @@
+{
+  "dashboards": [
+    {
+      "name": "PBS Hook Validation Metrics",
+      "description": "Monitoring dashboard for all PBS hook implementations",
+      "panels": [
+        {
+          "title": "Hook 1: Request Validation - Currency Normalization",
+          "metrics": [
+            {
+              "name": "currency_normalization_total",
+              "description": "Total requests with currency codes normalized",
+              "query": "sum(rate(pbs_currency_normalized_total[5m])) by (original_currency, normalized_currency)",
+              "visualization": "time_series"
+            },
+            {
+              "name": "currency_validation_errors",
+              "description": "Requests rejected due to invalid currency codes",
+              "query": "sum(rate(pbs_currency_validation_errors_total[5m])) by (currency, reason)",
+              "visualization": "time_series",
+              "alert": {
+                "threshold": 10,
+                "duration": "5m",
+                "severity": "warning"
+              }
+            }
+          ]
+        },
+        {
+          "title": "Hook 2: Privacy Enforcement - GDPR/CCPA",
+          "metrics": [
+            {
+              "name": "privacy_rejections",
+              "description": "Requests rejected by privacy middleware",
+              "query": "sum(rate(pbs_privacy_rejections_total[5m])) by (regulation, reason)",
+              "visualization": "time_series"
+            },
+            {
+              "name": "gdpr_enforcement_rate",
+              "description": "% of EU traffic with GDPR enforcement applied",
+              "query": "(sum(rate(pbs_gdpr_requests_total[5m])) / sum(rate(pbs_requests_total{geo_region=\"EU\"}[5m]))) * 100",
+              "visualization": "gauge",
+              "thresholds": {
+                "red": 0,
+                "yellow": 90,
+                "green": 95
+              }
+            },
+            {
+              "name": "ccpa_opt_out_rate",
+              "description": "% of CA traffic with CCPA opt-out",
+              "query": "(sum(rate(pbs_ccpa_opt_out_total[5m])) / sum(rate(pbs_requests_total{geo_region=\"US-CA\"}[5m]))) * 100",
+              "visualization": "gauge",
+              "expected_range": "2-3%"
+            },
+            {
+              "name": "consent_ok_rate",
+              "description": "% of auctions with valid consent",
+              "query": "(sum(rate(pbs_auction_consent_ok_total[5m])) / sum(rate(pbs_auction_total[5m]))) * 100",
+              "visualization": "gauge"
+            }
+          ]
+        },
+        {
+          "title": "Hook 3: Identity Gating - EID Filtering",
+          "metrics": [
+            {
+              "name": "eid_filtered_rate",
+              "description": "% of requests with EIDs filtered",
+              "query": "(sum(rate(pbs_eids_filtered_total[5m])) / sum(rate(pbs_requests_with_eids_total[5m]))) * 100",
+              "visualization": "gauge"
+            },
+            {
+              "name": "user_id_cleared_rate",
+              "description": "Requests where user.id was cleared due to privacy",
+              "query": "sum(rate(pbs_user_id_cleared_total[5m])) by (reason)",
+              "visualization": "time_series"
+            }
+          ]
+        },
+        {
+          "title": "Hook 4: SChain Augmentation",
+          "metrics": [
+            {
+              "name": "schain_created",
+              "description": "Requests where SChain was created (was missing)",
+              "query": "sum(rate(pbs_schain_created_total[5m]))",
+              "visualization": "time_series"
+            },
+            {
+              "name": "schain_moved_from_ext",
+              "description": "SChains moved from source.ext to source.schain",
+              "query": "sum(rate(pbs_schain_moved_from_ext_total[5m]))",
+              "visualization": "time_series"
+            },
+            {
+              "name": "schain_platform_node_added",
+              "description": "Platform nodes added to supply chain",
+              "query": "sum(rate(pbs_schain_platform_node_added_total[5m]))",
+              "visualization": "time_series"
+            },
+            {
+              "name": "schain_completion_rate",
+              "description": "% of requests with complete supply chain",
+              "query": "(sum(rate(pbs_schain_complete_total[5m])) / sum(rate(pbs_requests_total[5m]))) * 100",
+              "visualization": "gauge",
+              "thresholds": {
+                "red": 0,
+                "yellow": 90,
+                "green": 95
+              }
+            }
+          ]
+        },
+        {
+          "title": "Hook 5: Multiformat Bid Selection",
+          "metrics": [
+            {
+              "name": "multiformat_impressions",
+              "description": "Impressions detected as multiformat",
+              "query": "sum(rate(pbs_multiformat_impressions_total[5m])) by (formats)",
+              "visualization": "time_series"
+            },
+            {
+              "name": "multiformat_selection_strategy",
+              "description": "Multiformat selections by strategy",
+              "query": "sum(rate(pbs_multiformat_selections_total[5m])) by (strategy)",
+              "visualization": "pie_chart"
+            },
+            {
+              "name": "multiformat_selected_format",
+              "description": "Distribution of selected media types in multiformat",
+              "query": "sum(rate(pbs_multiformat_selected_format_total[5m])) by (selected_format)",
+              "visualization": "pie_chart"
+            },
+            {
+              "name": "multiformat_revenue_lift",
+              "description": "Revenue difference: multiformat vs single-format",
+              "query": "(avg(pbs_multiformat_winning_bid_price) - avg(pbs_singleformat_winning_bid_price)) / avg(pbs_singleformat_winning_bid_price) * 100",
+              "visualization": "gauge",
+              "unit": "%"
+            }
+          ]
+        },
+        {
+          "title": "Hook 6: Response Normalization",
+          "metrics": [
+            {
+              "name": "response_id_mismatches",
+              "description": "Responses rejected due to ID mismatch",
+              "query": "sum(rate(pbs_response_id_mismatch_total[5m])) by (bidder)",
+              "visualization": "time_series",
+              "alert": {
+                "threshold": 1,
+                "duration": "5m",
+                "severity": "critical",
+                "message": "Bidder returning responses with wrong ID"
+              }
+            },
+            {
+              "name": "currency_validation_failures",
+              "description": "Responses rejected due to invalid currency",
+              "query": "sum(rate(pbs_response_currency_invalid_total[5m])) by (bidder, currency)",
+              "visualization": "time_series",
+              "alert": {
+                "threshold": 5,
+                "duration": "10m",
+                "severity": "warning"
+              }
+            },
+            {
+              "name": "creative_validation_failures",
+              "description": "Bids rejected due to missing adm/nurl",
+              "query": "sum(rate(pbs_bid_creative_missing_total[5m])) by (bidder)",
+              "visualization": "time_series"
+            },
+            {
+              "name": "nurl_validation_failures",
+              "description": "Bids rejected due to invalid NURL format",
+              "query": "sum(rate(pbs_bid_nurl_invalid_total[5m])) by (bidder, reason)",
+              "visualization": "time_series"
+            },
+            {
+              "name": "media_type_validation_failures",
+              "description": "Bids rejected due to media type mismatch",
+              "query": "sum(rate(pbs_bid_media_type_mismatch_total[5m])) by (bidder, bid_type, imp_type)",
+              "visualization": "time_series"
+            }
+          ]
+        },
+        {
+          "title": "Overall System Health",
+          "metrics": [
+            {
+              "name": "request_rate",
+              "description": "Total requests per second",
+              "query": "sum(rate(pbs_requests_total[5m]))",
+              "visualization": "time_series"
+            },
+            {
+              "name": "error_rate",
+              "description": "% of requests resulting in errors",
+              "query": "(sum(rate(pbs_errors_total[5m])) / sum(rate(pbs_requests_total[5m]))) * 100",
+              "visualization": "gauge",
+              "thresholds": {
+                "green": 0.1,
+                "yellow": 0.5,
+                "red": 1.0
+              },
+              "alert": {
+                "threshold": 1.0,
+                "duration": "5m",
+                "severity": "critical"
+              }
+            },
+            {
+              "name": "latency_percentiles",
+              "description": "Request latency distribution",
+              "query": "histogram_quantile(0.95, sum(rate(pbs_request_duration_seconds_bucket[5m])) by (le, endpoint))",
+              "visualization": "time_series",
+              "alert": {
+                "threshold": 0.2,
+                "duration": "5m",
+                "severity": "warning",
+                "message": "P95 latency exceeds 200ms"
+              }
+            },
+            {
+              "name": "fill_rate",
+              "description": "% of impressions with at least one bid",
+              "query": "(sum(rate(pbs_impressions_with_bids_total[5m])) / sum(rate(pbs_impressions_total[5m]))) * 100",
+              "visualization": "gauge",
+              "alert": {
+                "threshold": 50,
+                "comparison": "less_than",
+                "duration": "30m",
+                "severity": "warning",
+                "message": "Fill rate dropped below 50%"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "alert_rules": [
+    {
+      "name": "HighPrivacyRejectionRate",
+      "description": "Privacy rejection rate exceeds expected threshold",
+      "query": "(sum(rate(pbs_privacy_rejections_total[10m])) / sum(rate(pbs_requests_total[10m]))) > 0.20",
+      "duration": "15m",
+      "severity": "warning",
+      "annotations": {
+        "summary": "Privacy rejection rate > 20%",
+        "description": "Possible privacy configuration issue or traffic pattern change"
+      }
+    },
+    {
+      "name": "SChainCompletionLow",
+      "description": "Supply chain completion rate below threshold",
+      "query": "(sum(rate(pbs_schain_complete_total[10m])) / sum(rate(pbs_requests_total[10m]))) < 0.90",
+      "duration": "30m",
+      "severity": "warning",
+      "annotations": {
+        "summary": "SChain completion < 90%",
+        "description": "Check SChain augmentation logic"
+      }
+    },
+    {
+      "name": "MultiformatSelectionFailures",
+      "description": "Multiformat selection failures increasing",
+      "query": "sum(rate(pbs_multiformat_selection_errors_total[5m])) > 10",
+      "duration": "10m",
+      "severity": "warning",
+      "annotations": {
+        "summary": "Multiformat selection errors > 10/min",
+        "description": "Check multiformat processor logic"
+      }
+    },
+    {
+      "name": "ResponseValidationFailureSpike",
+      "description": "Sudden increase in response validation failures",
+      "query": "sum(rate(pbs_response_validation_failures_total[5m])) > 50",
+      "duration": "5m",
+      "severity": "critical",
+      "annotations": {
+        "summary": "Response validation failures > 50/min",
+        "description": "Bidder may be sending malformed responses"
+      }
+    }
+  ],
+  "log_queries": [
+    {
+      "name": "Currency Normalization Examples",
+      "query": "level=info msg=\"currency normalized\" | json",
+      "fields": ["timestamp", "original_currency", "normalized_currency", "imp_id"]
+    },
+    {
+      "name": "Privacy Rejections",
+      "query": "level=warn msg=\"privacy rejection\" | json",
+      "fields": ["timestamp", "regulation", "reason", "country", "request_id"]
+    },
+    {
+      "name": "SChain Augmentation",
+      "query": "level=debug msg=\"schain augmented\" | json",
+      "fields": ["timestamp", "created", "nodes_added", "bidder", "request_id"]
+    },
+    {
+      "name": "Multiformat Selections",
+      "query": "level=info msg=\"multiformat bid selected\" | json",
+      "fields": ["timestamp", "strategy", "selected_format", "price", "imp_id"]
+    },
+    {
+      "name": "Response Validation Failures",
+      "query": "level=error msg=~\"response validation|invalid response\" | json",
+      "fields": ["timestamp", "bidder", "reason", "request_id", "response_id"]
+    }
+  ],
+  "recommended_retention": {
+    "metrics": "90 days",
+    "logs": "30 days",
+    "traces": "7 days"
+  }
+}

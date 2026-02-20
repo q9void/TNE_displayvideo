@@ -175,12 +175,6 @@ func DefaultSyncerConfigs() map[string]SyncerConfig {
 			SupportCORS:     true,
 			Enabled:         true,
 		},
-		"oms": {
-			BidderCode:      "oms",
-			RedirectSyncURL: "http://rt.marphezis.com/usersync?gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}&redirect={{redirect_url}}",
-			SupportCORS:     true,
-			Enabled:         false, // No official user sync in Prebid Server repo - disabled by default
-		},
 		"33across": {
 			BidderCode:      "33across",
 			RedirectSyncURL: "https://ssc.33across.com/ps/?gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}&redir={{redirect_url}}",

@@ -11,7 +11,7 @@ import (
 func TestDefaultCORSConfig(t *testing.T) {
 	// Clear environment first
 	os.Unsetenv("CORS_ENABLED")
-	os.Unsetenv("CORS_ALLOWED_ORIGINS")
+	os.Unsetenv("CORS_ORIGINS")
 	os.Unsetenv("PBS_DEV_MODE")
 	os.Unsetenv("CORS_ALLOW_ALL")
 	os.Unsetenv("CORS_ALLOW_CREDENTIALS")
@@ -54,8 +54,8 @@ func TestDefaultCORSConfig_AllowAll(t *testing.T) {
 }
 
 func TestDefaultCORSConfig_ExplicitOrigins(t *testing.T) {
-	os.Setenv("CORS_ALLOWED_ORIGINS", "https://example.com,https://test.com")
-	defer os.Unsetenv("CORS_ALLOWED_ORIGINS")
+	os.Setenv("CORS_ORIGINS", "https://example.com,https://test.com")
+	defer os.Unsetenv("CORS_ORIGINS")
 
 	config := DefaultCORSConfig()
 

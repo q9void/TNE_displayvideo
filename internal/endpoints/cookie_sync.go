@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/thenexusengine/tne_springwire/internal/storage"
 	"github.com/thenexusengine/tne_springwire/internal/usersync"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 )
@@ -25,6 +27,8 @@ type CookieSyncRequest struct {
 	CooperativeSync bool `json:"coopSync,omitempty"`
 	// FilterSettings controls which sync types to use
 	FilterSettings *FilterSettings `json:"filterSettings,omitempty"`
+	// FPID is the client-provided first-party identifier
+	FPID string `json:"fpid,omitempty"`
 }
 
 // FilterSettings controls sync type filtering
@@ -55,9 +59,10 @@ type BidderSyncStatus struct {
 
 // CookieSyncHandler handles cookie sync requests
 type CookieSyncHandler struct {
-	syncers  map[string]*usersync.Syncer
-	hostURL  string
-	maxSyncs int
+	syncers       map[string]*usersync.Syncer
+	hostURL       string
+	maxSyncs      int
+	userSyncStore *storage.UserSyncStore // Database storage for user syncs
 }
 
 // CookieSyncConfig holds configuration for the cookie sync handler
@@ -77,7 +82,7 @@ func DefaultCookieSyncConfig(hostURL string) *CookieSyncConfig {
 }
 
 // NewCookieSyncHandler creates a new cookie sync handler
-func NewCookieSyncHandler(config *CookieSyncConfig) *CookieSyncHandler {
+func NewCookieSyncHandler(config *CookieSyncConfig, userSyncStore *storage.UserSyncStore) *CookieSyncHandler {
 	syncers := make(map[string]*usersync.Syncer)
 
 	for code, syncConfig := range config.SyncConfigs {
@@ -85,9 +90,10 @@ func NewCookieSyncHandler(config *CookieSyncConfig) *CookieSyncHandler {
 	}
 
 	return &CookieSyncHandler{
-		syncers:  syncers,
-		hostURL:  config.HostURL,
-		maxSyncs: config.MaxSyncs,
+		syncers:       syncers,
+		hostURL:       config.HostURL,
+		maxSyncs:      config.MaxSyncs,
+		userSyncStore: userSyncStore,
 	}
 }
 
@@ -111,11 +117,33 @@ func (h *CookieSyncHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		req.Limit = h.maxSyncs
 	}
 
+	// Log cookie sync request
+	logEvent := logger.Log.Info().
+		Strs("bidders", req.Bidders).
+		Int("gdpr", req.GDPR).
+		Str("us_privacy", req.USPrivacy).
+		Int("limit", req.Limit).
+		Str("remote_addr", r.RemoteAddr)
+
+	if req.GDPR == 1 && req.GDPRConsent != "" {
+		// Only log first 20 chars of consent string to avoid log bloat
+		consentPreview := req.GDPRConsent
+		if len(consentPreview) > 20 {
+			consentPreview = consentPreview[:20] + "..."
+		}
+		logEvent.Str("gdpr_consent_preview", consentPreview)
+	}
+
+	logEvent.Msg("Cookie sync request received")
+
 	// GDPR FIX: Validate GDPR consent before processing cookie sync
 	// If GDPR=1 but no valid consent, do not return sync URLs
 	if req.GDPR == 1 {
 		if req.GDPRConsent == "" {
-			logger.Log.Warn().Msg("GDPR consent required but not provided for cookie sync")
+			logger.Log.Warn().
+				Str("remote_addr", r.RemoteAddr).
+				Strs("bidders", req.Bidders).
+				Msg("GDPR consent required but not provided for cookie sync - rejecting")
 			h.respondJSON(w, CookieSyncResponse{
 				Status:       "ok",
 				BidderStatus: []BidderSyncStatus{},
@@ -124,7 +152,11 @@ func (h *CookieSyncHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		// Validate consent string format (minimum length for TCF v2)
 		if len(req.GDPRConsent) < 20 {
-			logger.Log.Warn().Msg("Invalid GDPR consent string for cookie sync")
+			logger.Log.Warn().
+				Str("remote_addr", r.RemoteAddr).
+				Strs("bidders", req.Bidders).
+				Int("consent_length", len(req.GDPRConsent)).
+				Msg("Invalid GDPR consent string for cookie sync - rejecting")
 			h.respondJSON(w, CookieSyncResponse{
 				Status:       "ok",
 				BidderStatus: []BidderSyncStatus{},
@@ -136,14 +168,46 @@ func (h *CookieSyncHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Parse existing cookie to see what's already synced
 	cookie := usersync.ParseCookie(r)
 
+	// Store FPID from request if provided AND consent is valid
+	// GDPR compliance: Only store FPID if we have valid consent or GDPR doesn't apply
+	if req.FPID != "" {
+		// GDPR check is already done above - if we reach here, consent is valid
+		// But double-check to be explicit about GDPR compliance
+		canStoreFPID := req.GDPR != 1 || (req.GDPRConsent != "" && len(req.GDPRConsent) >= 20)
+
+		if canStoreFPID {
+			cookie.SetFPID(req.FPID)
+			logger.Log.Info().
+				Str("fpid", req.FPID).
+				Int("gdpr", req.GDPR).
+				Bool("has_consent", req.GDPRConsent != "").
+				Str("remote_addr", r.RemoteAddr).
+				Msg("Stored FPID from cookie sync request")
+		} else {
+			logger.Log.Warn().
+				Str("fpid", req.FPID).
+				Int("gdpr", req.GDPR).
+				Str("remote_addr", r.RemoteAddr).
+				Msg("Rejected FPID - GDPR applies but no valid consent")
+		}
+	}
+
 	// Check for opt-out
 	if cookie.IsOptOut() {
+		logger.Log.Info().
+			Str("remote_addr", r.RemoteAddr).
+			Msg("Cookie sync skipped - user opted out")
 		h.respondJSON(w, CookieSyncResponse{Status: "ok"})
 		return
 	}
 
 	// Determine which bidders to sync
 	biddersToSync := h.getBiddersToSync(req, cookie)
+
+	logger.Log.Debug().
+		Strs("bidders_to_sync", biddersToSync).
+		Int("count", len(biddersToSync)).
+		Msg("Determined bidders to sync")
 
 	// Build response
 	response := CookieSyncResponse{
@@ -178,6 +242,9 @@ func (h *CookieSyncHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Check if already synced
 		if cookie.HasUID(bidderCode) {
+			logger.Log.Debug().
+				Str("bidder", bidderCode).
+				Msg("Skipping cookie sync - already synced")
 			continue
 		}
 
@@ -191,13 +258,22 @@ func (h *CookieSyncHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Get sync URL
 		syncInfo, err := syncer.GetSync(syncType, gdprStr, req.GDPRConsent, req.USPrivacy)
 		if err != nil {
-			logger.Log.Debug().Err(err).Str("bidder", bidderCode).Msg("Failed to get sync URL")
+			logger.Log.Warn().
+				Err(err).
+				Str("bidder", bidderCode).
+				Str("sync_type", string(syncType)).
+				Msg("Failed to get sync URL for bidder")
 			response.BidderStatus = append(response.BidderStatus, BidderSyncStatus{
 				Bidder: bidderCode,
 				Error:  err.Error(),
 			})
 			continue
 		}
+
+		logger.Log.Debug().
+			Str("bidder", bidderCode).
+			Str("sync_type", string(syncType)).
+			Msg("Generated sync URL for bidder")
 
 		response.BidderStatus = append(response.BidderStatus, BidderSyncStatus{
 			Bidder:   bidderCode,
@@ -206,6 +282,45 @@ func (h *CookieSyncHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 		syncCount++
 	}
+
+	// Log sync results
+	syncedBidders := make([]string, 0, len(response.BidderStatus))
+	for _, status := range response.BidderStatus {
+		if status.UserSync != nil {
+			syncedBidders = append(syncedBidders, status.Bidder)
+		}
+	}
+
+	// Store sync records in database if FPID is available and database is enabled
+	fpid := cookie.GetFPID()
+	if fpid != "" && h.userSyncStore != nil && len(syncedBidders) > 0 {
+		// Store each synced bidder in database (UID will be NULL until callback)
+		ctx := r.Context()
+		expiresAt := time.Now().Add(90 * 24 * time.Hour) // 90 days typical cookie lifetime
+
+		for _, bidderCode := range syncedBidders {
+			if err := h.userSyncStore.UpsertSync(ctx, fpid, bidderCode, nil, &expiresAt); err != nil {
+				logger.Log.Warn().
+					Err(err).
+					Str("fpid", fpid).
+					Str("bidder", bidderCode).
+					Msg("Failed to store user sync record in database")
+			}
+		}
+
+		logger.Log.Debug().
+			Str("fpid", fpid).
+			Strs("bidders", syncedBidders).
+			Msg("Stored user sync records in database")
+	}
+
+	logger.Log.Info().
+		Str("fpid", fpid).
+		Strs("synced_bidders", syncedBidders).
+		Int("synced_count", len(syncedBidders)).
+		Int("requested_count", len(biddersToSync)).
+		Str("remote_addr", r.RemoteAddr).
+		Msg("Cookie sync completed")
 
 	// Set cookie
 	if httpCookie, err := cookie.ToHTTPCookie(h.getCookieDomain(r)); err == nil {
@@ -304,11 +419,7 @@ func (h *CookieSyncHandler) getBiddersToSync(req CookieSyncRequest, cookie *user
 
 // getCookieDomain extracts the domain for cookies
 func (h *CookieSyncHandler) getCookieDomain(r *http.Request) string {
-	host := r.Host
-	if idx := strings.Index(host, ":"); idx != -1 {
-		host = host[:idx]
-	}
-	return host
+	return GetCookieDomain(r.Host)
 }
 
 // respondJSON writes a JSON response

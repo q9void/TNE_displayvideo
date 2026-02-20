@@ -22,7 +22,34 @@ func New(endpoint string) *Adapter {
 }
 
 func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.ExtraRequestInfo) ([]*adapters.RequestData, []error) {
-	body, err := json.Marshal(request)
+	// Create a copy to avoid modifying original
+	requestCopy := *request
+
+	// Remove Catalyst internal IDs from Site (prevent ID leakage)
+	if requestCopy.Site != nil {
+		siteCopy := *requestCopy.Site
+		siteCopy.ID = ""
+		if siteCopy.Publisher != nil {
+			pubCopy := *siteCopy.Publisher
+			pubCopy.ID = ""
+			siteCopy.Publisher = &pubCopy
+		}
+		requestCopy.Site = &siteCopy
+	}
+
+	// Remove Catalyst internal IDs from App (if present)
+	if requestCopy.App != nil {
+		appCopy := *requestCopy.App
+		appCopy.ID = ""
+		if appCopy.Publisher != nil {
+			pubCopy := *appCopy.Publisher
+			pubCopy.ID = ""
+			appCopy.Publisher = &pubCopy
+		}
+		requestCopy.App = &appCopy
+	}
+
+	body, err := json.Marshal(requestCopy)
 	if err != nil {
 		return nil, []error{err}
 	}

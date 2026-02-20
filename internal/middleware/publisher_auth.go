@@ -152,7 +152,7 @@ const maxRequestBodySize = 1024 * 1024
 const publisherContextKey = "publisher"
 
 // Context key for storing publisher ID
-const publisherIDKey = "publisherID"
+const publisherIDKey = "publisher_id"
 
 // NewPublisherAuth creates a new publisher auth middleware
 func NewPublisherAuth(config *PublisherAuthConfig) *PublisherAuth {

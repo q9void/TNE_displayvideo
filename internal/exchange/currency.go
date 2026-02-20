@@ -3,6 +3,7 @@ package exchange
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
 	"github.com/thenexusengine/tne_springwire/pkg/currency"
@@ -190,4 +191,11 @@ func (e *Exchange) isCurrencySupported(currencyCode string) bool {
 
 	_, exists := rates[currencyCode]
 	return exists
+}
+
+// normalizeIsoCurrency normalizes currency codes to uppercase ISO 4217 format
+// Fixes issue #16: "usd" → "USD", "eur" → "EUR", etc.
+func normalizeIsoCurrency(code string) string {
+	// Convert to uppercase for ISO 4217 compliance
+	return strings.ToUpper(code)
 }

@@ -496,9 +496,9 @@ func createTestBidder(code string) *Bidder {
 		SupportsAudio:    false,
 		GVLVendorID:      &vendorID,
 		HTTPHeaders:      map[string]interface{}{"X-API-Key": "test"},
-		Description:      "Test bidder",
-		DocumentationURL: "https://example.com/docs",
-		ContactEmail:     "test@example.com",
+		Description:      sql.NullString{String: "Test bidder", Valid: true},
+		DocumentationURL: sql.NullString{String: "https://example.com/docs", Valid: true},
+		ContactEmail:     sql.NullString{String: "test@example.com", Valid: true},
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}

@@ -6,17 +6,20 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"net/http/pprof"
+	"os"
 	"time"
 
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	_ "github.com/thenexusengine/tne_springwire/internal/adapters/appnexus"
 	// _ "github.com/thenexusengine/tne_springwire/internal/adapters/demo" // Disabled - no demo bids in production
 	_ "github.com/thenexusengine/tne_springwire/internal/adapters/kargo"
-	_ "github.com/thenexusengine/tne_springwire/internal/adapters/oms"
 	_ "github.com/thenexusengine/tne_springwire/internal/adapters/pubmatic"
 	_ "github.com/thenexusengine/tne_springwire/internal/adapters/rubicon"
 	_ "github.com/thenexusengine/tne_springwire/internal/adapters/sovrn"
 	_ "github.com/thenexusengine/tne_springwire/internal/adapters/triplelift"
+	"github.com/thenexusengine/tne_springwire/internal/analytics"
+	analyticsIDR "github.com/thenexusengine/tne_springwire/internal/analytics/idr"
 	pbsconfig "github.com/thenexusengine/tne_springwire/internal/config"
 	"github.com/thenexusengine/tne_springwire/internal/endpoints"
 	"github.com/thenexusengine/tne_springwire/internal/exchange"
@@ -24,6 +27,7 @@ import (
 	"github.com/thenexusengine/tne_springwire/internal/middleware"
 	"github.com/thenexusengine/tne_springwire/internal/storage"
 	"github.com/thenexusengine/tne_springwire/pkg/currency"
+	"github.com/thenexusengine/tne_springwire/pkg/idr"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 	"github.com/thenexusengine/tne_springwire/pkg/redis"
 )
@@ -37,6 +41,8 @@ type Server struct {
 	rateLimiter       *middleware.RateLimiter
 	db                *storage.BidderStore
 	publisher         *storage.PublisherStore
+	idGraphStore      *storage.IDGraphStore
+	userSyncStore     *storage.UserSyncStore
 	redisClient       *redis.Client
 	currencyConverter *currency.Converter
 }
@@ -130,26 +136,15 @@ func (s *Server) initDatabase() error {
 
 	s.db = storage.NewBidderStore(dbConn)
 	s.publisher = storage.NewPublisherStore(dbConn)
+	s.idGraphStore = storage.NewIDGraphStore(dbConn)
+	s.userSyncStore = storage.NewUserSyncStore(dbConn)
+	log.Info().Msg("ID graph store initialized")
+	log.Info().Msg("User sync store initialized")
 
 	// Load and log bidders from database
-	bidders, err := s.db.ListActive(ctx)
-	if err != nil {
-		log.Warn().Err(err).Msg("Failed to load bidders from database")
-	} else {
-		log.Info().
-			Int("count", len(bidders)).
-			Msg("Bidders loaded from PostgreSQL")
-	}
-
-	// Test publisher store
-	publishers, err := s.publisher.List(ctx)
-	if err != nil {
-		log.Warn().Err(err).Msg("Failed to load publishers from database")
-	} else {
-		log.Info().
-			Int("count", len(publishers)).
-			Msg("Publishers loaded from PostgreSQL")
-	}
+	// Old schema table queries removed - now using new schema
+	// (accounts → publishers_new → ad_slots → slot_bidder_configs)
+	// Bidder and publisher data loaded on-demand via GetSlotBidderConfigs
 
 	return nil
 }
@@ -192,9 +187,41 @@ func (s *Server) initExchange() {
 		log.Info().Msg("Currency conversion disabled")
 	}
 
-	// Create exchange config with currency converter
+	// Initialize analytics modules
+	var analyticsModules []analytics.Module
+
+	// Initialize IDR analytics adapter if IDR is enabled
+	if s.config.IDREnabled && s.config.IDRUrl != "" {
+		// Create IDR client for analytics
+		idrClient := idr.NewClient(s.config.IDRUrl, 150*time.Millisecond, s.config.IDRAPIKey)
+
+		// Create IDR adapter with configuration
+		idrAdapter := analyticsIDR.NewAdapter(idrClient, &analyticsIDR.Config{
+			BufferSize:  s.config.ToExchangeConfig().EventBufferSize,
+			VerboseMode: false, // Can be made configurable via env var
+		})
+
+		analyticsModules = append(analyticsModules, idrAdapter)
+
+		log.Info().
+			Str("adapter", "idr").
+			Str("idr_url", s.config.IDRUrl).
+			Msg("Analytics adapter enabled")
+	}
+
+	// Create multi-module broadcaster if any modules are enabled
+	var analyticsModule analytics.Module
+	if len(analyticsModules) > 0 {
+		analyticsModule = analytics.NewMultiModule(analyticsModules...)
+		log.Info().
+			Int("adapter_count", len(analyticsModules)).
+			Msg("Analytics module initialized with multi-sink broadcasting")
+	}
+
+	// Create exchange config with currency converter and analytics
 	exchangeConfig := s.config.ToExchangeConfig()
 	exchangeConfig.CurrencyConverter = s.currencyConverter
+	exchangeConfig.Analytics = analyticsModule
 
 	// Create exchange with default registry
 	s.exchange = exchange.New(adapters.DefaultRegistry, exchangeConfig)
@@ -247,8 +274,8 @@ func (s *Server) initHandlers() {
 
 	// Cookie sync handlers
 	cookieSyncConfig := endpoints.DefaultCookieSyncConfig(s.config.HostURL)
-	cookieSyncHandler := endpoints.NewCookieSyncHandler(cookieSyncConfig)
-	setuidHandler := endpoints.NewSetUIDHandler(cookieSyncHandler.ListBidders())
+	cookieSyncHandler := endpoints.NewCookieSyncHandler(cookieSyncConfig, s.userSyncStore)
+	setuidHandler := endpoints.NewSetUIDHandler(cookieSyncHandler.ListBidders(), s.idGraphStore, s.userSyncStore)
 	optoutHandler := endpoints.NewOptOutHandler()
 
 	log.Info().
@@ -269,6 +296,7 @@ func (s *Server) initHandlers() {
 
 	log.Info().
 		Bool("gdpr_enforcement", privacyConfig.EnforceGDPR).
+		Bool("ccpa_enforcement", privacyConfig.EnforceCCPA).
 		Bool("coppa_enforcement", privacyConfig.EnforceCOPPA).
 		Bool("strict_mode", privacyConfig.StrictMode).
 		Msg("Privacy middleware initialized")
@@ -286,9 +314,9 @@ func (s *Server) initHandlers() {
 	mux.Handle("/setuid", setuidHandler)
 	mux.Handle("/optout", optoutHandler)
 
-	// Video endpoints
-	mux.HandleFunc("/video/vast", videoHandler.HandleVASTRequest)
-	mux.HandleFunc("/video/openrtb", videoHandler.HandleOpenRTBVideo)
+	// Video endpoints (protected by privacy middleware)
+	mux.Handle("/video/vast", privacyMiddleware(http.HandlerFunc(videoHandler.HandleVASTRequest)))
+	mux.Handle("/video/openrtb", privacyMiddleware(http.HandlerFunc(videoHandler.HandleOpenRTBVideo)))
 	endpoints.RegisterVideoEventRoutes(mux, videoEventHandler)
 
 	log.Info().Msg("Video endpoints registered: /video/vast, /video/openrtb, /video/event/*")
@@ -314,10 +342,12 @@ func (s *Server) initHandlers() {
 		Strs("bidders", bidderMapping.Publisher.DefaultBidders).
 		Msg("Loaded bidder mapping configuration")
 
-	catalystBidHandler := endpoints.NewCatalystBidHandler(s.exchange, bidderMapping)
-	mux.HandleFunc("/v1/bid", catalystBidHandler.HandleBidRequest)
+	catalystBidHandler := endpoints.NewCatalystBidHandler(s.exchange, bidderMapping, s.publisher, s.userSyncStore)
+	mux.Handle("/v1/bid", privacyMiddleware(http.HandlerFunc(catalystBidHandler.HandleBidRequest)))
 
-	log.Info().Msg("Catalyst MAI Publisher endpoint registered: /v1/bid")
+	log.Info().
+		Bool("hierarchical_config", s.publisher != nil).
+		Msg("Catalyst MAI Publisher endpoint registered: /v1/bid")
 
 	// Static assets
 	mux.HandleFunc("/assets/tne-ads.js", endpoints.HandleAssets)
@@ -354,6 +384,31 @@ func (s *Server) initHandlers() {
 
 	log.Info().Msg("Admin tag generator registered: /admin/adtag/generator")
 
+	// Version endpoint (similar to Prebid Server)
+	mux.HandleFunc("/version", versionHandler)
+
+	// pprof debugging endpoints (only enabled with PPROF_ENABLED=true)
+	if os.Getenv("PPROF_ENABLED") == "true" {
+		// Wrap pprof with admin auth middleware
+		adminAuth := middleware.AdminAuth
+		pprofMux := http.NewServeMux()
+		pprofMux.HandleFunc("/debug/pprof/", pprof.Index)
+		pprofMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		pprofMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		pprofMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+		mux.Handle("/debug/pprof/", adminAuth(pprofMux))
+		mux.Handle("/debug/pprof/cmdline", adminAuth(http.HandlerFunc(pprof.Cmdline)))
+		mux.Handle("/debug/pprof/profile", adminAuth(http.HandlerFunc(pprof.Profile)))
+		mux.Handle("/debug/pprof/symbol", adminAuth(http.HandlerFunc(pprof.Symbol)))
+		mux.Handle("/debug/pprof/trace", adminAuth(http.HandlerFunc(pprof.Trace)))
+
+		log.Info().Msg("pprof debugging endpoints enabled with admin auth: /debug/pprof/*")
+	} else {
+		log.Info().Msg("pprof debugging endpoints disabled (set PPROF_ENABLED=true to enable)")
+	}
+
 	// Build middleware chain
 	handler := s.buildHandler(mux)
 
@@ -374,6 +429,7 @@ func (s *Server) buildHandler(mux *http.ServeMux) http.Handler {
 	// Initialize middleware
 	cors := middleware.NewCORS(middleware.DefaultCORSConfig())
 	security := middleware.NewSecurity(nil)
+	adminAuth := middleware.AdminAuth  // Admin API key authentication
 	publisherAuth := middleware.NewPublisherAuth(middleware.DefaultPublisherAuthConfig())
 	sizeLimiter := middleware.NewSizeLimiter(middleware.DefaultSizeLimitConfig())
 	gzipMiddleware := middleware.NewGzip(middleware.DefaultGzipConfig())
@@ -399,7 +455,7 @@ func (s *Server) buildHandler(mux *http.ServeMux) http.Handler {
 		Bool("rate_limiting_enabled", s.rateLimiter != nil).
 		Msg("Middleware chain built")
 
-	// Build chain: CORS -> Security -> Logging -> Size Limit -> PublisherAuth -> Rate Limit -> Metrics -> Gzip -> Handler
+	// Build chain: CORS -> Security -> AdminAuth -> Logging -> Size Limit -> PublisherAuth -> Rate Limit -> Metrics -> Gzip -> Handler
 	handler := http.Handler(mux)
 	handler = gzipMiddleware.Middleware(handler)
 	handler = s.metrics.Middleware(handler)
@@ -407,6 +463,7 @@ func (s *Server) buildHandler(mux *http.ServeMux) http.Handler {
 	handler = publisherAuth.Middleware(handler)
 	handler = sizeLimiter.Middleware(handler)
 	handler = loggingMiddleware(handler)
+	handler = adminAuth(handler)  // Admin endpoint authentication
 	handler = security.Middleware(handler)
 	handler = cors.Middleware(handler)
 
@@ -709,6 +766,19 @@ func readyHandler(redisClient *redis.Client, publisherStore *storage.PublisherSt
 			logger.Log.Error().Err(err).Msg("failed to encode readiness response")
 		}
 	})
+}
+
+// versionHandler returns version information
+func versionHandler(w http.ResponseWriter, r *http.Request) {
+	version := map[string]string{
+		"version":   "1.0.0",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(version); err != nil {
+		logger.Log.Error().Err(err).Msg("failed to encode version response")
+	}
 }
 
 // generateRequestID creates a unique request ID

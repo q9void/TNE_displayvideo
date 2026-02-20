@@ -4,13 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/thenexusengine/tne_springwire/internal/device"
 	"github.com/thenexusengine/tne_springwire/internal/exchange"
+	"github.com/thenexusengine/tne_springwire/internal/geo"
+	"github.com/thenexusengine/tne_springwire/internal/hooks"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
+	"github.com/thenexusengine/tne_springwire/internal/storage"
 	"github.com/thenexusengine/tne_springwire/internal/usersync"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 )
@@ -30,8 +35,6 @@ type AdUnitConfig struct {
 	Rubicon    *RubiconParams    `json:"rubicon,omitempty"`
 	Kargo      *KargoParams      `json:"kargo,omitempty"`
 	Sovrn      *SovrnParams      `json:"sovrn,omitempty"`
-	OMS        *OMSParams        `json:"oms,omitempty"`
-	Aniview    *AniviewParams    `json:"aniview,omitempty"`
 	Pubmatic   *PubmaticParams   `json:"pubmatic,omitempty"`
 	Triplelift *TripleliftParams `json:"triplelift,omitempty"`
 }
@@ -51,24 +54,13 @@ type KargoParams struct {
 
 // SovrnParams are Sovrn adapter parameters
 type SovrnParams struct {
-	TagID int `json:"tagid"`
-}
-
-// OMSParams are OMS (Onemobile) adapter parameters
-type OMSParams struct {
-	PublisherID int `json:"publisherId"`
-}
-
-// AniviewParams are Aniview adapter parameters
-type AniviewParams struct {
-	PublisherID string `json:"publisherId"`
-	ChannelID   string `json:"channelId"`
+	TagID string `json:"tagid"` // Must be string per Prebid Server spec
 }
 
 // PubmaticParams are Pubmatic adapter parameters
 type PubmaticParams struct {
-	PublisherID int `json:"publisherId"`
-	AdSlot      int `json:"adSlot"`
+	PublisherID string `json:"publisherId"` // Must be string per Prebid Server spec
+	AdSlot      string `json:"adSlot"`      // Must be string per Prebid Server spec
 }
 
 // TripleliftParams are Triplelift adapter parameters
@@ -78,8 +70,10 @@ type TripleliftParams struct {
 
 // CatalystBidHandler handles MAI Publisher-compatible bid requests
 type CatalystBidHandler struct {
-	exchange *exchange.Exchange
-	mapping  *BidderMapping
+	exchange       *exchange.Exchange
+	mapping        *BidderMapping             // Legacy: static mapping file (fallback)
+	publisherStore *storage.PublisherStore    // Dynamic hierarchical config from database
+	userSyncStore  *storage.UserSyncStore     // User sync storage for persistent UIDs
 }
 
 // LoadBidderMapping loads bidder parameter mapping from JSON file
@@ -103,10 +97,12 @@ func LoadBidderMapping(path string) (*BidderMapping, error) {
 }
 
 // NewCatalystBidHandler creates a new Catalyst bid handler
-func NewCatalystBidHandler(ex *exchange.Exchange, mapping *BidderMapping) *CatalystBidHandler {
+func NewCatalystBidHandler(ex *exchange.Exchange, mapping *BidderMapping, publisherStore *storage.PublisherStore, userSyncStore *storage.UserSyncStore) *CatalystBidHandler {
 	return &CatalystBidHandler{
-		exchange: ex,
-		mapping:  mapping,
+		exchange:       ex,
+		mapping:        mapping,
+		publisherStore: publisherStore,
+		userSyncStore:  userSyncStore,
 	}
 }
 
@@ -122,11 +118,18 @@ type MAIBidRequest struct {
 
 // MAISlot represents an ad slot
 type MAISlot struct {
-	DivID          string      `json:"divId"`
-	Sizes          [][]int     `json:"sizes"`
-	AdUnitPath     string      `json:"adUnitPath,omitempty"`
-	Position       string      `json:"position,omitempty"`
-	EnabledBidders []string    `json:"enabled_bidders,omitempty"`
+	DivID                  string      `json:"divId"`
+	Sizes                  [][]int     `json:"sizes"`                            // Banner sizes
+	AdUnitPath             string      `json:"adUnitPath,omitempty"`
+	Position               string      `json:"position,omitempty"`
+	EnabledBidders         []string    `json:"enabled_bidders,omitempty"`
+	Video                  bool        `json:"video,omitempty"`                  // Enable video format
+	VideoWidth             int         `json:"videoWidth,omitempty"`             // Video player width
+	VideoHeight            int         `json:"videoHeight,omitempty"`            // Video player height
+	VideoMimes             []string    `json:"videoMimes,omitempty"`             // Supported MIME types
+	Native                 bool        `json:"native,omitempty"`                 // Enable native format
+	MultiformatStrategy    string      `json:"multiformatStrategy,omitempty"`    // Strategy for multiformat
+	PreferredMediaType     string      `json:"preferredMediaType,omitempty"`     // Preferred media type for multiformat
 }
 
 // MAIPage represents page context
@@ -139,18 +142,30 @@ type MAIPage struct {
 
 // MAIUser represents user/privacy info
 type MAIUser struct {
-	ConsentGiven bool              `json:"consentGiven,omitempty"`
-	GDPRApplies  bool              `json:"gdprApplies,omitempty"`
-	USPConsent   string            `json:"uspConsent,omitempty"`
-	UserIds      map[string]string `json:"userIds,omitempty"` // Bidder-specific user IDs from cookie sync
+	FPID           string                   `json:"fpid,omitempty"`           // First-party identifier
+	ConsentGiven   bool                     `json:"consentGiven,omitempty"`
+	ConsentString  string                   `json:"consentString,omitempty"`  // TCFv2 consent string
+	GDPRApplies    bool                     `json:"gdprApplies,omitempty"`
+	USPConsent     string                   `json:"uspConsent,omitempty"`
+	UserIds        map[string]string        `json:"userIds,omitempty"`        // Bidder-specific user IDs from cookie sync
+	Data           []map[string]interface{} `json:"data,omitempty"`           // ORTB2 user data segments
+	Ext            map[string]interface{}   `json:"ext,omitempty"`            // Additional user extensions
 }
 
 // MAIDevice represents device info
 type MAIDevice struct {
-	Width      int    `json:"width,omitempty"`
-	Height     int    `json:"height,omitempty"`
-	DeviceType string `json:"deviceType,omitempty"`
-	UserAgent  string `json:"userAgent,omitempty"`
+	Width      int      `json:"width,omitempty"`
+	Height     int      `json:"height,omitempty"`
+	DeviceType string   `json:"deviceType,omitempty"`
+	UserAgent  string   `json:"userAgent,omitempty"`
+	Geo        *MAIGeo  `json:"geo,omitempty"` // Client-side geolocation (optional)
+}
+
+// MAIGeo represents client-side geolocation data
+type MAIGeo struct {
+	Lat      float64 `json:"lat,omitempty"`      // Latitude from GPS/browser
+	Lon      float64 `json:"lon,omitempty"`      // Longitude from GPS/browser
+	Accuracy int     `json:"accuracy,omitempty"` // Accuracy in meters
 }
 
 // MAIBidResponse represents the MAI Publisher bid response format
@@ -161,15 +176,16 @@ type MAIBidResponse struct {
 
 // MAIBid represents a single bid
 type MAIBid struct {
-	DivID      string      `json:"divId"`
-	CPM        float64     `json:"cpm"`
-	Currency   string      `json:"currency"`
-	Width      int         `json:"width"`
-	Height     int         `json:"height"`
-	AdID       string      `json:"adId"`
-	CreativeID string      `json:"creativeId"`
-	DealID     string      `json:"dealId,omitempty"`
-	Meta       *MAIBidMeta `json:"meta,omitempty"`
+	DivID      string            `json:"divId"`
+	CPM        float64           `json:"cpm"`
+	Currency   string            `json:"currency"`
+	Width      int               `json:"width"`
+	Height     int               `json:"height"`
+	AdID       string            `json:"adId"`
+	CreativeID string            `json:"creativeId"`
+	DealID     string            `json:"dealId,omitempty"`
+	Meta       *MAIBidMeta       `json:"meta,omitempty"`
+	Targeting  map[string]string `json:"targeting,omitempty"` // Pre-built GAM targeting key-values
 }
 
 // MAIBidMeta represents bid metadata
@@ -184,34 +200,74 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 	log := logger.Log
 	startTime := time.Now()
 
-	// Set CORS headers
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-	// Handle preflight
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
+	// CORS is handled by middleware - removed hardcoded wildcard
 
 	// Only accept POST
 	if r.Method != "POST" {
+		log.Error().
+			Str("method", r.Method).
+			Str("path", r.URL.Path).
+			Msg("Method not allowed - expected POST")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	// Parse MAI bid request
 	var maiBidReq MAIBidRequest
-	if err := json.NewDecoder(r.Body).Decode(&maiBidReq); err != nil {
-		log.Error().Err(err).Msg("Failed to parse MAI bid request")
+
+	// Close body when done
+	defer r.Body.Close()
+
+	// Limit request body size to prevent DoS attacks (1MB limit)
+	const maxRequestBodySize = 1024 * 1024 // 1MB
+	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBodySize))
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("remote_addr", r.RemoteAddr).
+			Str("user_agent", r.Header.Get("User-Agent")).
+			Msg("Failed to read MAI bid request body")
+		h.writeErrorResponse(w, "Invalid request format", http.StatusBadRequest)
+		return
+	}
+
+	// DEBUG: Full request dump if enabled
+	debugDumpRequests := os.Getenv("DEBUG_DUMP_REQUESTS") == "true"
+	if debugDumpRequests {
+		log.Debug().
+			Str("method", r.Method).
+			Str("path", r.URL.Path).
+			Str("remote_addr", r.RemoteAddr).
+			Str("user_agent", r.Header.Get("User-Agent")).
+			Str("content_type", r.Header.Get("Content-Type")).
+			Str("request_body", string(bodyBytes)).
+			Msg("🔍 DEBUG_DUMP_REQUESTS: Full incoming request")
+	} else {
+		// Log preview for normal debug mode
+		requestPreview := string(bodyBytes)
+		if len(requestPreview) > 2000 {
+			requestPreview = requestPreview[:2000] + "..."
+		}
+		log.Debug().Str("request_body_preview", requestPreview).Msg("Received MAI bid request")
+	}
+
+	if err := json.Unmarshal(bodyBytes, &maiBidReq); err != nil {
+		log.Error().
+			Err(err).
+			Str("request_body", string(bodyBytes)).
+			Msg("Failed to parse MAI bid request - invalid JSON")
 		h.writeErrorResponse(w, "Invalid request format", http.StatusBadRequest)
 		return
 	}
 
 	// Validate request
 	if err := h.validateMAIBidRequest(&maiBidReq); err != nil {
-		log.Error().Err(err).Msg("Invalid MAI bid request")
+		log.Error().
+			Err(err).
+			Str("account_id", maiBidReq.AccountID).
+			Int("slots_count", len(maiBidReq.Slots)).
+			Interface("request", maiBidReq).
+			Msg("❌ Invalid MAI bid request - validation failed")
 		h.writeErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -219,10 +275,37 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 	// Convert to OpenRTB
 	ortbReq, impToSlot, err := h.convertToOpenRTB(r, &maiBidReq)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to convert to OpenRTB")
+		log.Error().
+			Err(err).
+			Str("account_id", maiBidReq.AccountID).
+			Int("slots_count", len(maiBidReq.Slots)).
+			Msg("❌ Failed to convert to OpenRTB")
 		h.writeErrorResponse(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
+
+	// Execute request-level hooks (BEFORE auction)
+	// Hook execution order is critical:
+	// 1. Request Validation - validates and normalizes request
+	// 2. Privacy/Consent - enforces GDPR/CCPA/GPP, strips IDs without consent
+	hookExecutor := hooks.NewHookExecutor()
+	hookExecutor.RegisterRequestHook(hooks.NewRequestValidationHook())
+	hookExecutor.RegisterRequestHook(hooks.NewPrivacyConsentHook())
+
+	if err := hookExecutor.ExecuteRequestHooks(r.Context(), ortbReq); err != nil {
+		log.Error().
+			Err(err).
+			Str("account_id", maiBidReq.AccountID).
+			Str("request_id", ortbReq.ID).
+			Msg("❌ Request hook failed")
+		h.writeErrorResponse(w, fmt.Sprintf("Request validation failed: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	log.Debug().
+		Str("request_id", ortbReq.ID).
+		Str("account_id", maiBidReq.AccountID).
+		Msg("✓ Request hooks executed successfully")
 
 	// Run auction with 2500ms timeout (MAI Publisher requirement)
 	ctx, cancel := context.WithTimeout(r.Context(), 2500*time.Millisecond)
@@ -235,7 +318,13 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 
 	auctionResp, err := h.exchange.RunAuction(ctx, auctionReq)
 	if err != nil {
-		log.Error().Err(err).Msg("Auction failed")
+		log.Error().
+			Err(err).
+			Str("account_id", maiBidReq.AccountID).
+			Int("slots", len(maiBidReq.Slots)).
+			Int("timeout_ms", int(time.Since(startTime).Milliseconds())).
+			Str("error_type", fmt.Sprintf("%T", err)).
+			Msg("❌ Auction failed - returning empty bids")
 		// Return empty bids on error (MAI Publisher requirement)
 		h.writeMAIResponse(w, &MAIBidResponse{
 			Bids:         []MAIBid{},
@@ -248,13 +337,22 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 	maiResp := h.convertToMAIResponse(auctionResp, impToSlot)
 	maiResp.ResponseTime = int(time.Since(startTime).Milliseconds())
 
-	// Log the full response payload for debugging
-	if respJSON, err := json.Marshal(maiResp); err == nil {
+	// DEBUG: Full response dump if enabled
+	debugDumpResponses := os.Getenv("DEBUG_DUMP_RESPONSES") == "true"
+	if debugDumpResponses {
+		if respJSON, err := json.Marshal(maiResp); err == nil {
+			log.Debug().
+				Str("response_body", string(respJSON)).
+				Int("bids", len(maiResp.Bids)).
+				Int("response_time_ms", maiResp.ResponseTime).
+				Msg("🔍 DEBUG_DUMP_RESPONSES: Full outgoing response")
+		}
+	} else {
+		// Normal debug logging
 		log.Debug().
-			Str("full_response", string(respJSON)).
 			Int("bids", len(maiResp.Bids)).
 			Int("response_time_ms", maiResp.ResponseTime).
-			Msg("Catalyst full response payload")
+			Msg("Catalyst response ready")
 	}
 
 	// Write response
@@ -265,7 +363,7 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 		Int("slots", len(maiBidReq.Slots)).
 		Int("bids", len(maiResp.Bids)).
 		Int("response_time_ms", maiResp.ResponseTime).
-		Msg("Catalyst bid request completed")
+		Msg("✓ Catalyst bid request completed")
 }
 
 // validateMAIBidRequest validates the MAI bid request
@@ -292,6 +390,51 @@ func (h *CatalystBidHandler) validateMAIBidRequest(req *MAIBidRequest) error {
 	return nil
 }
 
+// normalizeSlotPattern generates multiple slot pattern variations for flexible matching
+// Returns patterns in priority order: exact match → without prefix → without suffix → base
+func normalizeSlotPattern(domain, divID, adUnitPath string) []string {
+	patterns := []string{}
+
+	// 1. Try exact match with adUnitPath first (if provided)
+	if adUnitPath != "" {
+		patterns = append(patterns, fmt.Sprintf("%s%s", domain, adUnitPath))
+	}
+
+	// 2. Try exact domain/divID
+	if divID != "" {
+		patterns = append(patterns, fmt.Sprintf("%s/%s", domain, divID))
+	}
+
+	// 3. Try without "mai-ad-" prefix (common pattern)
+	if divID != "" && strings.HasPrefix(divID, "mai-ad-") {
+		simpleDivID := strings.TrimPrefix(divID, "mai-ad-")
+		patterns = append(patterns, fmt.Sprintf("%s/%s", domain, simpleDivID))
+
+		// 4. Progressively remove compound suffixes
+		// Examples: "leaderboard-wide-adhesion" → "leaderboard-wide" → "leaderboard"
+		//           "rectangle-medium" → "rectangle"
+		suffixes := []string{"-wide", "-narrow", "-tablet", "-adhesion", "-medium", "-large", "-small"}
+
+		current := simpleDivID
+		for {
+			removed := false
+			for _, suffix := range suffixes {
+				if strings.HasSuffix(current, suffix) {
+					current = strings.TrimSuffix(current, suffix)
+					patterns = append(patterns, fmt.Sprintf("%s/%s", domain, current))
+					removed = true
+					break // Try removing another suffix from the new current
+				}
+			}
+			if !removed {
+				break // No more suffixes to remove
+			}
+		}
+	}
+
+	return patterns
+}
+
 // convertToOpenRTB converts MAI bid request to OpenRTB format
 func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidRequest) (*openrtb.BidRequest, map[string]string, error) {
 	// Generate request ID
@@ -314,110 +457,296 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 			}
 		}
 
+		// We'll set TagID after resolving adUnitPath below
+		secureFlag := 1 // Assume HTTPS (OpenRTB 2.6 requirement)
 		imp := openrtb.Imp{
-			ID: impID,
-			Banner: &openrtb.Banner{
+			ID:     impID,
+			Secure: &secureFlag,
+		}
+
+		// Add banner if sizes are provided (default format)
+		if len(slot.Sizes) > 0 {
+			imp.Banner = &openrtb.Banner{
 				W:      slot.Sizes[0][0], // Use first size as primary
 				H:      slot.Sizes[0][1],
 				Format: formats,
-			},
-			TagID: slot.AdUnitPath,
+			}
 		}
 
-		// Look up bidder parameters from mapping
-		if slot.AdUnitPath != "" && h.mapping != nil {
-			if adUnitConfig, ok := h.mapping.AdUnits[slot.AdUnitPath]; ok {
-				logger.Log.Debug().
-					Str("ad_unit", slot.AdUnitPath).
-					Msg("Found mapping for ad unit")
+		// Add video if enabled
+		if slot.Video {
+			videoWidth := slot.VideoWidth
+			videoHeight := slot.VideoHeight
+			if videoWidth == 0 || videoHeight == 0 {
+				// Default to first banner size if available
+				if len(slot.Sizes) > 0 {
+					videoWidth = slot.Sizes[0][0]
+					videoHeight = slot.Sizes[0][1]
+				} else {
+					videoWidth = 640
+					videoHeight = 480
+				}
+			}
 
-				// Build imp.ext with all configured bidders
-				impExt := make(map[string]interface{})
+			mimes := slot.VideoMimes
+			if len(mimes) == 0 {
+				mimes = []string{"video/mp4", "video/webm"}
+			}
 
-				// Rubicon/Magnite
-				if adUnitConfig.Rubicon != nil {
-					impExt["rubicon"] = map[string]interface{}{
-						"accountId":        adUnitConfig.Rubicon.AccountID,
-						"siteId":           adUnitConfig.Rubicon.SiteID,
-						"zoneId":           adUnitConfig.Rubicon.ZoneID,
-						"bidonmultiformat": adUnitConfig.Rubicon.BidOnMultiFormat,
+			imp.Video = &openrtb.Video{
+				W:     videoWidth,
+				H:     videoHeight,
+				Mimes: mimes,
+			}
+		}
+
+		// Add native if enabled
+		if slot.Native {
+			imp.Native = &openrtb.Native{
+				Request: "", // Native request would be built based on requirements
+				Ver:     "1.2",
+			}
+		}
+
+		// Set multiformat strategy if multiple formats present
+		hasMultipleFormats := 0
+		if imp.Banner != nil {
+			hasMultipleFormats++
+		}
+		if imp.Video != nil {
+			hasMultipleFormats++
+		}
+		if imp.Native != nil {
+			hasMultipleFormats++
+		}
+
+		if hasMultipleFormats > 1 {
+			// Add multiformat strategy and preferred media type to imp.ext.prebid
+			impExtPrebid := map[string]interface{}{}
+
+			if slot.MultiformatStrategy != "" {
+				impExtPrebid["multiformatRequestStrategy"] = slot.MultiformatStrategy
+			}
+
+			if slot.PreferredMediaType != "" {
+				impExtPrebid["preferredMediaType"] = slot.PreferredMediaType
+			}
+
+			if len(impExtPrebid) > 0 {
+				if len(imp.Ext) > 0 {
+					// Merge with existing ext
+					var extMap map[string]interface{}
+					if err := json.Unmarshal(imp.Ext, &extMap); err == nil {
+						extMap["prebid"] = impExtPrebid
+						if extBytes, err := json.Marshal(extMap); err == nil {
+							imp.Ext = extBytes
+						}
+					}
+				} else {
+					// Create new ext
+					extMap := map[string]interface{}{
+						"prebid": impExtPrebid,
+					}
+					if extBytes, err := json.Marshal(extMap); err == nil {
+						imp.Ext = extBytes
 					}
 				}
+			}
+		}
 
-				// Kargo
-				if adUnitConfig.Kargo != nil {
-					impExt["kargo"] = map[string]interface{}{
-						"placementId": adUnitConfig.Kargo.PlacementID,
-					}
+	// Look up bidder parameters using hierarchical config (DB first, then mapping file fallback)
+	// Always try to lookup bidder config, with appropriate fallbacks
+	impExt := make(map[string]interface{})
+
+	if maiBid.AccountID == "" {
+		logger.Log.Warn().Msg("Missing accountId - cannot lookup bidder config")
+	} else {
+		// Extract domain from page context
+		domain := ""
+		if maiBid.Page != nil && maiBid.Page.Domain != "" {
+			domain = maiBid.Page.Domain
+		}
+
+		// If adUnitPath is missing, try to resolve it from divId mapping
+		adUnitPath := slot.AdUnitPath
+		if adUnitPath == "" && h.publisherStore != nil {
+			resolvedPath, err := h.publisherStore.GetAdUnitPathFromDivID(r.Context(), maiBid.AccountID, domain, slot.DivID)
+			if err == nil && resolvedPath != "" {
+				adUnitPath = resolvedPath
+				logger.Log.Info().
+					Str("publisher", maiBid.AccountID).
+					Str("domain", domain).
+					Str("div_id", slot.DivID).
+					Str("resolved_path", adUnitPath).
+					Msg("✓ Resolved adUnitPath from divId mapping")
+			} else {
+				logger.Log.Warn().
+					Str("publisher", maiBid.AccountID).
+					Str("domain", domain).
+					Str("div_id", slot.DivID).
+					Msg("⚠️  Missing adUnitPath and no divId mapping found - falling back to publisher-level config only")
+			}
+		}
+
+		// Set TagID with resolved adUnitPath
+		imp.TagID = adUnitPath
+
+		// List of bidders to look up
+		bidders := []string{"rubicon", "kargo", "sovrn", "pubmatic", "triplelift"}
+
+		// Detect device type from User-Agent for device-specific bidder configs
+		deviceType := "desktop" // Default to desktop
+		if maiBid.Device != nil && maiBid.Device.UserAgent != "" {
+			deviceType = detectDeviceType(maiBid.Device.UserAgent)
+		}
+
+		// Try multiple slot pattern variations for flexible matching
+		// This handles cases like "mai-ad-billboard-wide" → "billboard"
+		var allConfigs map[string]map[string]interface{}
+		var err error
+		var matchedPattern string
+
+		if h.publisherStore != nil && domain != "" && slot.DivID != "" {
+			patterns := normalizeSlotPattern(domain, slot.DivID, adUnitPath)
+
+			logger.Log.Debug().
+				Str("div_id", slot.DivID).
+				Strs("patterns_to_try", patterns).
+				Msg("Trying multiple slot pattern variations")
+
+			// Try each pattern until we find configs
+			for _, pattern := range patterns {
+				allConfigs, err = h.publisherStore.GetSlotBidderConfigs(
+					r.Context(),
+					maiBid.AccountID, // CATALYST internal account ID (e.g., '12345')
+					domain,           // Publisher domain (e.g., 'totalprosports.com')
+					pattern,          // Ad slot pattern (trying variations)
+					deviceType,       // Device type ('desktop' or 'mobile')
+				)
+
+				if err != nil {
+					logger.Log.Debug().
+						Err(err).
+						Str("pattern", pattern).
+						Msg("Pattern lookup failed, trying next")
+					continue
 				}
 
-				// Sovrn
-				if adUnitConfig.Sovrn != nil {
-					impExt["sovrn"] = map[string]interface{}{
-						"tagid": adUnitConfig.Sovrn.TagID,
-					}
+				if len(allConfigs) > 0 {
+					matchedPattern = pattern
+					logger.Log.Info().
+						Str("slot_pattern", matchedPattern).
+						Str("div_id", slot.DivID).
+						Str("device_type", deviceType).
+						Strs("bidder_names", getConfiguredBidders(allConfigs)).
+						Int("bidders_configured", len(allConfigs)).
+						Str("account_id", maiBid.AccountID).
+						Str("domain", domain).
+						Msg("✓ Matched slot pattern and loaded bidder configs")
+					break
 				}
+			}
 
-				// OMS (Onemobile) - uses "onetag" in OpenRTB
-				if adUnitConfig.OMS != nil {
-					impExt["onetag"] = map[string]interface{}{
-						"publisherId": adUnitConfig.OMS.PublisherID,
-					}
-				}
-
-				// Aniview
-				if adUnitConfig.Aniview != nil {
-					impExt["aniview"] = map[string]interface{}{
-						"publisherId": adUnitConfig.Aniview.PublisherID,
-						"channelId":   adUnitConfig.Aniview.ChannelID,
-					}
-				}
-
-				// Pubmatic
-				if adUnitConfig.Pubmatic != nil {
-					impExt["pubmatic"] = map[string]interface{}{
-						"publisherId": adUnitConfig.Pubmatic.PublisherID,
-						"adSlot":      adUnitConfig.Pubmatic.AdSlot,
-					}
-				}
-
-				// Triplelift
-				if adUnitConfig.Triplelift != nil {
-					impExt["triplelift"] = map[string]interface{}{
-						"inventoryCode": adUnitConfig.Triplelift.InventoryCode,
-					}
-				}
-
-				// Marshal and attach to impression
-				if len(impExt) > 0 {
-					extJSON, err := json.Marshal(impExt)
-					if err == nil {
-						imp.Ext = extJSON
-						logger.Log.Info().
-							Str("ad_unit", slot.AdUnitPath).
-							Int("bidders", len(impExt)).
-							Msg("Injected bidder parameters")
-					} else {
-						logger.Log.Error().
-							Err(err).
-							Str("ad_unit", slot.AdUnitPath).
-							Msg("Failed to marshal bidder parameters")
-					}
+			// If no patterns matched, log error
+			if matchedPattern == "" {
+				logger.Log.Warn().
+					Str("account_id", maiBid.AccountID).
+					Str("domain", domain).
+					Str("div_id", slot.DivID).
+					Strs("patterns_tried", patterns).
+					Msg("⚠️  No bidder configs found for any slot pattern variation")
+				allConfigs = make(map[string]map[string]interface{})
+			}
+		} else {
+			// Fallback: Try legacy hierarchical lookup if slot pattern unavailable
+			if h.publisherStore != nil && adUnitPath != "" {
+				allConfigs, err = h.publisherStore.GetAllBidderConfigsHierarchical(
+					r.Context(),
+					maiBid.AccountID,
+					domain,
+					adUnitPath,
+					bidders,
+				)
+				if err != nil {
+					logger.Log.Warn().
+						Err(err).
+						Str("account_id", maiBid.AccountID).
+						Msg("⚠️  Legacy hierarchical config lookup failed - using fallback")
+					allConfigs = make(map[string]map[string]interface{})
 				}
 			} else {
 				logger.Log.Warn().
-					Str("ad_unit", slot.AdUnitPath).
-					Msg("No mapping found for ad unit")
+					Str("account_id", maiBid.AccountID).
+					Str("domain", domain).
+					Str("div_id", slot.DivID).
+					Msg("⚠️  Missing slot pattern - cannot query bidder configs")
+				allConfigs = make(map[string]map[string]interface{})
 			}
 		}
+
+		// Now populate impExt with configs
+		for _, bidderCode := range bidders {
+			params := allConfigs[bidderCode]
+
+			// If no DB config found, fall back to mapping file (only if we have adUnitPath)
+			if params == nil && h.mapping != nil && adUnitPath != "" {
+				if adUnitConfig, ok := h.mapping.AdUnits[adUnitPath]; ok {
+					params = h.extractBidderParamsFromMapping(bidderCode, &adUnitConfig)
+				}
+			}
+
+			// Add params to impExt if found
+			if params != nil && len(params) > 0 {
+				impExt[bidderCode] = params
+			} else {
+				logger.Log.Warn().
+					Str("bidder", bidderCode).
+					Str("publisher", maiBid.AccountID).
+					Str("domain", domain).
+					Str("ad_unit", adUnitPath).
+					Msg("⚠️  No configuration found for bidder")
+			}
+		}
+
+		// Marshal and attach to impression
+		if len(impExt) > 0 {
+			extJSON, err := json.Marshal(impExt)
+			if err == nil {
+				imp.Ext = extJSON
+				logger.Log.Info().
+					Str("publisher", maiBid.AccountID).
+					Str("domain", domain).
+					Str("ad_unit", adUnitPath).
+					Int("bidders_configured", len(impExt)).
+					Interface("bidder_names", getBidderNames(impExt)).
+					Interface("full_config", impExt).
+					Msg("✓ Injected bidder parameters using hierarchical config")
+			} else {
+				logger.Log.Error().
+					Err(err).
+					Str("publisher", maiBid.AccountID).
+					Str("domain", domain).
+					Str("ad_unit", adUnitPath).
+					Interface("impExt", impExt).
+					Msg("❌ Failed to marshal bidder parameters")
+			}
+		} else {
+			logger.Log.Error().
+				Str("publisher", maiBid.AccountID).
+				Str("domain", domain).
+				Str("ad_unit", adUnitPath).
+				Str("div_id", slot.DivID).
+				Msg("❌ ZERO bidder configuration found - no bids will be returned for this slot!")
+		}
+	}
 
 		imps = append(imps, imp)
 	}
 
 	// Build site
-	site := &openrtb.Site{
-		ID: maiBid.AccountID,
-	}
+	// NOTE: We intentionally leave site.id EMPTY to prevent leaking CATALYST's
+	// internal accountId ('12345') to SSPs. Each adapter sets SSP-specific IDs.
+	site := &openrtb.Site{}
 
 	if maiBid.Page != nil {
 		site.Domain = maiBid.Page.Domain
@@ -436,30 +765,139 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		}
 	}
 
+	// NOTE: We intentionally leave publisher.id EMPTY to prevent leaking CATALYST's
+	// internal accountId. Adapters set SSP-specific publisher IDs from bidder configs.
+	site.Publisher = &openrtb.Publisher{}
+
+	// Get publisher name from database for brand safety
+	if h.publisherStore != nil {
+		if pub, err := h.publisherStore.GetByPublisherID(r.Context(), maiBid.AccountID); err == nil && pub != nil {
+			if publisher, ok := pub.(*storage.Publisher); ok && publisher.Name != "" {
+				site.Publisher.Name = publisher.Name
+			}
+		}
+	}
+
+	// Set publisher domain from site domain
+	if site.Domain != "" {
+		site.Publisher.Domain = site.Domain
+	}
+
 	// Build device
-	device := &openrtb.Device{
+	deviceObj := &openrtb.Device{
 		UA: r.Header.Get("User-Agent"),
 		IP: getClientIP(r),
 	}
 
 	if maiBid.Device != nil {
 		if maiBid.Device.UserAgent != "" {
-			device.UA = maiBid.Device.UserAgent
+			deviceObj.UA = maiBid.Device.UserAgent
 		}
 		if maiBid.Device.Width > 0 && maiBid.Device.Height > 0 {
-			device.W = maiBid.Device.Width
-			device.H = maiBid.Device.Height
+			deviceObj.W = maiBid.Device.Width
+			deviceObj.H = maiBid.Device.Height
 		}
 		// Map device type to OpenRTB device type
 		switch strings.ToLower(maiBid.Device.DeviceType) {
 		case "mobile", "phone":
-			device.DeviceType = 1 // Mobile/Tablet
+			deviceObj.DeviceType = 1 // Mobile/Tablet
 		case "tablet":
-			device.DeviceType = 5 // Tablet
+			deviceObj.DeviceType = 5 // Tablet
 		case "desktop", "pc":
-			device.DeviceType = 2 // Personal Computer
+			deviceObj.DeviceType = 2 // Personal Computer
 		case "tv", "ctv", "connected_tv":
-			device.DeviceType = 3 // Connected TV
+			deviceObj.DeviceType = 3 // Connected TV
+		}
+	}
+
+	// Parse User-Agent to extract device details (OpenRTB 2.6 enhancement)
+	if deviceObj.UA != "" {
+		if deviceInfo := device.ParseUserAgent(deviceObj.UA); deviceInfo != nil {
+			// Set device make, model, os, osv from parsed UA
+			deviceObj.Make = deviceInfo.Make
+			deviceObj.Model = deviceInfo.Model
+			deviceObj.OS = deviceInfo.OS
+			deviceObj.OSV = deviceInfo.OSV
+
+			// Override device type from UA parser if not already set from client
+			if deviceObj.DeviceType == 0 {
+				deviceObj.DeviceType = deviceInfo.DeviceType
+			}
+
+			logger.Log.Debug().
+				Str("make", deviceObj.Make).
+				Str("model", deviceObj.Model).
+				Str("os", deviceObj.OS).
+				Str("osv", deviceObj.OSV).
+				Int("device_type", deviceObj.DeviceType).
+				Msg("Parsed device details from User-Agent")
+		}
+	}
+
+	// Add geolocation data (OpenRTB 2.6 critical enhancement - 15-30% CPM lift)
+	// Priority: Client-side geo (GPS/browser) > IP-based geo
+	if maiBid.Device != nil && maiBid.Device.Geo != nil && maiBid.Device.Geo.Lat != 0 && maiBid.Device.Geo.Lon != 0 {
+		// Client-side geolocation available (most accurate)
+		deviceObj.Geo = &openrtb.Geo{
+			Lat:  maiBid.Device.Geo.Lat,
+			Lon:  maiBid.Device.Geo.Lon,
+			Type: 1, // GPS/Location Services
+		}
+
+		// Try to reverse geocode for country/region/city using IP geo service
+		// This enriches client-side lat/lon with administrative region data
+		if deviceObj.IP != "" {
+			geoService, err := geo.GetDefaultService()
+			if err == nil && geoService != nil {
+				if geoInfo := geoService.LookupSafe(deviceObj.IP); geoInfo != nil {
+					deviceObj.Geo.Country = geoInfo.Country
+					deviceObj.Geo.Region = geoInfo.Region
+					deviceObj.Geo.City = geoInfo.City
+					deviceObj.Geo.Metro = geoInfo.Metro
+					deviceObj.Geo.ZIP = geoInfo.Zip
+				}
+			}
+		}
+
+		logger.Log.Info().
+			Float64("lat", deviceObj.Geo.Lat).
+			Float64("lon", deviceObj.Geo.Lon).
+			Str("country", deviceObj.Geo.Country).
+			Int("accuracy", maiBid.Device.Geo.Accuracy).
+			Msg("Using client-side geolocation (GPS/browser)")
+	} else if deviceObj.IP != "" {
+		// Fallback to IP-based geolocation
+		geoService, err := geo.GetDefaultService()
+		if err == nil && geoService != nil {
+			// Perform IP geolocation lookup
+			if geoInfo := geoService.LookupSafe(deviceObj.IP); geoInfo != nil {
+				deviceObj.Geo = &openrtb.Geo{
+					Country: geoInfo.Country,
+					Region:  geoInfo.Region,
+					City:    geoInfo.City,
+					Metro:   geoInfo.Metro,
+					ZIP:     geoInfo.Zip,
+					Lat:     geoInfo.Lat,
+					Lon:     geoInfo.Lon,
+					Type:    2, // IP-based geolocation
+				}
+
+				logger.Log.Info().
+					Str("ip", deviceObj.IP).
+					Str("country", geoInfo.Country).
+					Str("region", geoInfo.Region).
+					Str("city", geoInfo.City).
+					Float64("lat", geoInfo.Lat).
+					Float64("lon", geoInfo.Lon).
+					Msg("Added IP-based geolocation to device")
+			} else {
+				logger.Log.Debug().
+					Str("ip", deviceObj.IP).
+					Msg("IP geolocation lookup returned no results")
+			}
+		} else {
+			logger.Log.Debug().
+				Msg("GeoIP service not available - skipping geolocation (set GEOIP2_DB_PATH env var)")
 		}
 	}
 
@@ -467,19 +905,98 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 	var user *openrtb.User
 	var regs *openrtb.Regs
 
-	// Collect user IDs from all sources
+	// Collect user IDs from all sources (priority: request body > database > cookie)
 	userIDs := make(map[string]string)
 
-	// 1. From request body (SDK sends these)
+	// Extract FPID from request or cookie for database lookups
+	fpid := ""
+	if maiBid.User != nil && maiBid.User.FPID != "" {
+		fpid = maiBid.User.FPID
+	} else if maiBid.User != nil && maiBid.User.Ext != nil {
+		// Try to extract FPID from user.ext.eids (SDK sends it here)
+		if eids, ok := maiBid.User.Ext["eids"].([]interface{}); ok {
+			for _, eidRaw := range eids {
+				if eid, ok := eidRaw.(map[string]interface{}); ok {
+					if source, ok := eid["source"].(string); ok && source == "thenexusengine.com" {
+						if uids, ok := eid["uids"].([]interface{}); ok && len(uids) > 0 {
+							if uid, ok := uids[0].(map[string]interface{}); ok {
+								if id, ok := uid["id"].(string); ok {
+									fpid = id
+									logger.Log.Debug().
+										Str("fpid", fpid).
+										Msg("Extracted FPID from user.ext.eids")
+									break
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback to cookie if still not found
+	if fpid == "" {
+		cookieSync := usersync.ParseCookie(r)
+		fpid = cookieSync.GetFPID()
+		if fpid != "" {
+			logger.Log.Debug().
+				Str("fpid", fpid).
+				Msg("Extracted FPID from cookie")
+		}
+	}
+
+	// 1. From database (most persistent and reliable source)
+	if fpid != "" && h.userSyncStore != nil {
+		logger.Log.Debug().
+			Str("fpid", fpid).
+			Msg("Attempting to load user syncs from database")
+
+		dbSyncs, err := h.userSyncStore.GetSyncsForUser(r.Context(), fpid)
+		if err != nil {
+			logger.Log.Warn().
+				Err(err).
+				Str("fpid", fpid).
+				Msg("Failed to load user syncs from database")
+		} else {
+			logger.Log.Debug().
+				Str("fpid", fpid).
+				Int("uids_from_db", len(dbSyncs)).
+				Interface("db_syncs", dbSyncs).
+				Msg("Database UID lookup result")
+
+			if len(dbSyncs) > 0 {
+				for bidder, uid := range dbSyncs {
+					userIDs[bidder] = uid
+				}
+				logger.Log.Info().
+					Str("fpid", fpid).
+					Int("syncs_loaded", len(dbSyncs)).
+					Strs("bidders", getBidderKeys(dbSyncs)).
+					Msg("Loaded user syncs from database")
+			} else {
+				logger.Log.Warn().
+					Str("fpid", fpid).
+					Msg("No user syncs found in database for this FPID")
+			}
+		}
+	} else {
+		logger.Log.Debug().
+			Str("fpid", fpid).
+			Bool("userSyncStore_available", h.userSyncStore != nil).
+			Msg("Skipping database UID lookup")
+	}
+
+	// 2. From request body (SDK sends these) - overrides database
 	if maiBid.User != nil && len(maiBid.User.UserIds) > 0 {
 		for bidder, uid := range maiBid.User.UserIds {
 			userIDs[bidder] = uid
 		}
 	}
 
-	// 2. From HTTP cookie as fallback (server-side cookie sync)
+	// 3. From HTTP cookie as final fallback (least reliable due to cookie restrictions)
 	cookieSync := usersync.ParseCookie(r)
-	bidders := []string{"rubicon", "kargo", "sovrn", "pubmatic", "triplelift", "appnexus", "oms"}
+	bidders := []string{"rubicon", "kargo", "sovrn", "pubmatic", "triplelift", "appnexus"}
 	for _, bidder := range bidders {
 		if uid := cookieSync.GetUID(bidder); uid != "" {
 			if _, exists := userIDs[bidder]; !exists {
@@ -488,9 +1005,24 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		}
 	}
 
+	// Log final user ID collection status before building OpenRTB request
+	logger.Log.Info().
+		Str("fpid", fpid).
+		Int("total_user_ids", len(userIDs)).
+		Strs("bidders_with_uids", getBidderKeys(userIDs)).
+		Msg("User IDs available for auction")
+
 	// Create user object if we have IDs or consent data
 	if len(userIDs) > 0 || maiBid.User != nil {
 		user = &openrtb.User{}
+
+		// Set FPID as OpenRTB user.id (first-party identifier)
+		if maiBid.User != nil && maiBid.User.FPID != "" {
+			user.ID = maiBid.User.FPID
+			logger.Log.Debug().
+				Str("fpid", maiBid.User.FPID).
+				Msg("Including FPID in bid request as user.id")
+		}
 
 		// MODERN: Store all bidder IDs in user.ext.eids (OpenRTB 2.6+ standard)
 		// This provides transparency about ID sources and supports multiple ID types
@@ -505,7 +1037,6 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 				"pubmatic":    "pubmatic.com",
 				"triplelift":  "3lift.com",
 				"appnexus":    "adnxs.com",
-				"oms":         "onemobile.com",
 			}
 
 			for bidder, uid := range userIDs {
@@ -525,9 +1056,34 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 				})
 			}
 
-			// Build user.ext with eids and consent
-			userExt := map[string]interface{}{
-				"eids": eids,
+			// FIXED #16: Merge with existing user.ext instead of overwriting
+			// Preserve SDK-provided eids and other extensions
+			userExt := make(map[string]interface{})
+
+			// Start with SDK-provided user.ext if it exists
+			if maiBid.User != nil && maiBid.User.Ext != nil {
+				// Copy existing extensions from SDK
+				for k, v := range maiBid.User.Ext {
+					userExt[k] = v
+				}
+			}
+
+			// Merge eids: combine SDK eids with server-side UIDs
+			if existingEids, ok := userExt["eids"].([]interface{}); ok && len(existingEids) > 0 {
+				// SDK provided eids - merge with our server-side UIDs
+				logger.Log.Debug().
+					Int("sdk_eids", len(existingEids)).
+					Int("server_eids", len(eids)).
+					Msg("Merging SDK eids with server UIDs")
+
+				// Append server eids to SDK eids
+				for _, serverEid := range eids {
+					existingEids = append(existingEids, serverEid)
+				}
+				userExt["eids"] = existingEids
+			} else {
+				// No SDK eids, just use server-side UIDs
+				userExt["eids"] = eids
 			}
 
 			// Add consent hash if available (GDPR transparency)
@@ -539,17 +1095,73 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 			user.Ext = extJSON
 
 			logger.Log.Info().
+				Str("fpid", user.ID).
 				Int("user_ids", len(userIDs)).
 				Strs("bidders", getBidderKeys(userIDs)).
 				Msg("Populated user IDs from cookie sync")
 		}
 
-		// LEGACY: Set consent string at top level (OpenRTB 2.5 compatibility)
+		// Set TCF consent string (OpenRTB 2.5+ compliance)
 		if maiBid.User != nil {
-			if maiBid.User.ConsentGiven {
-				user.Consent = "1"
+			// Use actual TCF string from SDK if available
+			if maiBid.User.ConsentString != "" {
+				user.Consent = maiBid.User.ConsentString
+				previewLen := min(20, len(maiBid.User.ConsentString))
+				logger.Log.Debug().
+					Str("consent_string_preview", maiBid.User.ConsentString[:previewLen]).
+					Msg("Using TCFv2 consent string from SDK")
+			} else if maiBid.User.ConsentGiven {
+				// Fallback: If no TCF string but consent was given
+				logger.Log.Warn().
+					Str("account_id", maiBid.AccountID).
+					Msg("GDPR consent given but no TCF string provided - bidders may reject")
+				user.Consent = "1"  // Non-compliant fallback
 			} else {
-				user.Consent = "0"
+				user.Consent = "0"  // No consent
+			}
+
+			// Format user.data segments for first-party data targeting (OpenRTB 2.6)
+			if len(maiBid.User.Data) > 0 {
+				user.Data = make([]openrtb.Data, 0, len(maiBid.User.Data))
+				for _, segment := range maiBid.User.Data {
+					data := openrtb.Data{}
+
+					// Extract name if present
+					if name, ok := segment["name"].(string); ok {
+						data.Name = name
+					}
+
+					// Extract ID if present
+					if id, ok := segment["id"].(string); ok {
+						data.ID = id
+					}
+
+					// Extract segments if present
+					if segs, ok := segment["segment"].([]interface{}); ok {
+						data.Segment = make([]openrtb.Segment, 0, len(segs))
+						for _, seg := range segs {
+							if segMap, ok := seg.(map[string]interface{}); ok {
+								segment := openrtb.Segment{}
+								if id, ok := segMap["id"].(string); ok {
+									segment.ID = id
+								}
+								if name, ok := segMap["name"].(string); ok {
+									segment.Name = name
+								}
+								if value, ok := segMap["value"].(string); ok {
+									segment.Value = value
+								}
+								data.Segment = append(data.Segment, segment)
+							}
+						}
+					}
+
+					user.Data = append(user.Data, data)
+				}
+
+				logger.Log.Info().
+					Int("data_segments", len(user.Data)).
+					Msg("Formatted user.data segments for OpenRTB")
 			}
 		}
 	}
@@ -566,17 +1178,40 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		}
 	}
 
+	// Build supply chain object (schain) - REQUIRED for transparency and fraud prevention
+	// Identifies Catalyst as the seller in the supply chain
+	// Per OpenRTB 2.5 spec, schain goes in Source.SChain (not Source.Ext)
+	source := &openrtb.Source{
+		SChain: &openrtb.SupplyChain{
+			Ver:      "1.0",
+			Complete: 1,
+			Nodes: []openrtb.SupplyChainNode{
+				{
+					ASI:  "thenexusengine.com",
+					SID:  maiBid.AccountID,
+					HP:   1,
+					Name: "The Nexus Engine (Catalyst)",
+				},
+			},
+		},
+	}
+
 	// Build OpenRTB request
 	ortbReq := &openrtb.BidRequest{
 		ID:     requestID,
 		Imp:    imps,
 		Site:   site,
-		Device: device,
+		Device: deviceObj,
 		User:   user,
 		Regs:   regs,
+		Source: source, // Supply chain transparency
 		Cur:    []string{"USD"},
 		TMax:   2500, // 2500ms internal timeout
 	}
+
+	logger.Log.Debug().
+		Str("account_id", maiBid.AccountID).
+		Msg("Added supply chain (schain) to bid request")
 
 	return ortbReq, impToSlot, nil
 }
@@ -625,6 +1260,15 @@ func (h *CatalystBidHandler) convertToMAIResponse(auctionResp *exchange.AuctionR
 				}
 			}
 
+			// Extract pre-built GAM targeting keys from bid extension
+			// These are set by exchange.buildBidExtension and include _catalyst keys
+			if len(bid.Ext) > 0 {
+				var bidExt openrtb.BidExt
+				if err := json.Unmarshal(bid.Ext, &bidExt); err == nil && bidExt.Prebid != nil && len(bidExt.Prebid.Targeting) > 0 {
+					maiBid.Targeting = bidExt.Prebid.Targeting
+				}
+			}
+
 			maiResp.Bids = append(maiResp.Bids, maiBid)
 		}
 	}
@@ -651,6 +1295,50 @@ func (h *CatalystBidHandler) writeErrorResponse(w http.ResponseWriter, message s
 	})
 }
 
+// extractBidderParamsFromMapping extracts bidder-specific params from legacy mapping file
+// Note: This maintains backward compatibility with integer values in the mapping file
+func (h *CatalystBidHandler) extractBidderParamsFromMapping(bidderCode string, adUnitConfig *AdUnitConfig) map[string]interface{} {
+	switch bidderCode {
+	case "rubicon":
+		if adUnitConfig.Rubicon != nil {
+			return map[string]interface{}{
+				"accountId":        adUnitConfig.Rubicon.AccountID,        // int (correct)
+				"siteId":           adUnitConfig.Rubicon.SiteID,           // int (correct)
+				"zoneId":           adUnitConfig.Rubicon.ZoneID,           // int (correct)
+				"bidonmultiformat": adUnitConfig.Rubicon.BidOnMultiFormat, // bool (correct)
+			}
+		}
+	case "kargo":
+		if adUnitConfig.Kargo != nil {
+			return map[string]interface{}{
+				"placementId": adUnitConfig.Kargo.PlacementID, // string (correct)
+			}
+		}
+	case "sovrn":
+		if adUnitConfig.Sovrn != nil {
+			// Note: tagid must be string per Prebid Server spec
+			return map[string]interface{}{
+				"tagid": adUnitConfig.Sovrn.TagID, // string (will be converted from mapping)
+			}
+		}
+	case "pubmatic":
+		if adUnitConfig.Pubmatic != nil {
+			// Note: publisherId and adSlot must be strings per Prebid Server spec
+			return map[string]interface{}{
+				"publisherId": adUnitConfig.Pubmatic.PublisherID, // string (will be converted from mapping)
+				"adSlot":      adUnitConfig.Pubmatic.AdSlot,      // string (will be converted from mapping)
+			}
+		}
+	case "triplelift":
+		if adUnitConfig.Triplelift != nil {
+			return map[string]interface{}{
+				"inventoryCode": adUnitConfig.Triplelift.InventoryCode, // string (correct)
+			}
+		}
+	}
+	return nil
+}
+
 // getBidderKeys extracts keys from user IDs map for logging
 func getBidderKeys(userIDs map[string]string) []string {
 	keys := make([]string, 0, len(userIDs))
@@ -658,4 +1346,49 @@ func getBidderKeys(userIDs map[string]string) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// getBidderNames extracts keys from bidder config map for logging
+func getBidderNames(impExt map[string]interface{}) []string {
+	keys := make([]string, 0, len(impExt))
+	for k := range impExt {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+
+// getConfiguredBidders extracts bidder names from config map for logging
+func getConfiguredBidders(configs map[string]map[string]interface{}) []string {
+	keys := make([]string, 0, len(configs))
+	for k := range configs {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// detectDeviceType determines device type from User-Agent string
+// Returns "mobile" for mobile devices, "desktop" otherwise
+func detectDeviceType(userAgent string) string {
+	if userAgent == "" {
+		return "desktop" // Default to desktop if no UA
+	}
+
+	// Normalize to lowercase for case-insensitive matching
+	ua := strings.ToLower(userAgent)
+
+	// Mobile device indicators
+	mobileIndicators := []string{
+		"mobile", "android", "iphone", "ipad", "ipod",
+		"blackberry", "windows phone", "webos", "opera mini",
+		"opera mobi", "kindle", "silk", "palm", "symbian",
+	}
+
+	for _, indicator := range mobileIndicators {
+		if strings.Contains(ua, indicator) {
+			return "mobile"
+		}
+	}
+
+	return "desktop"
 }

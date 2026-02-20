@@ -24,9 +24,9 @@ type Bidder struct {
 	SupportsAudio    bool                   `json:"supports_audio"`
 	GVLVendorID      *int                   `json:"gvl_vendor_id,omitempty"`
 	HTTPHeaders      map[string]interface{} `json:"http_headers"`
-	Description      string                 `json:"description,omitempty"`
-	DocumentationURL string                 `json:"documentation_url,omitempty"`
-	ContactEmail     string                 `json:"contact_email,omitempty"`
+	Description      sql.NullString         `json:"description,omitempty"`
+	DocumentationURL sql.NullString         `json:"documentation_url,omitempty"`
+	ContactEmail     sql.NullString         `json:"contact_email,omitempty"`
 	Version          int                    `json:"version"`
 	CreatedAt        time.Time              `json:"created_at"`
 	UpdatedAt        time.Time              `json:"updated_at"`

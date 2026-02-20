@@ -25,13 +25,14 @@ func TestNew(t *testing.T) {
 func TestMakeRequests_OnePerImpression(t *testing.T) {
 	adapter := New("")
 
-	// Create request with multiple impressions
+	// Create request with multiple impressions with Rubicon params
+	rubiconExt := json.RawMessage(`{"rubicon":{"accountId":123,"siteId":456,"zoneId":789}}`)
 	request := &openrtb.BidRequest{
 		ID: "test-request-1",
 		Imp: []openrtb.Imp{
-			{ID: "imp-1", Banner: &openrtb.Banner{W: 300, H: 250}},
-			{ID: "imp-2", Banner: &openrtb.Banner{W: 728, H: 90}},
-			{ID: "imp-3", Video: &openrtb.Video{W: 640, H: 480}},
+			{ID: "imp-1", Banner: &openrtb.Banner{W: 300, H: 250}, Ext: rubiconExt},
+			{ID: "imp-2", Banner: &openrtb.Banner{W: 728, H: 90}, Ext: rubiconExt},
+			{ID: "imp-3", Video: &openrtb.Video{W: 640, H: 480}, Ext: rubiconExt},
 		},
 		Site: &openrtb.Site{Domain: "example.com"},
 	}
@@ -139,5 +140,54 @@ func TestInfo(t *testing.T) {
 
 	if info.Capabilities == nil || info.Capabilities.Site == nil {
 		t.Fatal("Expected capabilities to be set")
+	}
+}
+
+func TestPreserveBidOnMultiformat(t *testing.T) {
+	adapter := New("")
+
+	// Create request with bidonmultiformat flag
+	rubiconExt := json.RawMessage(`{"rubicon":{"accountId":123,"siteId":456,"zoneId":789,"bidonmultiformat":true}}`)
+	request := &openrtb.BidRequest{
+		ID: "test-request-1",
+		Imp: []openrtb.Imp{
+			{ID: "imp-1", Banner: &openrtb.Banner{W: 300, H: 250}, Ext: rubiconExt},
+		},
+		Site: &openrtb.Site{Domain: "example.com"},
+	}
+
+	requests, errs := adapter.MakeRequests(request, nil)
+
+	if len(errs) > 0 {
+		t.Fatalf("Unexpected errors: %v", errs)
+	}
+
+	if len(requests) != 1 {
+		t.Fatalf("Expected 1 request, got %d", len(requests))
+	}
+
+	// Parse the request body to verify bidonmultiformat is preserved
+	var parsed openrtb.BidRequest
+	if err := json.Unmarshal(requests[0].Body, &parsed); err != nil {
+		t.Fatalf("Failed to parse request body: %v", err)
+	}
+
+	if len(parsed.Imp) != 1 {
+		t.Fatalf("Expected 1 impression, got %d", len(parsed.Imp))
+	}
+
+	// Check that bidonmultiformat is preserved in imp.ext
+	var impExt map[string]interface{}
+	if err := json.Unmarshal(parsed.Imp[0].Ext, &impExt); err != nil {
+		t.Fatalf("Failed to parse imp.ext: %v", err)
+	}
+
+	bidonmultiformat, ok := impExt["bidonmultiformat"].(bool)
+	if !ok {
+		t.Error("Expected bidonmultiformat to be present in imp.ext")
+	}
+
+	if !bidonmultiformat {
+		t.Error("Expected bidonmultiformat to be true")
 	}
 }

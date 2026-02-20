@@ -54,8 +54,9 @@
     tne.requestAd(slot);
 
     // Setup auto-refresh if configured
+    // FIXED #6: Store interval ID so it can be cleared in destroySlot()
     if (slot.refreshRate > 0) {
-      setInterval(function() {
+      slot.refreshInterval = setInterval(function() {
         tne.refreshAd(slot.divId);
       }, slot.refreshRate * 1000);
     }
@@ -97,6 +98,11 @@
       }
     }
 
+    // FIXED #7-8: Remove old script before adding new one to prevent accumulation
+    if (slot.scriptTag && slot.scriptTag.parentNode) {
+      slot.scriptTag.parentNode.removeChild(slot.scriptTag);
+    }
+
     // Load ad script
     var script = document.createElement('script');
     script.src = url;
@@ -108,6 +114,7 @@
     };
 
     document.body.appendChild(script);
+    slot.scriptTag = script; // Track for cleanup
   };
 
   /**
@@ -197,6 +204,18 @@
    * @param {string} divId - Container div ID
    */
   tne.destroySlot = function(divId) {
+    // FIXED #6: Clear refresh interval to prevent memory leak
+    var slot = tne._slots[divId];
+    if (slot && slot.refreshInterval) {
+      clearInterval(slot.refreshInterval);
+      slot.refreshInterval = null;
+    }
+
+    // FIXED #7-8: Remove script tag to prevent DOM accumulation
+    if (slot && slot.scriptTag && slot.scriptTag.parentNode) {
+      slot.scriptTag.parentNode.removeChild(slot.scriptTag);
+    }
+
     var container = document.getElementById(divId);
     if (container) {
       container.innerHTML = '';

@@ -494,3 +494,58 @@ func BuildMinimalImp(impID string, mediaTypes []string, sizes []string) MinimalI
 		Sizes:      sizes,
 	}
 }
+
+// SendAuctionEvent sends auction-level analytics to IDR service
+func (c *Client) SendAuctionEvent(ctx context.Context, event interface{}) error {
+	return c.post(ctx, "/api/events/auction", event)
+}
+
+// SendBidderEvent sends per-bidder analytics to IDR service
+func (c *Client) SendBidderEvent(ctx context.Context, event interface{}) error {
+	return c.post(ctx, "/api/events/bidder", event)
+}
+
+// SendWinEvent sends winning bid analytics to IDR service
+func (c *Client) SendWinEvent(ctx context.Context, event interface{}) error {
+	return c.post(ctx, "/api/events/win", event)
+}
+
+// Flush ensures all buffered events are sent
+// This is a no-op for the client, but required by analytics.Module interface
+func (c *Client) Flush() error {
+	// No buffering in client - events are sent synchronously
+	return nil
+}
+
+// post is a helper method to send POST requests to IDR service
+func (c *Client) post(ctx context.Context, path string, data interface{}) error {
+	body, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal event: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("X-Internal-API-Key", c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send event: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		// Read error response body for better debugging
+		if errBody, err := io.ReadAll(io.LimitReader(resp.Body, 1024)); err == nil && len(errBody) > 0 {
+			return fmt.Errorf("IDR service returned status %d: %s", resp.StatusCode, string(errBody))
+		}
+		return fmt.Errorf("IDR service returned status %d", resp.StatusCode)
+	}
+
+	return nil
+}

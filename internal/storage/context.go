@@ -6,7 +6,8 @@ import (
 )
 
 // DefaultDBTimeout is the default timeout for database operations
-const DefaultDBTimeout = 5 * time.Second
+// Reduced from 5s to 500ms to fail fast and expose slow queries
+const DefaultDBTimeout = 500 * time.Millisecond
 
 // withTimeout wraps a context with a default timeout if it doesn't already have a deadline
 func withTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {

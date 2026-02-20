@@ -34,6 +34,7 @@ func TestMakeRequests(t *testing.T) {
 					W: 300,
 					H: 250,
 				},
+				Ext: json.RawMessage(`{"sovrn":{"tagid":"123456"}}`),
 			},
 		},
 		Site: &openrtb.Site{
@@ -142,8 +143,8 @@ func TestMakeBids_BadStatus(t *testing.T) {
 
 	bidderResponse, errs := adapter.MakeBids(&openrtb.BidRequest{}, response)
 
-	if len(errs) > 0 {
-		t.Fatalf("Unexpected errors: %v", errs)
+	if len(errs) != 1 {
+		t.Fatalf("Expected 1 error, got %d", len(errs))
 	}
 
 	if bidderResponse != nil {
