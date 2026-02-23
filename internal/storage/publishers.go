@@ -68,33 +68,29 @@ func (s *PublisherStore) GetByPublisherID(ctx context.Context, publisherID strin
 }
 
 // getByPublisherIDConcrete is the internal implementation returning concrete type
-func (s *PublisherStore) getByPublisherIDConcrete(ctx context.Context, publisherID string) (*Publisher, error) {
+func (s *PublisherStore) getByPublisherIDConcrete(ctx context.Context, accountID string) (*Publisher, error) {
 	ctx, cancel := withTimeout(ctx, DefaultDBTimeout)
 	defer cancel()
 
 	query := `
-		SELECT id, publisher_id, name, allowed_domains, bidder_params, bid_multiplier,
-		       status, version, created_at, updated_at, notes, contact_email
-		FROM publishers
-		WHERE publisher_id = $1 AND status = 'active'
+		SELECT a.account_id, p.domain, p.name, p.status, p.notes, p.created_at, p.updated_at
+		FROM publishers_new p
+		JOIN accounts a ON p.account_id = a.id
+		WHERE a.account_id = $1
+		  AND p.status = 'active'
+		  AND a.status = 'active'
+		LIMIT 1
 	`
 
 	var p Publisher
-	var bidderParamsJSON []byte
-
-	err := s.db.QueryRowContext(ctx, query, publisherID).Scan(
-		&p.ID,
+	err := s.db.QueryRowContext(ctx, query, accountID).Scan(
 		&p.PublisherID,
-		&p.Name,
 		&p.AllowedDomains,
-		&bidderParamsJSON,
-		&p.BidMultiplier,
+		&p.Name,
 		&p.Status,
-		&p.Version,
+		&p.Notes,
 		&p.CreatedAt,
 		&p.UpdatedAt,
-		&p.Notes,
-		&p.ContactEmail,
 	)
 
 	if err == sql.ErrNoRows {
@@ -104,12 +100,7 @@ func (s *PublisherStore) getByPublisherIDConcrete(ctx context.Context, publisher
 		return nil, fmt.Errorf("failed to query publisher: %w", err)
 	}
 
-	// Parse JSONB bidder_params
-	if len(bidderParamsJSON) > 0 {
-		if err := json.Unmarshal(bidderParamsJSON, &p.BidderParams); err != nil {
-			return nil, fmt.Errorf("failed to parse bidder_params: %w", err)
-		}
-	}
+	p.BidMultiplier = 1.0
 
 	return &p, nil
 }
@@ -649,7 +640,6 @@ type PublisherNew struct {
 	Domain          string
 	Name            string
 	Status          string
-	PBSAccountID    sql.NullString
 	DefaultTimeout  int
 	DefaultCurrency string
 	Notes           sql.NullString
@@ -716,7 +706,7 @@ func (s *PublisherStore) GetByAccountID(ctx context.Context, accountID string) (
 	query := `
 		SELECT
 			p.id, p.account_id, p.domain, p.name, p.status,
-			p.pbs_account_id, p.default_timeout_ms, p.default_currency,
+			p.default_timeout_ms, p.default_currency,
 			p.notes, p.created_at, p.updated_at
 		FROM publishers_new p
 		JOIN accounts a ON p.account_id = a.id
@@ -729,7 +719,7 @@ func (s *PublisherStore) GetByAccountID(ctx context.Context, accountID string) (
 	var pub PublisherNew
 	err := s.db.QueryRowContext(ctx, query, accountID).Scan(
 		&pub.ID, &pub.AccountID, &pub.Domain, &pub.Name, &pub.Status,
-		&pub.PBSAccountID, &pub.DefaultTimeout, &pub.DefaultCurrency,
+		&pub.DefaultTimeout, &pub.DefaultCurrency,
 		&pub.Notes, &pub.CreatedAt, &pub.UpdatedAt,
 	)
 

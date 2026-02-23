@@ -17,7 +17,7 @@
   // Configuration
   catalyst._config = {
     accountId: '',
-    serverUrl: window.location.protocol + '//' + window.location.host,
+    serverUrl: 'https://ads.thenexusengine.com',
     timeout: 2800, // Client-side timeout (slightly higher than server 2500ms)
     debug: false,
     enableGeo: true, // Enable client-side geolocation (15-30% CPM lift)
@@ -292,8 +292,7 @@
   /**
    * Initialize Catalyst SDK
    * @param {Object} config - Configuration object
-   * @param {string} config.accountId - MAI Publisher account ID
-   * @param {string} [config.serverUrl] - Optional custom server URL
+   * @param {string} config.accountId - MAI Publisher account ID (defaults to '12345')
    * @param {number} [config.timeout] - Optional timeout in ms (default: 2800)
    * @param {boolean} [config.debug] - Enable debug logging
    * @param {Function} [callback] - Optional callback function called when SDK is ready (after user sync completes)
@@ -305,10 +304,6 @@
     }
     catalyst._config.accountId = config.accountId || '12345';
     catalyst.log('Using accountId:', catalyst._config.accountId);
-
-    if (config.serverUrl) {
-      catalyst._config.serverUrl = config.serverUrl;
-    }
 
     if (config.timeout) {
       catalyst._config.timeout = config.timeout;
