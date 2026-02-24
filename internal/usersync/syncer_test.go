@@ -126,8 +126,10 @@ func TestSyncerGetSync_NoURL(t *testing.T) {
 func TestDefaultSyncerConfigs(t *testing.T) {
 	configs := DefaultSyncerConfigs()
 
-	// Check that common bidders are configured
-	expectedBidders := []string{"appnexus", "rubicon", "pubmatic", "openx", "triplelift"}
+	// Check that common bidders are configured and enabled.
+	// Rubicon is intentionally excluded here — it is disabled pending
+	// registration of a custom p= key with Magnite (see DefaultSyncerConfigs).
+	expectedBidders := []string{"appnexus", "pubmatic", "openx", "triplelift"}
 
 	for _, bidder := range expectedBidders {
 		config, ok := configs[bidder]

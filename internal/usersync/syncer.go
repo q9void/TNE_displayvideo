@@ -21,11 +21,22 @@ const (
 type SyncerConfig struct {
 	// BidderCode is the bidder identifier
 	BidderCode string
-	// IframeSyncURL is the URL template for iframe syncs
-	// Use {{gdpr}}, {{gdpr_consent}}, {{us_privacy}}, {{redirect_url}} as placeholders
+	// IframeSyncURL is the URL template for iframe syncs.
+	// Supported placeholders: {{gdpr}}, {{gdpr_consent}}, {{us_privacy}},
+	// {{redirect_url}}, {{redirect_url_base}}
 	IframeSyncURL string
-	// RedirectSyncURL is the URL template for redirect syncs
+	// RedirectSyncURL is the URL template for redirect syncs.
+	// Supported placeholders: {{gdpr}}, {{gdpr_consent}}, {{us_privacy}},
+	// {{redirect_url}}, {{redirect_url_base}}
 	RedirectSyncURL string
+	// UserMacro is the UID placeholder the SSP substitutes in the redirect URL.
+	// Defaults to "$UID" when empty. Use "#PMUID" for PubMatic.
+	// The macro is embedded in the callback URL (via {{redirect_url}}) and gets
+	// URL-encoded when passed to the SSP, so the SSP must substitute it before
+	// redirecting. Macros containing "#" (e.g. #PMUID) MUST use {{redirect_url}}
+	// so the "#" is percent-encoded (%23) inside the query parameter and not
+	// interpreted as a URL fragment by the browser.
+	UserMacro string
 	// SupportCORS indicates if the bidder supports CORS for the sync
 	SupportCORS bool
 	// Enabled indicates if syncing is enabled for this bidder
@@ -82,8 +93,28 @@ func (s *Syncer) GetSync(syncType SyncType, gdpr string, consent string, usPriva
 		return nil, fmt.Errorf("no %s sync URL for %s", syncType, s.config.BidderCode)
 	}
 
-	// Build the redirect URL (where bidder will send the UID)
-	redirectURL := fmt.Sprintf("%s/setuid?bidder=%s&uid=$UID", s.hostURL, url.QueryEscape(s.config.BidderCode))
+	// Determine the UID macro for this SSP (default: $UID).
+	macro := s.config.UserMacro
+	if macro == "" {
+		macro = "$UID"
+	}
+
+	// Build the redirect URLs (where the bidder will send the UID back to us).
+	//
+	// {{redirect_url}} — full callback URL with the SSP's UID macro embedded; the
+	// entire URL is URL-encoded when substituted.  The SSP substitutes its macro
+	// (e.g. $UID or %23PMUID after decoding) with the real user ID before redirecting.
+	// Use this for most SSPs and for macros whose characters are safe in URLs ($UID),
+	// AND for macros whose characters must be percent-encoded (#PMUID → %23PMUID)
+	// to avoid being stripped as a URL fragment by the browser.
+	//
+	// {{redirect_url_base}} — same callback URL but WITHOUT the macro (ends at "uid=").
+	// Use for SSPs (e.g. Sovrn) that append their UID macro AFTER the URL-encoded
+	// redirect string: redir={{redirect_url_base}}$UID
+	// The macro stays as a literal suffix outside the encoding, so the SSP can find and
+	// substitute it in the raw URL string.
+	redirectURL := fmt.Sprintf("%s/setuid?bidder=%s&uid=%s", s.hostURL, url.QueryEscape(s.config.BidderCode), macro)
+	redirectURLBase := fmt.Sprintf("%s/setuid?bidder=%s&uid=", s.hostURL, url.QueryEscape(s.config.BidderCode))
 
 	// Replace placeholders
 	syncURL := urlTemplate
@@ -91,6 +122,7 @@ func (s *Syncer) GetSync(syncType SyncType, gdpr string, consent string, usPriva
 	syncURL = strings.ReplaceAll(syncURL, "{{gdpr_consent}}", url.QueryEscape(consent))
 	syncURL = strings.ReplaceAll(syncURL, "{{us_privacy}}", url.QueryEscape(usPrivacy))
 	syncURL = strings.ReplaceAll(syncURL, "{{redirect_url}}", url.QueryEscape(redirectURL))
+	syncURL = strings.ReplaceAll(syncURL, "{{redirect_url_base}}", url.QueryEscape(redirectURLBase))
 
 	return &SyncInfo{
 		URL:    syncURL,
@@ -119,17 +151,38 @@ func DefaultSyncerConfigs() map[string]SyncerConfig {
 			SupportCORS:     true,
 			Enabled:         true,
 		},
+		// BLOCKED: Rubicon requires a custom p= key registered via header-bidding@rubiconproject.com.
+		// The shared p=prebid key belongs to prebid.org's hosted server; using it redirects callbacks
+		// to prebid.adnxs.com instead of ads.thenexusengine.com, so no UIDs are ever stored.
+		//
+		// Action: Email header-bidding@rubiconproject.com requesting registration of:
+		//   https://ads.thenexusengine.com/setuid?bidder=rubicon&uid=$UID
+		// They will provide a custom p=<KEY> value.
+		//
+		// TODO: Once the key is received, set Enabled: true and replace p=prebid with p=<KEY> in both URLs below.
 		"rubicon": {
 			BidderCode:      "rubicon",
 			RedirectSyncURL: "https://pixel.rubiconproject.com/exchange/sync.php?p=prebid&gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}&redir={{redirect_url}}",
 			IframeSyncURL:   "https://eus.rubiconproject.com/usync.html?p=prebid&gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}",
 			SupportCORS:     true,
-			Enabled:         true,
+			Enabled:         false, // Disabled until custom p= key is registered with Magnite
 		},
+		// NOTE: PubMatic's UID macro is #PMUID (not $UID).  The '#' character is a URL
+		// fragment delimiter and would be stripped by the browser if placed outside a
+		// percent-encoded query parameter.  We use {{redirect_url}} (which URL-encodes
+		// the full callback including the macro) so '#' is encoded as '%23' inside the
+		// pu= value.  PubMatic's server decodes the pu parameter, finds '#PMUID', and
+		// substitutes the real user ID before issuing the redirect.
+		//
+		// p=159706 is the PBS partner ID recognised by PubMatic for any Prebid Server host.
+		//
+		// For the iframe sync, PubMatic's JS directly appends the UID to the predirect
+		// URL, so {{redirect_url_base}} (ends at uid=) is correct — no explicit macro needed.
 		"pubmatic": {
 			BidderCode:      "pubmatic",
-			RedirectSyncURL: "https://ads.pubmatic.com/AdServer/js/user_sync.html?gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}&predirect={{redirect_url}}",
-			IframeSyncURL:   "https://ads.pubmatic.com/AdServer/js/user_sync.html?gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}&predirect={{redirect_url}}",
+			UserMacro:       "#PMUID",
+			RedirectSyncURL: "https://image8.pubmatic.com/AdServer/ImgSync?p=159706&gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}&pu={{redirect_url}}",
+			IframeSyncURL:   "https://ads.pubmatic.com/AdServer/js/user_sync.html?gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}&predirect={{redirect_url_base}}",
 			SupportCORS:     true,
 			Enabled:         true,
 		},
@@ -139,6 +192,10 @@ func DefaultSyncerConfigs() map[string]SyncerConfig {
 			SupportCORS:     true,
 			Enabled:         true,
 		},
+		// NOTE: TripleLift requires redirect domains to be allowlisted before syncing works.
+		// Without allowlisting, syncs return 400 with X-Error: "Unallowed sync domain".
+		// Action: Email prebid@triplelift.com to allowlist ads.thenexusengine.com.
+		// No code change needed once allowlisted — sync will work as-is.
 		"triplelift": {
 			BidderCode:      "triplelift",
 			RedirectSyncURL: "https://eb2.3lift.com/sync?gdpr={{gdpr}}&cmp_cs={{gdpr_consent}}&us_privacy={{us_privacy}}&redir={{redirect_url}}",
@@ -163,12 +220,18 @@ func DefaultSyncerConfigs() map[string]SyncerConfig {
 			SupportCORS:     true,
 			Enabled:         true,
 		},
+		// NOTE: Sovrn appends their UID macro AFTER the URL-encoded redirect string.
+		// Using {{redirect_url}} would encode $UID as %24UID, which Sovrn cannot substitute.
+		// {{redirect_url_base}} ends at "uid=" (no $UID), so $UID remains a literal suffix
+		// that Sovrn substitutes correctly before returning the redirect to the browser.
 		"sovrn": {
 			BidderCode:      "sovrn",
-			RedirectSyncURL: "https://ap.lijit.com/pixel?redir={{redirect_url}}",
+			RedirectSyncURL: "https://ap.lijit.com/pixel?redir={{redirect_url_base}}$UID",
 			SupportCORS:     true,
 			Enabled:         true,
 		},
+		// NOTE: Kargo is an invitation-only marketplace. Confirm with Kargo account manager
+		// that cookie sync is enabled and configured for ads.thenexusengine.com.
 		"kargo": {
 			BidderCode:      "kargo",
 			RedirectSyncURL: "https://crb.kargo.com/api/v1/dsync/PrebidServer?gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}&r={{redirect_url}}",

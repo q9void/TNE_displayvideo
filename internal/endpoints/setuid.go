@@ -81,8 +81,10 @@ func (h *SetUIDHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle UID
-	if uid == "" || uid == "$UID" || uid == "0" {
-		// Bidder sent empty/invalid UID - delete any existing
+	if uid == "" || uid == "$UID" || uid == "#PMUID" || uid == "0" {
+		// Bidder sent an empty or unsubstituted UID macro — delete any existing UID.
+		// $UID  — generic Prebid macro not replaced (most SSPs)
+		// #PMUID — PubMatic macro not replaced (account not activated or unknown user)
 		cookie.DeleteUID(bidderLower)
 		logger.Log.Debug().Str("bidder", bidder).Msg("Deleted UID (empty value received)")
 	} else {
