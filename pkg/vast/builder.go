@@ -55,7 +55,7 @@ func (b *Builder) WithWrapper(adSystem, vastTagURI string) *Builder {
 	}
 	b.current.Wrapper = &Wrapper{
 		AdSystem:     AdSystem{Value: adSystem},
-		VASTAdTagURI: vastTagURI,
+		VASTAdTagURI: CDATAElement{Value: vastTagURI},
 		Impressions:  make([]Impression, 0),
 	}
 	return b
@@ -99,7 +99,7 @@ func (b *Builder) WithLinearCreative(id string, duration time.Duration) *LinearB
 
 	linear := &Linear{
 		Duration:       Duration(FormatDuration(duration)),
-		MediaFiles:     MediaFiles{MediaFile: make([]MediaFile, 0)},
+		MediaFiles:     &MediaFiles{MediaFile: make([]MediaFile, 0)},
 		TrackingEvents: TrackingEvents{Tracking: make([]Tracking, 0)},
 	}
 
@@ -165,6 +165,9 @@ func (lb *LinearBuilder) WithMediaFile(url, mimeType string, width, height int, 
 	}
 	for _, opt := range opts {
 		opt(&mf)
+	}
+	if lb.linear.MediaFiles == nil {
+		lb.linear.MediaFiles = &MediaFiles{}
 	}
 	lb.linear.MediaFiles.MediaFile = append(lb.linear.MediaFiles.MediaFile, mf)
 	return lb

@@ -121,7 +121,7 @@ func TestInLineValidation(t *testing.T) {
 								{
 									Linear: &Linear{
 										Duration: "00:00:30",
-										MediaFiles: MediaFiles{
+										MediaFiles: &MediaFiles{
 											MediaFile: []MediaFile{
 												{
 													Delivery: "progressive",
@@ -157,7 +157,7 @@ func TestInLineValidation(t *testing.T) {
 						Impressions: []Impression{{Value: "https://example.com/imp"}},
 						Creatives: Creatives{
 							Creative: []Creative{
-								{Linear: &Linear{Duration: "00:00:30", MediaFiles: MediaFiles{MediaFile: []MediaFile{{Delivery: "progressive", Type: "video/mp4", Width: 1920, Height: 1080, Value: "https://example.com/video.mp4"}}}}},
+								{Linear: &Linear{Duration: "00:00:30", MediaFiles: &MediaFiles{MediaFile: []MediaFile{{Delivery: "progressive", Type: "video/mp4", Width: 1920, Height: 1080, Value: "https://example.com/video.mp4"}}}}},
 							},
 						},
 					},
@@ -181,7 +181,7 @@ func TestInLineValidation(t *testing.T) {
 						Impressions: []Impression{}, // Empty
 						Creatives: Creatives{
 							Creative: []Creative{
-								{Linear: &Linear{Duration: "00:00:30", MediaFiles: MediaFiles{MediaFile: []MediaFile{{Delivery: "progressive", Type: "video/mp4", Width: 1920, Height: 1080, Value: "https://example.com/video.mp4"}}}}},
+								{Linear: &Linear{Duration: "00:00:30", MediaFiles: &MediaFiles{MediaFile: []MediaFile{{Delivery: "progressive", Type: "video/mp4", Width: 1920, Height: 1080, Value: "https://example.com/video.mp4"}}}}},
 							},
 						},
 					},
@@ -205,7 +205,7 @@ func TestInLineValidation(t *testing.T) {
 						Impressions: []Impression{{Value: "not-a-url"}}, // Invalid URL
 						Creatives: Creatives{
 							Creative: []Creative{
-								{Linear: &Linear{Duration: "00:00:30", MediaFiles: MediaFiles{MediaFile: []MediaFile{{Delivery: "progressive", Type: "video/mp4", Width: 1920, Height: 1080, Value: "https://example.com/video.mp4"}}}}},
+								{Linear: &Linear{Duration: "00:00:30", MediaFiles: &MediaFiles{MediaFile: []MediaFile{{Delivery: "progressive", Type: "video/mp4", Width: 1920, Height: 1080, Value: "https://example.com/video.mp4"}}}}},
 							},
 						},
 					},
@@ -230,7 +230,7 @@ func TestInLineValidation(t *testing.T) {
 						Error:       "not-a-url", // Invalid
 						Creatives: Creatives{
 							Creative: []Creative{
-								{Linear: &Linear{Duration: "00:00:30", MediaFiles: MediaFiles{MediaFile: []MediaFile{{Delivery: "progressive", Type: "video/mp4", Width: 1920, Height: 1080, Value: "https://example.com/video.mp4"}}}}},
+								{Linear: &Linear{Duration: "00:00:30", MediaFiles: &MediaFiles{MediaFile: []MediaFile{{Delivery: "progressive", Type: "video/mp4", Width: 1920, Height: 1080, Value: "https://example.com/video.mp4"}}}}},
 							},
 						},
 					},
@@ -268,7 +268,7 @@ func TestLinearValidation(t *testing.T) {
 	t.Run("Missing_Duration", func(t *testing.T) {
 		linear := &Linear{
 			Duration: "", // Missing
-			MediaFiles: MediaFiles{
+			MediaFiles: &MediaFiles{
 				MediaFile: []MediaFile{
 					{
 						Delivery: "progressive",
@@ -291,7 +291,7 @@ func TestLinearValidation(t *testing.T) {
 	t.Run("Invalid_Duration_Format", func(t *testing.T) {
 		linear := &Linear{
 			Duration: "invalid", // Bad format
-			MediaFiles: MediaFiles{
+			MediaFiles: &MediaFiles{
 				MediaFile: []MediaFile{
 					{
 						Delivery: "progressive",
@@ -314,7 +314,7 @@ func TestLinearValidation(t *testing.T) {
 	t.Run("Missing_MediaFiles", func(t *testing.T) {
 		linear := &Linear{
 			Duration:   "00:00:30",
-			MediaFiles: MediaFiles{MediaFile: []MediaFile{}}, // Empty
+			MediaFiles: &MediaFiles{MediaFile: []MediaFile{}}, // Empty
 		}
 
 		result := &ValidationResult{Valid: true}
@@ -506,7 +506,7 @@ func TestWrapperValidation(t *testing.T) {
 				{
 					Wrapper: &Wrapper{
 						AdSystem:     AdSystem{Value: "Test"},
-						VASTAdTagURI: "https://example.com/vast",
+						VASTAdTagURI: CDATAElement{Value: "https://example.com/vast"},
 						Impressions:  []Impression{{Value: "https://example.com/imp"}},
 					},
 				},
@@ -524,7 +524,7 @@ func TestWrapperValidation(t *testing.T) {
 				{
 					Wrapper: &Wrapper{
 						AdSystem:     AdSystem{Value: "Test"},
-						VASTAdTagURI: "", // Missing
+						VASTAdTagURI: CDATAElement{Value: ""}, // Missing
 					},
 				},
 			},
@@ -542,7 +542,7 @@ func TestWrapperValidation(t *testing.T) {
 				{
 					Wrapper: &Wrapper{
 						AdSystem:     AdSystem{Value: "Test"},
-						VASTAdTagURI: "not-a-url",
+						VASTAdTagURI: CDATAElement{Value: "not-a-url"},
 					},
 				},
 			},

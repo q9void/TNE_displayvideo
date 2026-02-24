@@ -38,17 +38,24 @@ type InLine struct {
 	Extensions  *Extensions  `xml:"Extensions,omitempty"`
 }
 
-// Wrapper represents a wrapper ad that references another VAST
+// CDATAElement wraps a string value in a CDATA section when marshaled to XML.
+// Use this for URL fields (VASTAdTagURI, Error) that may contain & characters.
+type CDATAElement struct {
+	Value string `xml:",cdata"`
+}
+
+// Wrapper represents a wrapper ad that references another VAST.
+// Fields are ordered per VAST 4.0 spec: AdSystem → Error → Impression → Creatives → VASTAdTagURI.
 type Wrapper struct {
-	AdSystem               AdSystem     `xml:"AdSystem"`
-	VASTAdTagURI           string       `xml:"VASTAdTagURI"`
-	Error                  string       `xml:"Error,omitempty"`
-	Impressions            []Impression `xml:"Impression"`
-	Creatives              Creatives    `xml:"Creatives,omitempty"`
-	Extensions             *Extensions  `xml:"Extensions,omitempty"`
-	FollowAdditionalWraps  bool         `xml:"followAdditionalWrappers,attr,omitempty"`
-	AllowMultipleAds       bool         `xml:"allowMultipleAds,attr,omitempty"`
-	FallbackOnNoAd         bool         `xml:"fallbackOnNoAd,attr,omitempty"`
+	FollowAdditionalWraps bool         `xml:"followAdditionalWrappers,attr,omitempty"`
+	AllowMultipleAds      bool         `xml:"allowMultipleAds,attr,omitempty"`
+	FallbackOnNoAd        bool         `xml:"fallbackOnNoAd,attr,omitempty"`
+	AdSystem              AdSystem     `xml:"AdSystem"`
+	Error                 string       `xml:"Error,omitempty"`
+	Impressions           []Impression `xml:"Impression"`
+	Creatives             Creatives    `xml:"Creatives,omitempty"`
+	Extensions            *Extensions  `xml:"Extensions,omitempty"`
+	VASTAdTagURI          CDATAElement `xml:"VASTAdTagURI"`
 }
 
 // AdSystem identifies the ad server
@@ -97,13 +104,13 @@ type UniversalAdId struct {
 
 // Linear represents a linear (video) creative
 type Linear struct {
-	SkipOffset    string         `xml:"skipoffset,attr,omitempty"`
-	Duration      Duration       `xml:"Duration"`
-	AdParameters  *AdParameters  `xml:"AdParameters,omitempty"`
-	MediaFiles    MediaFiles     `xml:"MediaFiles"`
+	SkipOffset     string         `xml:"skipoffset,attr,omitempty"`
+	Duration       Duration       `xml:"Duration,omitempty"`
+	AdParameters   *AdParameters  `xml:"AdParameters,omitempty"`
+	MediaFiles     *MediaFiles    `xml:"MediaFiles,omitempty"`
 	TrackingEvents TrackingEvents `xml:"TrackingEvents,omitempty"`
-	VideoClicks   *VideoClicks   `xml:"VideoClicks,omitempty"`
-	Icons         *Icons         `xml:"Icons,omitempty"`
+	VideoClicks    *VideoClicks   `xml:"VideoClicks,omitempty"`
+	Icons          *Icons         `xml:"Icons,omitempty"`
 }
 
 // Duration represents a time duration in HH:MM:SS format

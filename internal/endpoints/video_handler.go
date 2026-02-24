@@ -470,7 +470,7 @@ func (h *VideoHandler) buildWrapperVAST(requestID, auctionURL string) *vast.VAST
 					FollowAdditionalWraps: true,
 					FallbackOnNoAd:        true,
 					AdSystem:              vast.AdSystem{Value: "TNEVideo"},
-					VASTAdTagURI:          auctionURL,
+					VASTAdTagURI:          vast.CDATAElement{Value: auctionURL},
 					Impressions: []vast.Impression{
 						{ID: "tne-imp", Value: trackingURL("impression")},
 					},

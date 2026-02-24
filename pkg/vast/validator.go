@@ -132,9 +132,9 @@ func validateWrapper(wrapper *Wrapper, prefix string, result *ValidationResult) 
 		result.AddError(prefix+".AdSystem", "AdSystem is required")
 	}
 
-	if wrapper.VASTAdTagURI == "" {
+	if wrapper.VASTAdTagURI.Value == "" {
 		result.AddError(prefix+".VASTAdTagURI", "VASTAdTagURI is required")
-	} else if !isValidURL(wrapper.VASTAdTagURI) {
+	} else if !isValidURL(wrapper.VASTAdTagURI.Value) {
 		result.AddError(prefix+".VASTAdTagURI", "Invalid VAST Ad Tag URI")
 	}
 
