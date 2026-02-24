@@ -317,9 +317,10 @@ func (s *Server) initHandlers() {
 	// Video endpoints (protected by privacy middleware)
 	mux.Handle("/video/vast", privacyMiddleware(http.HandlerFunc(videoHandler.HandleVASTRequest)))
 	mux.Handle("/video/openrtb", privacyMiddleware(http.HandlerFunc(videoHandler.HandleOpenRTBVideo)))
+	mux.Handle("/video/wrapper", privacyMiddleware(http.HandlerFunc(videoHandler.HandleVASTWrapper)))
 	endpoints.RegisterVideoEventRoutes(mux, videoEventHandler)
 
-	log.Info().Msg("Video endpoints registered: /video/vast, /video/openrtb, /video/event/*")
+	log.Info().Msg("Video endpoints registered: /video/vast, /video/openrtb, /video/wrapper, /video/event/*")
 
 	// Ad tag endpoints (direct publisher integration)
 	mux.HandleFunc("/ad/js", adTagHandler.HandleJavaScriptAd)

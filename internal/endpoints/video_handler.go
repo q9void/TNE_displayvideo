@@ -398,3 +398,102 @@ func parseStringArray(s string, defaultVal []string) []string {
 func generateRequestID() string {
 	return fmt.Sprintf("video-%d", time.Now().UnixNano())
 }
+
+// HandleVASTWrapper handles GET /video/wrapper requests.
+// Returns a VAST 4.0 Wrapper pointing to the /video/vast auction endpoint,
+// with TNE impression and quartile tracking pixels injected at the wrapper level.
+func (h *VideoHandler) HandleVASTWrapper(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	q := r.URL.Query()
+	requestID := q.Get("id")
+	if requestID == "" {
+		requestID = generateRequestID()
+	}
+
+	auctionURL := h.buildAuctionURL(q, requestID)
+	vastDoc := h.buildWrapperVAST(requestID, auctionURL)
+
+	data, err := vastDoc.Marshal()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to marshal VAST wrapper")
+		h.writeVASTError(w, "Failed to serialize response")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	// SECURITY NOTE: CORS wildcard intentional for VAST - see setVASTCORSHeaders
+	h.setVASTCORSHeaders(w)
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
+
+	log.Info().
+		Str("request_id", requestID).
+		Str("auction_url", auctionURL).
+		Msg("VAST wrapper response sent")
+}
+
+// buildAuctionURL constructs the downstream /video/vast URL by forwarding
+// relevant query parameters from the wrapper request.
+func (h *VideoHandler) buildAuctionURL(q url.Values, requestID string) string {
+	params := url.Values{}
+	for _, key := range []string{
+		"w", "h", "mindur", "maxdur", "skip", "skipafter",
+		"protocols", "mimes", "minbitrate", "maxbitrate",
+		"bidfloor", "site_id", "domain", "page", "placement",
+	} {
+		if v := q.Get(key); v != "" {
+			params.Set(key, v)
+		}
+	}
+	params.Set("id", requestID)
+	return h.trackingBaseURL + "/video/vast?" + params.Encode()
+}
+
+// buildWrapperVAST constructs a VAST 4.0 Wrapper document with TNE tracking pixels.
+func (h *VideoHandler) buildWrapperVAST(requestID, auctionURL string) *vast.VAST {
+	base := h.trackingBaseURL + "/video/event"
+	trackingURL := func(event string) string {
+		return fmt.Sprintf("%s?event=%s&bid_id=%s", base, event, url.QueryEscape(requestID))
+	}
+
+	return &vast.VAST{
+		Version: "4.0",
+		Ads: []vast.Ad{
+			{
+				ID: requestID,
+				Wrapper: &vast.Wrapper{
+					FollowAdditionalWraps: true,
+					FallbackOnNoAd:        true,
+					AdSystem:              vast.AdSystem{Value: "TNEVideo"},
+					VASTAdTagURI:          auctionURL,
+					Impressions: []vast.Impression{
+						{ID: "tne-imp", Value: trackingURL("impression")},
+					},
+					Creatives: vast.Creatives{
+						Creative: []vast.Creative{
+							{
+								ID: requestID + "-tracking",
+								Linear: &vast.Linear{
+									TrackingEvents: vast.TrackingEvents{
+										Tracking: []vast.Tracking{
+											{Event: vast.EventStart, Value: trackingURL(vast.EventStart)},
+											{Event: vast.EventFirstQuartile, Value: trackingURL(vast.EventFirstQuartile)},
+											{Event: vast.EventMidpoint, Value: trackingURL(vast.EventMidpoint)},
+											{Event: vast.EventThirdQuartile, Value: trackingURL(vast.EventThirdQuartile)},
+											{Event: vast.EventComplete, Value: trackingURL(vast.EventComplete)},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
