@@ -64,13 +64,8 @@ func TestPrivacyConsentHook_GDPR_NoConsent_StripsIDs(t *testing.T) {
 	hook := NewPrivacyConsentHook()
 	ctx := context.Background()
 
-	// Create request with GDPR=1 but no consent string
-	gdpr := int8(1)
-	regsExt := map[string]interface{}{
-		"gdpr": gdpr,
-	}
-	regsExtBytes, _ := json.Marshal(regsExt)
-
+	// Create request with GDPR=1 (native field) but no consent string
+	gdpr := 1
 	userExt := map[string]interface{}{
 		"eids": []interface{}{
 			map[string]interface{}{
@@ -92,7 +87,7 @@ func TestPrivacyConsentHook_GDPR_NoConsent_StripsIDs(t *testing.T) {
 			Ext:      userExtBytes,
 		},
 		Regs: &openrtb.Regs{
-			Ext: regsExtBytes,
+			GDPR: &gdpr,
 		},
 		Site: &openrtb.Site{
 			ID: "catalyst-account-12345",
@@ -133,14 +128,11 @@ func TestPrivacyConsentHook_GDPR_WithConsent_PreservesIDs(t *testing.T) {
 	ctx := context.Background()
 
 	// Create request with GDPR=1 AND valid consent string
-	gdpr := int8(1)
-	regsExt := map[string]interface{}{
-		"gdpr": gdpr,
-	}
-	regsExtBytes, _ := json.Marshal(regsExt)
+	gdpr := 1
+	consentStr := "COvzTO5OvzTO5AHABBENAlCsAP_AAH_AACiQGVNf_X_fb39j-_59_9t0eY1f9_7_v-0zjgeds-8Nyd_X_L8X42M7vF36pq4KuR4Eu3LBIQdlHOHcTUmw6IkVqTPsbk2Mr7NKJ7PEinMbe2dYGH9_n9XTuZKYr97s___z__-__v__7-f___-_____7AAAAA"
 
 	userExt := map[string]interface{}{
-		"consent": "COvzTO5OvzTO5AHABBENAlCsAP_AAH_AACiQGVNf_X_fb39j-_59_9t0eY1f9_7_v-0zjgeds-8Nyd_X_L8X42M7vF36pq4KuR4Eu3LBIQdlHOHcTUmw6IkVqTPsbk2Mr7NKJ7PEinMbe2dYGH9_n9XTuZKYr97s___z__-__v__7-f___-_____7AAAAA",
+		"consent": consentStr,
 		"eids": []interface{}{
 			map[string]interface{}{
 				"source": "rubiconproject.com",
@@ -155,11 +147,12 @@ func TestPrivacyConsentHook_GDPR_WithConsent_PreservesIDs(t *testing.T) {
 	req := &openrtb.BidRequest{
 		ID: "test-request-123",
 		User: &openrtb.User{
-			ID:  "user-123",
-			Ext: userExtBytes,
+			ID:      "user-123",
+			Consent: consentStr,
+			Ext:     userExtBytes,
 		},
 		Regs: &openrtb.Regs{
-			Ext: regsExtBytes,
+			GDPR: &gdpr,
 		},
 		Site: &openrtb.Site{
 			ID: "catalyst-account-12345",
@@ -192,11 +185,6 @@ func TestPrivacyConsentHook_CCPA_OptOut_StripsIDs(t *testing.T) {
 	ctx := context.Background()
 
 	// Create request with CCPA opt-out (position 2 = 'Y')
-	regsExt := map[string]interface{}{
-		"us_privacy": "1YYN", // Version=1, Notice=Y, Opt-out=Y (user opted out)
-	}
-	regsExtBytes, _ := json.Marshal(regsExt)
-
 	userExt := map[string]interface{}{
 		"eids": []interface{}{
 			map[string]interface{}{
@@ -216,7 +204,7 @@ func TestPrivacyConsentHook_CCPA_OptOut_StripsIDs(t *testing.T) {
 			Ext: userExtBytes,
 		},
 		Regs: &openrtb.Regs{
-			Ext: regsExtBytes,
+			USPrivacy: "1YYN", // Version=1, Notice=Y, Opt-out=Y (user opted out)
 		},
 		Site: &openrtb.Site{
 			ID: "catalyst-account-12345",
@@ -246,11 +234,6 @@ func TestPrivacyConsentHook_CCPA_NoOptOut_PreservesIDs(t *testing.T) {
 	ctx := context.Background()
 
 	// Create request with CCPA no opt-out (position 2 = 'N')
-	regsExt := map[string]interface{}{
-		"us_privacy": "1YNN", // Version=1, Notice=Y, Opt-out=N (user did NOT opt out)
-	}
-	regsExtBytes, _ := json.Marshal(regsExt)
-
 	userExt := map[string]interface{}{
 		"eids": []interface{}{
 			map[string]interface{}{
@@ -270,7 +253,7 @@ func TestPrivacyConsentHook_CCPA_NoOptOut_PreservesIDs(t *testing.T) {
 			Ext: userExtBytes,
 		},
 		Regs: &openrtb.Regs{
-			Ext: regsExtBytes,
+			USPrivacy: "1YNN", // Version=1, Notice=Y, Opt-out=N (user did NOT opt out)
 		},
 		Site: &openrtb.Site{
 			ID: "catalyst-account-12345",

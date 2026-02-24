@@ -182,99 +182,75 @@ func (h *PrivacyConsentHook) clearInternalIDs(req *openrtb.BidRequest) {
 
 // checkGDPRConsent validates GDPR consent string
 func (h *PrivacyConsentHook) checkGDPRConsent(req *openrtb.BidRequest) bool {
-	// Check if GDPR applies
-	if req.Regs == nil || req.Regs.Ext == nil {
-		// No GDPR specified - default to allowing
+	// Check if GDPR applies using the native OpenRTB 2.5 regs.gdpr field
+	if req.Regs == nil || req.Regs.GDPR == nil || *req.Regs.GDPR == 0 {
+		// GDPR doesn't apply (or not specified) - default to allowing
 		return true
 	}
 
-	var regsExt struct {
-		GDPR *int8 `json:"gdpr"`
+	// GDPR applies (gdpr=1) - check for valid consent string in user.consent
+	// (OpenRTB 2.5: consent string lives at user.consent, not user.ext.consent)
+	if req.User == nil {
+		logger.Log.Warn().Msg("GDPR applies but no user object found")
+		return false
 	}
-	if err := json.Unmarshal(req.Regs.Ext, &regsExt); err != nil {
-		// Parse error - default to allowing
+
+	if req.User.Consent != "" {
+		logger.Log.Debug().
+			Str("consent_prefix", req.User.Consent[:min(10, len(req.User.Consent))]).
+			Msg("GDPR consent string present")
 		return true
 	}
 
-	// If GDPR doesn't apply (gdpr=0), allow all processing
-	if regsExt.GDPR == nil || *regsExt.GDPR == 0 {
-		return true
+	// Fallback: check user.ext.consent for older SDK payloads
+	if len(req.User.Ext) > 0 {
+		var userExt struct {
+			Consent string `json:"consent"`
+		}
+		if err := json.Unmarshal(req.User.Ext, &userExt); err == nil && userExt.Consent != "" {
+			logger.Log.Debug().
+				Str("consent_prefix", userExt.Consent[:min(10, len(userExt.Consent))]).
+				Msg("GDPR consent string present (user.ext.consent)")
+			return true
+		}
 	}
 
-	// GDPR applies (gdpr=1) - check for valid consent string
-	if req.User == nil || req.User.Ext == nil {
-		logger.Log.Warn().Msg("GDPR applies but no user.ext.consent found")
-		return false
-	}
-
-	var userExt struct {
-		Consent string `json:"consent"`
-	}
-	if err := json.Unmarshal(req.User.Ext, &userExt); err != nil {
-		logger.Log.Warn().Err(err).Msg("Failed to parse user.ext for consent")
-		return false
-	}
-
-	// Check if consent string exists
-	if userExt.Consent == "" {
-		logger.Log.Warn().Msg("GDPR applies but consent string is empty")
-		return false
-	}
-
-	// TODO: Parse TCF consent string and check Purpose 1 (Store/access information)
-	// For now, we accept any non-empty consent string
-	// Production implementation should use IAB TCF library to parse and validate
-
-	logger.Log.Debug().
-		Str("consent_prefix", userExt.Consent[:min(10, len(userExt.Consent))]).
-		Msg("GDPR consent string present")
-
-	return true
+	logger.Log.Warn().Msg("GDPR applies but no consent string found")
+	return false
 }
 
 // checkCCPAConsent validates US Privacy (CCPA) string
 func (h *PrivacyConsentHook) checkCCPAConsent(req *openrtb.BidRequest) bool {
-	// Check for US Privacy string
-	if req.Regs == nil || req.Regs.Ext == nil {
+	// Check for US Privacy string using the native OpenRTB 2.5 regs.us_privacy field
+	if req.Regs == nil || req.Regs.USPrivacy == "" {
 		// No CCPA specified - default to allowing
 		return true
 	}
 
-	var regsExt struct {
-		USPrivacy string `json:"us_privacy"`
-	}
-	if err := json.Unmarshal(req.Regs.Ext, &regsExt); err != nil {
-		// Parse error - default to allowing
-		return true
-	}
-
-	// No US Privacy string - default to allowing
-	if regsExt.USPrivacy == "" {
-		return true
-	}
+	usp := req.Regs.USPrivacy
 
 	// Parse CCPA string (format: "1YNN")
 	// Position 0: Version (1)
 	// Position 1: Notice given (Y/N)
 	// Position 2: Opt-out (Y=opted out, N=no opt-out)
 	// Position 3: LSPA (Limited Service Provider Agreement)
-	if len(regsExt.USPrivacy) < 3 {
+	if len(usp) < 3 {
 		logger.Log.Warn().
-			Str("us_privacy", regsExt.USPrivacy).
+			Str("us_privacy", usp).
 			Msg("Invalid US Privacy string - too short")
 		return false
 	}
 
 	// Check if user opted out (position 2 == 'Y')
-	if regsExt.USPrivacy[2] == 'Y' {
+	if usp[2] == 'Y' {
 		logger.Log.Warn().
-			Str("us_privacy", regsExt.USPrivacy).
+			Str("us_privacy", usp).
 			Msg("CCPA opt-out detected - blocking ID usage")
 		return false
 	}
 
 	logger.Log.Debug().
-		Str("us_privacy", regsExt.USPrivacy).
+		Str("us_privacy", usp).
 		Msg("CCPA consent OK")
 
 	return true
@@ -282,23 +258,9 @@ func (h *PrivacyConsentHook) checkCCPAConsent(req *openrtb.BidRequest) bool {
 
 // checkGPPConsent validates Global Privacy Platform (GPP) consent
 func (h *PrivacyConsentHook) checkGPPConsent(req *openrtb.BidRequest) bool {
-	// Check for GPP (Global Privacy Platform)
-	if req.Regs == nil || req.Regs.Ext == nil {
+	// Check for GPP using the native OpenRTB regs.gpp field
+	if req.Regs == nil || req.Regs.GPP == "" {
 		// No GPP specified - default to allowing
-		return true
-	}
-
-	var regsExt struct {
-		GPP    string `json:"gpp"`
-		GPPSID []int  `json:"gpp_sid"`
-	}
-	if err := json.Unmarshal(req.Regs.Ext, &regsExt); err != nil {
-		// Parse error - default to allowing
-		return true
-	}
-
-	// No GPP string - default to allowing
-	if regsExt.GPP == "" {
 		return true
 	}
 
@@ -312,8 +274,8 @@ func (h *PrivacyConsentHook) checkGPPConsent(req *openrtb.BidRequest) bool {
 	// Production implementation should use IAB GPP library
 
 	logger.Log.Debug().
-		Str("gpp_prefix", regsExt.GPP[:min(20, len(regsExt.GPP))]).
-		Ints("gpp_sid", regsExt.GPPSID).
+		Str("gpp_prefix", req.Regs.GPP[:min(20, len(req.Regs.GPP))]).
+		Ints("gpp_sid", req.Regs.GPPSID).
 		Msg("GPP consent string present")
 
 	return true
