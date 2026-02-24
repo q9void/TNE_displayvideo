@@ -277,18 +277,59 @@ func (h *VideoHandler) parseVASTRequest(r *http.Request) (*openrtb.BidRequest, e
 		AT:   2, // Second-price auction
 	}
 
-	// Add site or app info if provided
-	// Create Site if site_id OR domain is provided (OpenRTB allows ID to be optional)
+	// Build content object if any content params are present (used by both Site and App)
+	var content *openrtb.Content
+	contentTitle := q.Get("content_title")
+	contentSeries := q.Get("content_series")
+	contentSeason := q.Get("content_season")
+	contentGenre := q.Get("content_genre")
+	contentEpisode := parseInt(q.Get("content_episode"), 0)
+	livestream := parseInt(q.Get("livestream"), 0)
+	if contentTitle != "" || contentSeries != "" || contentGenre != "" {
+		content = &openrtb.Content{
+			Title:      contentTitle,
+			Series:     contentSeries,
+			Season:     contentSeason,
+			Genre:      contentGenre,
+			Episode:    contentEpisode,
+			LiveStream: livestream,
+		}
+	}
+
+	// Publisher ID (used for auth; applies to both site and app contexts)
+	pubID := q.Get("pub")
+
+	// App object takes precedence for CTV requests
+	appBundle := q.Get("app_bundle")
+	appName := q.Get("app_name")
+	if appBundle != "" || appName != "" {
+		app := &openrtb.App{
+			Bundle:  appBundle,
+			Name:    appName,
+			Content: content,
+		}
+		if pubID != "" {
+			app.Publisher = &openrtb.Publisher{ID: pubID}
+		}
+		bidReq.App = app
+		return bidReq, nil
+	}
+
+	// Site object for desktop instream
 	siteID := q.Get("site_id")
 	domain := q.Get("domain")
 	page := q.Get("page")
-
 	if siteID != "" || domain != "" {
-		bidReq.Site = &openrtb.Site{
-			ID:     siteID,
-			Domain: domain,
-			Page:   page,
+		site := &openrtb.Site{
+			ID:      siteID,
+			Domain:  domain,
+			Page:    page,
+			Content: content,
 		}
+		if pubID != "" {
+			site.Publisher = &openrtb.Publisher{ID: pubID}
+		}
+		bidReq.Site = site
 	}
 
 	return bidReq, nil

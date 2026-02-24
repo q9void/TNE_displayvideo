@@ -320,7 +320,11 @@ func (s *Server) initHandlers() {
 	mux.Handle("/video/wrapper", privacyMiddleware(http.HandlerFunc(videoHandler.HandleVASTWrapper)))
 	endpoints.RegisterVideoEventRoutes(mux, videoEventHandler)
 
-	log.Info().Msg("Video endpoints registered: /video/vast, /video/openrtb, /video/wrapper, /video/event/*")
+	// VMAP ad pod endpoint for CTV/SSAI integration
+	podHandler := endpoints.NewPodHandler(s.config.HostURL)
+	mux.Handle("/video/pod", privacyMiddleware(http.HandlerFunc(podHandler.HandleVMAP)))
+
+	log.Info().Msg("Video endpoints registered: /video/vast, /video/openrtb, /video/wrapper, /video/pod, /video/event/*")
 
 	// Ad tag endpoints (direct publisher integration)
 	mux.HandleFunc("/ad/js", adTagHandler.HandleJavaScriptAd)
