@@ -1031,12 +1031,12 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 
 			// Map bidder codes to proper source domains
 			sourceDomains := map[string]string{
-				"rubicon":     "rubiconproject.com",
-				"kargo":       "kargo.com",
-				"sovrn":       "lijit.com",
-				"pubmatic":    "pubmatic.com",
-				"triplelift":  "3lift.com",
-				"appnexus":    "adnxs.com",
+				"rubicon":    "rubiconproject.com",
+				"kargo":      "kargo.com",
+				"sovrn":      "lijit.com",
+				"pubmatic":   "pubmatic.com",
+				"triplelift": "3lift.com",
+				"appnexus":   "adnxs.com",
 			}
 
 			for bidder, uid := range userIDs {
@@ -1056,13 +1056,12 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 				})
 			}
 
-			// FIXED #16: Merge with existing user.ext instead of overwriting
+			// Merge with existing user.ext instead of overwriting
 			// Preserve SDK-provided eids and other extensions
 			userExt := make(map[string]interface{})
 
 			// Start with SDK-provided user.ext if it exists
 			if maiBid.User != nil && maiBid.User.Ext != nil {
-				// Copy existing extensions from SDK
 				for k, v := range maiBid.User.Ext {
 					userExt[k] = v
 				}
@@ -1076,7 +1075,6 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 					Int("server_eids", len(eids)).
 					Msg("Merging SDK eids with server UIDs")
 
-				// Append server eids to SDK eids
 				for _, serverEid := range eids {
 					existingEids = append(existingEids, serverEid)
 				}
@@ -1099,6 +1097,20 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 				Int("user_ids", len(userIDs)).
 				Strs("bidders", getBidderKeys(userIDs)).
 				Msg("Populated user IDs from cookie sync")
+		} else if maiBid.User != nil && maiBid.User.Ext != nil {
+			// No server-side UIDs yet, but always preserve the SDK's user.ext.
+			// It contains the FPID eid (source: "thenexusengine.com") which the
+			// identity_gating hook checks to determine consent. Without it, the
+			// hook sees empty eids and skips injecting synced UIDs on future requests.
+			userExt := make(map[string]interface{})
+			for k, v := range maiBid.User.Ext {
+				userExt[k] = v
+			}
+			if maiBid.User.ConsentGiven {
+				userExt["consent"] = "1"
+			}
+			extJSON, _ := json.Marshal(userExt)
+			user.Ext = extJSON
 		}
 
 		// Set TCF consent string (OpenRTB 2.5+ compliance)
