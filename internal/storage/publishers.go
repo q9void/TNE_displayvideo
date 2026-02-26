@@ -79,7 +79,8 @@ func (s *PublisherStore) getByPublisherIDConcrete(ctx context.Context, accountID
 	defer cancel()
 
 	query := `
-		SELECT a.account_id, p.domain, p.name, p.status, p.default_timeout_ms, p.notes, p.created_at, p.updated_at
+		SELECT a.account_id, p.domain, p.name, p.status, p.default_timeout_ms,
+		       p.bid_multiplier, p.notes, p.created_at, p.updated_at
 		FROM publishers_new p
 		JOIN accounts a ON p.account_id = a.id
 		WHERE a.account_id = $1
@@ -95,6 +96,7 @@ func (s *PublisherStore) getByPublisherIDConcrete(ctx context.Context, accountID
 		&p.Name,
 		&p.Status,
 		&p.TMaxMs,
+		&p.BidMultiplier,
 		&p.Notes,
 		&p.CreatedAt,
 		&p.UpdatedAt,
@@ -107,7 +109,9 @@ func (s *PublisherStore) getByPublisherIDConcrete(ctx context.Context, accountID
 		return nil, fmt.Errorf("failed to query publisher: %w", err)
 	}
 
-	p.BidMultiplier = 1.0
+	if p.BidMultiplier < 1.0 {
+		p.BidMultiplier = 1.0 // Safety floor — never pay out more than the bid
+	}
 
 	return &p, nil
 }

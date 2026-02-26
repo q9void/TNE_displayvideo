@@ -65,13 +65,14 @@ func TestPublisherStore_GetByPublisherID_Success(t *testing.T) {
 	expectedPublisher := createTestPublisher("pub-123")
 
 	rows := sqlmock.NewRows([]string{
-		"account_id", "domain", "name", "status", "default_timeout_ms", "notes", "created_at", "updated_at",
+		"account_id", "domain", "name", "status", "default_timeout_ms", "bid_multiplier", "notes", "created_at", "updated_at",
 	}).AddRow(
 		expectedPublisher.PublisherID,
 		expectedPublisher.AllowedDomains,
 		expectedPublisher.Name,
 		expectedPublisher.Status,
 		expectedPublisher.TMaxMs,
+		expectedPublisher.BidMultiplier,
 		expectedPublisher.Notes,
 		expectedPublisher.CreatedAt,
 		expectedPublisher.UpdatedAt,
@@ -100,8 +101,8 @@ func TestPublisherStore_GetByPublisherID_Success(t *testing.T) {
 	if publisher.TMaxMs != 1500 {
 		t.Errorf("Expected TMaxMs 1500, got %d", publisher.TMaxMs)
 	}
-	if publisher.BidMultiplier != 1.0 {
-		t.Errorf("Expected default BidMultiplier 1.0, got %f", publisher.BidMultiplier)
+	if publisher.BidMultiplier != 1.05 {
+		t.Errorf("Expected BidMultiplier 1.05, got %f", publisher.BidMultiplier)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -181,13 +182,14 @@ func TestPublisherStore_GetByPublisherID_ScanError(t *testing.T) {
 
 	// Pass a string for default_timeout_ms (an int column) to trigger a scan error
 	rows := sqlmock.NewRows([]string{
-		"account_id", "domain", "name", "status", "default_timeout_ms", "notes", "created_at", "updated_at",
+		"account_id", "domain", "name", "status", "default_timeout_ms", "bid_multiplier", "notes", "created_at", "updated_at",
 	}).AddRow(
 		"pub-123",
 		"example.com",
 		"Test Publisher",
 		"active",
 		"not-a-number", // invalid value for int column
+		1.25,
 		"notes",
 		time.Now(),
 		time.Now(),
