@@ -14,6 +14,7 @@ import (
 	"github.com/thenexusengine/tne_springwire/internal/exchange"
 	"github.com/thenexusengine/tne_springwire/internal/geo"
 	"github.com/thenexusengine/tne_springwire/internal/hooks"
+	"github.com/thenexusengine/tne_springwire/internal/middleware"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
 	"github.com/thenexusengine/tne_springwire/internal/storage"
 	"github.com/thenexusengine/tne_springwire/internal/usersync"
@@ -307,13 +308,14 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 		Str("account_id", maiBidReq.AccountID).
 		Msg("✓ Request hooks executed successfully")
 
-	// Run auction with 2500ms timeout (MAI Publisher requirement)
-	ctx, cancel := context.WithTimeout(r.Context(), 2500*time.Millisecond)
+	// Run auction with per-publisher timeout (falls back to 1500 ms)
+	tmaxMs := publisherTMaxMs(r.Context())
+	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(tmaxMs)*time.Millisecond)
 	defer cancel()
 
 	auctionReq := &exchange.AuctionRequest{
 		BidRequest: ortbReq,
-		Timeout:    2500 * time.Millisecond,
+		Timeout:    time.Duration(tmaxMs) * time.Millisecond,
 	}
 
 	auctionResp, err := h.exchange.RunAuction(ctx, auctionReq)
@@ -1217,8 +1219,8 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		User:   user,
 		Regs:   regs,
 		Source: source, // Supply chain transparency
-		Cur:    []string{"USD"},
-		TMax:   2500, // 2500ms internal timeout
+		Cur:  []string{"USD"},
+		TMax: publisherTMaxMs(r.Context()),
 	}
 
 	logger.Log.Debug().
@@ -1380,6 +1382,23 @@ func getConfiguredBidders(configs map[string]map[string]interface{}) []string {
 }
 
 // detectDeviceType determines device type from User-Agent string
+// publisherTMaxMs returns the auction timeout for the publisher in context.
+// Falls back to 1500 ms if no publisher is configured or their timeout is unset.
+func publisherTMaxMs(ctx context.Context) int {
+	const defaultTMaxMs = 1500
+	type tmaxGetter interface {
+		GetTMaxMs() int
+	}
+	if pub := middleware.PublisherFromContext(ctx); pub != nil {
+		if g, ok := pub.(tmaxGetter); ok {
+			if t := g.GetTMaxMs(); t > 0 {
+				return t
+			}
+		}
+	}
+	return defaultTMaxMs
+}
+
 // Returns "mobile" for mobile devices, "desktop" otherwise
 func detectDeviceType(userAgent string) string {
 	if userAgent == "" {

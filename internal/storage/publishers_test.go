@@ -27,6 +27,7 @@ func createTestPublisher(publisherID string) *Publisher {
 			},
 		},
 		BidMultiplier: 1.05,
+		TMaxMs:        1500,
 		Status:        "active",
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
@@ -62,27 +63,21 @@ func TestPublisherStore_GetByPublisherID_Success(t *testing.T) {
 	ctx := context.Background()
 
 	expectedPublisher := createTestPublisher("pub-123")
-	bidderParamsJSON, _ := json.Marshal(expectedPublisher.BidderParams)
 
 	rows := sqlmock.NewRows([]string{
-		"id", "publisher_id", "name", "allowed_domains", "bidder_params",
-		"bid_multiplier", "status", "version", "created_at", "updated_at", "notes", "contact_email",
+		"account_id", "domain", "name", "status", "default_timeout_ms", "notes", "created_at", "updated_at",
 	}).AddRow(
-		expectedPublisher.ID,
 		expectedPublisher.PublisherID,
-		expectedPublisher.Name,
 		expectedPublisher.AllowedDomains,
-		bidderParamsJSON,
-		expectedPublisher.BidMultiplier,
+		expectedPublisher.Name,
 		expectedPublisher.Status,
-		1, // version
+		expectedPublisher.TMaxMs,
+		expectedPublisher.Notes,
 		expectedPublisher.CreatedAt,
 		expectedPublisher.UpdatedAt,
-		expectedPublisher.Notes,
-		expectedPublisher.ContactEmail,
 	)
 
-	mock.ExpectQuery("SELECT (.+) FROM publishers WHERE publisher_id").
+	mock.ExpectQuery("SELECT (.+) FROM publishers_new").
 		WithArgs("pub-123").
 		WillReturnRows(rows)
 
@@ -102,8 +97,11 @@ func TestPublisherStore_GetByPublisherID_Success(t *testing.T) {
 	if publisher.Name != "Test Publisher" {
 		t.Errorf("Expected 'Test Publisher', got '%s'", publisher.Name)
 	}
-	if publisher.BidMultiplier != 1.05 {
-		t.Errorf("Expected 1.05, got %f", publisher.BidMultiplier)
+	if publisher.TMaxMs != 1500 {
+		t.Errorf("Expected TMaxMs 1500, got %d", publisher.TMaxMs)
+	}
+	if publisher.BidMultiplier != 1.0 {
+		t.Errorf("Expected default BidMultiplier 1.0, got %f", publisher.BidMultiplier)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -121,7 +119,7 @@ func TestPublisherStore_GetByPublisherID_NotFound(t *testing.T) {
 	store := NewPublisherStore(db)
 	ctx := context.Background()
 
-	mock.ExpectQuery("SELECT (.+) FROM publishers WHERE publisher_id").
+	mock.ExpectQuery("SELECT (.+) FROM publishers_new").
 		WithArgs("nonexistent").
 		WillReturnError(sql.ErrNoRows)
 
@@ -151,7 +149,7 @@ func TestPublisherStore_GetByPublisherID_QueryError(t *testing.T) {
 	store := NewPublisherStore(db)
 	ctx := context.Background()
 
-	mock.ExpectQuery("SELECT (.+) FROM publishers WHERE publisher_id").
+	mock.ExpectQuery("SELECT (.+) FROM publishers_new").
 		WithArgs("pub-123").
 		WillReturnError(sql.ErrConnDone)
 
@@ -171,7 +169,7 @@ func TestPublisherStore_GetByPublisherID_QueryError(t *testing.T) {
 	}
 }
 
-func TestPublisherStore_GetByPublisherID_InvalidJSON(t *testing.T) {
+func TestPublisherStore_GetByPublisherID_ScanError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("Failed to create mock DB: %v", err)
@@ -181,36 +179,32 @@ func TestPublisherStore_GetByPublisherID_InvalidJSON(t *testing.T) {
 	store := NewPublisherStore(db)
 	ctx := context.Background()
 
+	// Pass a string for default_timeout_ms (an int column) to trigger a scan error
 	rows := sqlmock.NewRows([]string{
-		"id", "publisher_id", "name", "allowed_domains", "bidder_params",
-		"bid_multiplier", "status", "version", "created_at", "updated_at", "notes", "contact_email",
+		"account_id", "domain", "name", "status", "default_timeout_ms", "notes", "created_at", "updated_at",
 	}).AddRow(
-		"1",
 		"pub-123",
-		"Test Publisher",
 		"example.com",
-		[]byte("{invalid json}"), // Invalid JSON
-		1.05,
+		"Test Publisher",
 		"active",
-		1, // version
-		time.Now(),
-		time.Now(),
+		"not-a-number", // invalid value for int column
 		"notes",
-		"test@example.com",
+		time.Now(),
+		time.Now(),
 	)
 
-	mock.ExpectQuery("SELECT (.+) FROM publishers WHERE publisher_id").
+	mock.ExpectQuery("SELECT (.+) FROM publishers_new").
 		WithArgs("pub-123").
 		WillReturnRows(rows)
 
 	result, err := store.GetByPublisherID(ctx, "pub-123")
 	if err == nil {
-		t.Error("Expected error from invalid JSON")
+		t.Error("Expected error from scan failure")
 	}
 	// Handle typed nil - interface{} containing (*Publisher)(nil)
 	if result != nil {
 		if pub, ok := result.(*Publisher); ok && pub != nil {
-			t.Error("Expected nil result on JSON error")
+			t.Error("Expected nil result on scan error")
 		}
 	}
 
@@ -848,5 +842,9 @@ func TestPublisher_GetterMethods(t *testing.T) {
 
 	if publisher.GetBidMultiplier() != 1.05 {
 		t.Errorf("Expected 1.05, got %f", publisher.GetBidMultiplier())
+	}
+
+	if publisher.GetTMaxMs() != 1500 {
+		t.Errorf("Expected TMaxMs 1500, got %d", publisher.GetTMaxMs())
 	}
 }

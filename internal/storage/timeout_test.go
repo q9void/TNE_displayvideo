@@ -158,7 +158,7 @@ func TestPublisherStore_GetByPublisherID_TimeoutEnforcement(t *testing.T) {
 	store := NewPublisherStore(db)
 	ctx := context.Background()
 
-	mock.ExpectQuery("SELECT (.+) FROM publishers WHERE publisher_id").
+	mock.ExpectQuery("SELECT (.+) FROM publishers_new").
 		WithArgs("pub-123").
 		WillDelayFor(6 * time.Second).
 		WillReturnError(errors.New("context deadline exceeded"))

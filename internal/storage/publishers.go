@@ -20,6 +20,7 @@ type Publisher struct {
 	AllowedDomains string                 `json:"allowed_domains"`
 	BidderParams   map[string]interface{} `json:"bidder_params"`
 	BidMultiplier  float64                `json:"bid_multiplier"` // Revenue share multiplier (1.0000-10.0000). Bid divided by this. 1.05 = ~5% platform cut
+	TMaxMs         int                    `json:"tmax_ms"`        // Per-publisher auction timeout in milliseconds
 	Status         string                 `json:"status"`
 	Version        int                    `json:"version"`
 	CreatedAt      time.Time              `json:"created_at"`
@@ -41,6 +42,11 @@ func (p *Publisher) GetBidMultiplier() float64 {
 // GetPublisherID returns the publisher ID (for exchange interface)
 func (p *Publisher) GetPublisherID() string {
 	return p.PublisherID
+}
+
+// GetTMaxMs returns the per-publisher auction timeout in milliseconds (for exchange interface)
+func (p *Publisher) GetTMaxMs() int {
+	return p.TMaxMs
 }
 
 // PublisherStore provides database operations for publishers
@@ -73,7 +79,7 @@ func (s *PublisherStore) getByPublisherIDConcrete(ctx context.Context, accountID
 	defer cancel()
 
 	query := `
-		SELECT a.account_id, p.domain, p.name, p.status, p.notes, p.created_at, p.updated_at
+		SELECT a.account_id, p.domain, p.name, p.status, p.default_timeout_ms, p.notes, p.created_at, p.updated_at
 		FROM publishers_new p
 		JOIN accounts a ON p.account_id = a.id
 		WHERE a.account_id = $1
@@ -88,6 +94,7 @@ func (s *PublisherStore) getByPublisherIDConcrete(ctx context.Context, accountID
 		&p.AllowedDomains,
 		&p.Name,
 		&p.Status,
+		&p.TMaxMs,
 		&p.Notes,
 		&p.CreatedAt,
 		&p.UpdatedAt,

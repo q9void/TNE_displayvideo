@@ -71,7 +71,7 @@ func TestSQLInjection_PublisherID(t *testing.T) {
 
 			// The query should use parameterized statements ($1), not string concatenation
 			// This ensures the malicious input is treated as data, not SQL code
-			mock.ExpectQuery("SELECT (.+) FROM publishers WHERE publisher_id = \\$1").
+			mock.ExpectQuery("SELECT (.+) FROM publishers_new").
 				WithArgs(tc.publisherID). // The exact malicious string should be passed as parameter
 				WillReturnError(sql.ErrNoRows)
 

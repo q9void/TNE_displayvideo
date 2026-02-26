@@ -261,8 +261,8 @@ func TestPublisherStore_Update_OptimisticLocking_CommitError(t *testing.T) {
 	}
 }
 
-// TestPublisherStore_GetByPublisherID_IncludesVersion tests that version is retrieved
-func TestPublisherStore_GetByPublisherID_IncludesVersion(t *testing.T) {
+// TestPublisherStore_GetByPublisherID_IncludesTMaxMs tests that default_timeout_ms is retrieved
+func TestPublisherStore_GetByPublisherID_IncludesTMaxMs(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("Failed to create mock DB: %v", err)
@@ -273,27 +273,22 @@ func TestPublisherStore_GetByPublisherID_IncludesVersion(t *testing.T) {
 	ctx := context.Background()
 
 	expectedPublisher := createTestPublisher("pub-123")
-	expectedPublisher.Version = 7
+	expectedPublisher.TMaxMs = 2000
 
 	rows := sqlmock.NewRows([]string{
-		"id", "publisher_id", "name", "allowed_domains", "bidder_params",
-		"bid_multiplier", "status", "version", "created_at", "updated_at", "notes", "contact_email",
+		"account_id", "domain", "name", "status", "default_timeout_ms", "notes", "created_at", "updated_at",
 	}).AddRow(
-		expectedPublisher.ID,
 		expectedPublisher.PublisherID,
-		expectedPublisher.Name,
 		expectedPublisher.AllowedDomains,
-		[]byte("{}"),
-		expectedPublisher.BidMultiplier,
+		expectedPublisher.Name,
 		expectedPublisher.Status,
-		expectedPublisher.Version,
+		expectedPublisher.TMaxMs,
+		expectedPublisher.Notes,
 		expectedPublisher.CreatedAt,
 		expectedPublisher.UpdatedAt,
-		expectedPublisher.Notes,
-		expectedPublisher.ContactEmail,
 	)
 
-	mock.ExpectQuery("SELECT (.+) FROM publishers WHERE publisher_id").
+	mock.ExpectQuery("SELECT (.+) FROM publishers_new").
 		WithArgs("pub-123").
 		WillReturnRows(rows)
 
@@ -303,8 +298,8 @@ func TestPublisherStore_GetByPublisherID_IncludesVersion(t *testing.T) {
 	}
 
 	publisher := result.(*Publisher)
-	if publisher.Version != 7 {
-		t.Errorf("Expected version 7, got %d", publisher.Version)
+	if publisher.TMaxMs != 2000 {
+		t.Errorf("Expected TMaxMs 2000, got %d", publisher.TMaxMs)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
