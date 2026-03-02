@@ -65,7 +65,7 @@ func TestPublisherStore_GetByPublisherID_Success(t *testing.T) {
 	expectedPublisher := createTestPublisher("pub-123")
 
 	rows := sqlmock.NewRows([]string{
-		"account_id", "domain", "name", "status", "default_timeout_ms", "bid_multiplier", "notes", "created_at", "updated_at",
+		"account_id", "domain", "name", "status", "default_timeout_ms", "bid_multiplier", "video_config", "notes", "created_at", "updated_at",
 	}).AddRow(
 		expectedPublisher.PublisherID,
 		expectedPublisher.AllowedDomains,
@@ -73,6 +73,7 @@ func TestPublisherStore_GetByPublisherID_Success(t *testing.T) {
 		expectedPublisher.Status,
 		expectedPublisher.TMaxMs,
 		expectedPublisher.BidMultiplier,
+		[]byte(`{"placement":1,"protocols":[2,3,5,6],"playbackmethod":[2],"api":[6,7],"mimes":["video/mp4"],"maxdur":30,"mindur":5}`),
 		expectedPublisher.Notes,
 		expectedPublisher.CreatedAt,
 		expectedPublisher.UpdatedAt,
@@ -182,7 +183,7 @@ func TestPublisherStore_GetByPublisherID_ScanError(t *testing.T) {
 
 	// Pass a string for default_timeout_ms (an int column) to trigger a scan error
 	rows := sqlmock.NewRows([]string{
-		"account_id", "domain", "name", "status", "default_timeout_ms", "bid_multiplier", "notes", "created_at", "updated_at",
+		"account_id", "domain", "name", "status", "default_timeout_ms", "bid_multiplier", "video_config", "notes", "created_at", "updated_at",
 	}).AddRow(
 		"pub-123",
 		"example.com",
@@ -190,6 +191,7 @@ func TestPublisherStore_GetByPublisherID_ScanError(t *testing.T) {
 		"active",
 		"not-a-number", // invalid value for int column
 		1.25,
+		[]byte(`{}`),
 		"notes",
 		time.Now(),
 		time.Now(),

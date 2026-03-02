@@ -12,6 +12,7 @@ import (
 	"github.com/thenexusengine/tne_springwire/internal/ctv"
 	"github.com/thenexusengine/tne_springwire/internal/exchange"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
+	"github.com/thenexusengine/tne_springwire/internal/storage"
 	"github.com/thenexusengine/tne_springwire/pkg/vast"
 )
 
@@ -20,14 +21,16 @@ type VideoHandler struct {
 	exchange        *exchange.Exchange
 	vastBuilder     *exchange.VASTResponseBuilder
 	trackingBaseURL string
+	publishers      *storage.PublisherStore
 }
 
 // NewVideoHandler creates a new video handler
-func NewVideoHandler(ex *exchange.Exchange, trackingBaseURL string) *VideoHandler {
+func NewVideoHandler(ex *exchange.Exchange, trackingBaseURL string, publishers *storage.PublisherStore) *VideoHandler {
 	return &VideoHandler{
 		exchange:        ex,
 		vastBuilder:     exchange.NewVASTResponseBuilder(trackingBaseURL),
 		trackingBaseURL: trackingBaseURL,
+		publishers:      publishers,
 	}
 }
 
@@ -192,7 +195,9 @@ func (h *VideoHandler) setVASTCORSHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept")
 }
 
-// parseVASTRequest parses video parameters from query string into OpenRTB bid request
+// parseVASTRequest parses video parameters from query string into OpenRTB bid request.
+// If a pub= param is present, publisher video config is loaded from the DB and used
+// as defaults — URL params always win over DB config, DB config wins over code defaults.
 func (h *VideoHandler) parseVASTRequest(r *http.Request) (*openrtb.BidRequest, error) {
 	q := r.URL.Query()
 
@@ -202,47 +207,111 @@ func (h *VideoHandler) parseVASTRequest(r *http.Request) (*openrtb.BidRequest, e
 		requestID = generateRequestID()
 	}
 
+	// Load publisher video config if pub param is present
+	var vidCfg *storage.PublisherVideoConfig
+	if pubID := q.Get("pub"); pubID != "" && h.publishers != nil {
+		if pub, err := h.publishers.GetByPublisherID(r.Context(), pubID); err == nil && pub != nil {
+			if p, ok := pub.(*storage.Publisher); ok {
+				vidCfg = p.GetVideoConfig()
+			}
+		}
+	}
+
+	// Helper: return url param value if present, else publisher config value, else fallback
+	intParam := func(key string, cfgVal, fallback int) int {
+		if v := q.Get(key); v != "" {
+			return parseInt(v, fallback)
+		}
+		if cfgVal != 0 {
+			return cfgVal
+		}
+		return fallback
+	}
+	intArrayParam := func(key string, cfgVal, fallback []int) []int {
+		if v := q.Get(key); v != "" {
+			return parseIntArray(v, fallback)
+		}
+		if len(cfgVal) > 0 {
+			return cfgVal
+		}
+		return fallback
+	}
+	stringArrayParam := func(key string, cfgVal, fallback []string) []string {
+		if v := q.Get(key); v != "" {
+			return parseStringArray(v, fallback)
+		}
+		if len(cfgVal) > 0 {
+			return cfgVal
+		}
+		return fallback
+	}
+
+	// Seed config values (nil-safe)
+	var cfgPlacement, cfgMaxDur, cfgMinDur, cfgMinBitrate, cfgMaxBitrate, cfgSkip, cfgSkipAfter int
+	var cfgProtocols, cfgPlayback, cfgAPI []int
+	var cfgMimes []string
+	if vidCfg != nil {
+		cfgPlacement = vidCfg.Placement
+		cfgMaxDur = vidCfg.MaxDur
+		cfgMinDur = vidCfg.MinDur
+		cfgMinBitrate = vidCfg.MinBitrate
+		cfgMaxBitrate = vidCfg.MaxBitrate
+		cfgSkip = vidCfg.Skip
+		cfgSkipAfter = vidCfg.SkipAfter
+		cfgProtocols = vidCfg.Protocols
+		cfgPlayback = vidCfg.PlaybackMethod
+		cfgAPI = vidCfg.API
+		cfgMimes = vidCfg.Mimes
+	}
+
 	// Video dimensions (default to 1920x1080)
 	width := parseInt(q.Get("w"), 1920)
 	height := parseInt(q.Get("h"), 1080)
 
 	// Duration constraints
-	minDuration := parseInt(q.Get("mindur"), 5)
-	maxDuration := parseInt(q.Get("maxdur"), 30)
+	minDuration := intParam("mindur", cfgMinDur, 5)
+	maxDuration := intParam("maxdur", cfgMaxDur, 30)
 
 	// Skip parameters
-	skip := parseInt(q.Get("skip"), 0)
-	skipAfter := parseInt(q.Get("skipafter"), 0)
+	skip := intParam("skip", cfgSkip, 0)
+	skipAfter := intParam("skipafter", cfgSkipAfter, 0)
 
 	// Placement type (1=in-stream, 3=in-article, 4=in-feed, 5=interstitial)
-	placement := parseInt(q.Get("placement"), 1)
+	placement := intParam("placement", cfgPlacement, 1)
 
 	// Protocols (comma-separated)
-	protocols := parseIntArray(q.Get("protocols"), []int{2, 3, 5, 6})
+	protocols := intArrayParam("protocols", cfgProtocols, []int{2, 3, 5, 6})
 
 	// MIME types (comma-separated)
-	mimes := parseStringArray(q.Get("mimes"), []string{"video/mp4", "video/webm"})
+	mimes := stringArrayParam("mimes", cfgMimes, []string{"video/mp4"})
+
+	// Playback method — 1=autoplay sound on, 2=autoplay sound off, 3=click to play
+	playbackMethod := intArrayParam("playbackmethod", cfgPlayback, []int{2})
+
+	// API frameworks — 6=VPAID 2.0 JS, 7=OMID-1
+	apiFrameworks := intArrayParam("api", cfgAPI, []int{6, 7})
 
 	// Bitrate
-	minBitrate := parseInt(q.Get("minbitrate"), 300)
-	maxBitrate := parseInt(q.Get("maxbitrate"), 5000)
+	minBitrate := intParam("minbitrate", cfgMinBitrate, 300)
+	maxBitrate := intParam("maxbitrate", cfgMaxBitrate, 5000)
 
 	// Floor price
 	bidFloor := parseFloat(q.Get("bidfloor"), 0.0)
 
 	// Build video object
 	video := &openrtb.Video{
-		Mimes:       mimes,
-		MinDuration: minDuration,
-		MaxDuration: maxDuration,
-		Protocols:   protocols,
-		W:           width,
-		H:           height,
-		Placement:   placement,
-		Linearity:   1, // Linear/in-stream
-		MinBitrate:  minBitrate,
-		MaxBitrate:  maxBitrate,
-		API:         []int{1, 2}, // VPAID 1.0 and 2.0
+		Mimes:          mimes,
+		MinDuration:    minDuration,
+		MaxDuration:    maxDuration,
+		Protocols:      protocols,
+		W:              width,
+		H:              height,
+		Placement:      placement,
+		Linearity:      1, // Linear/in-stream
+		MinBitrate:     minBitrate,
+		MaxBitrate:     maxBitrate,
+		PlaybackMethod: playbackMethod,
+		API:            apiFrameworks,
 	}
 
 	if skip == 1 {

@@ -261,7 +261,7 @@ func (s *Server) initHandlers() {
 	biddersHandler := endpoints.NewDynamicInfoBiddersHandler(adapters.DefaultRegistry)
 
 	// Video handlers
-	videoHandler := endpoints.NewVideoHandler(s.exchange, s.config.HostURL)
+	videoHandler := endpoints.NewVideoHandler(s.exchange, s.config.HostURL, s.publisher)
 	videoEventHandler := endpoints.NewVideoEventHandler(nil) // Analytics can be added later
 
 	log.Info().Msg("Video handlers initialized")

@@ -12,6 +12,22 @@ import (
 	"github.com/lib/pq" // PostgreSQL driver (use pq.Array for batch queries)
 )
 
+// PublisherVideoConfig holds per-publisher video inventory defaults (OpenRTB 2.5 Video object).
+// These are used when the corresponding query param is absent from the ad tag URL.
+type PublisherVideoConfig struct {
+	Placement      int      `json:"placement"`
+	Protocols      []int    `json:"protocols"`
+	PlaybackMethod []int    `json:"playbackmethod"`
+	API            []int    `json:"api"`
+	Mimes          []string `json:"mimes"`
+	MaxDur         int      `json:"maxdur"`
+	MinDur         int      `json:"mindur"`
+	MaxBitrate     int      `json:"maxbitrate"`
+	MinBitrate     int      `json:"minbitrate"`
+	Skip           int      `json:"skip"`
+	SkipAfter      int      `json:"skipafter"`
+}
+
 // Publisher represents a publisher configuration from the database
 type Publisher struct {
 	ID             string                 `json:"id"`
@@ -19,8 +35,9 @@ type Publisher struct {
 	Name           string                 `json:"name"`
 	AllowedDomains string                 `json:"allowed_domains"`
 	BidderParams   map[string]interface{} `json:"bidder_params"`
-	BidMultiplier  float64                `json:"bid_multiplier"` // Revenue share multiplier (1.0000-10.0000). Bid divided by this. 1.05 = ~5% platform cut
+	BidMultiplier  float64                `json:"bid_multiplier"` // Revenue share multiplier. Bid divided by this. 1.25 = 20% platform cut
 	TMaxMs         int                    `json:"tmax_ms"`        // Per-publisher auction timeout in milliseconds
+	VideoConfig    json.RawMessage        `json:"video_config"`   // Per-publisher video inventory defaults (JSONB)
 	Status         string                 `json:"status"`
 	Version        int                    `json:"version"`
 	CreatedAt      time.Time              `json:"created_at"`
@@ -47,6 +64,19 @@ func (p *Publisher) GetPublisherID() string {
 // GetTMaxMs returns the per-publisher auction timeout in milliseconds (for exchange interface)
 func (p *Publisher) GetTMaxMs() int {
 	return p.TMaxMs
+}
+
+// GetVideoConfig parses and returns the publisher's video inventory config.
+// Returns nil if no config is set.
+func (p *Publisher) GetVideoConfig() *PublisherVideoConfig {
+	if len(p.VideoConfig) == 0 {
+		return nil
+	}
+	var cfg PublisherVideoConfig
+	if err := json.Unmarshal(p.VideoConfig, &cfg); err != nil {
+		return nil
+	}
+	return &cfg
 }
 
 // PublisherStore provides database operations for publishers
@@ -80,7 +110,7 @@ func (s *PublisherStore) getByPublisherIDConcrete(ctx context.Context, accountID
 
 	query := `
 		SELECT a.account_id, p.domain, p.name, p.status, p.default_timeout_ms,
-		       p.bid_multiplier, p.notes, p.created_at, p.updated_at
+		       p.bid_multiplier, p.video_config, p.notes, p.created_at, p.updated_at
 		FROM publishers_new p
 		JOIN accounts a ON p.account_id = a.id
 		WHERE a.account_id = $1
@@ -97,6 +127,7 @@ func (s *PublisherStore) getByPublisherIDConcrete(ctx context.Context, accountID
 		&p.Status,
 		&p.TMaxMs,
 		&p.BidMultiplier,
+		&p.VideoConfig,
 		&p.Notes,
 		&p.CreatedAt,
 		&p.UpdatedAt,

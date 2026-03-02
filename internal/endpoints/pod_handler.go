@@ -111,7 +111,7 @@ func (h *PodHandler) buildBreakAdTagURI(q url.Values, requestID, breakID string)
 		// Video
 		"w", "h", "mindur", "maxdur", "skip", "skipafter",
 		"protocols", "mimes", "minbitrate", "maxbitrate",
-		"bidfloor", "placement",
+		"bidfloor", "placement", "playbackmethod", "api",
 		// Publisher
 		"pub",
 		// Site (desktop instream)

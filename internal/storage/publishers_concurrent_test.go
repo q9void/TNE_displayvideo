@@ -276,7 +276,7 @@ func TestPublisherStore_GetByPublisherID_IncludesTMaxMs(t *testing.T) {
 	expectedPublisher.TMaxMs = 2000
 
 	rows := sqlmock.NewRows([]string{
-		"account_id", "domain", "name", "status", "default_timeout_ms", "bid_multiplier", "notes", "created_at", "updated_at",
+		"account_id", "domain", "name", "status", "default_timeout_ms", "bid_multiplier", "video_config", "notes", "created_at", "updated_at",
 	}).AddRow(
 		expectedPublisher.PublisherID,
 		expectedPublisher.AllowedDomains,
@@ -284,6 +284,7 @@ func TestPublisherStore_GetByPublisherID_IncludesTMaxMs(t *testing.T) {
 		expectedPublisher.Status,
 		expectedPublisher.TMaxMs,
 		expectedPublisher.BidMultiplier,
+		[]byte(`{}`),
 		expectedPublisher.Notes,
 		expectedPublisher.CreatedAt,
 		expectedPublisher.UpdatedAt,
