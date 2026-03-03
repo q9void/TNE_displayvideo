@@ -1217,6 +1217,7 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 	// Build OpenRTB request
 	ortbReq := &openrtb.BidRequest{
 		ID:     requestID,
+		AT:     1, // First-price auction
 		Imp:    imps,
 		Site:   site,
 		Device: deviceObj,

@@ -139,8 +139,13 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		return nil, append(errs, fmt.Errorf("publisherId is required"))
 	}
 
-	// Set wrapper extension in request and preserve original fields
-	newReqExt.Wrapper = wrapperExt
+	// Only include wrapper if it has actual profile/version data.
+	// An empty wrapper with just biddercode confuses the translator.
+	if wrapperExt != nil && (wrapperExt.ProfileID != 0 || wrapperExt.VersionID != 0) {
+		newReqExt.Wrapper = wrapperExt
+	} else {
+		newReqExt.Wrapper = nil
+	}
 
 	// Marshal PubMatic extensions
 	pmExtBytes, err := json.Marshal(newReqExt)
@@ -193,15 +198,20 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		request.App = &appCopy
 	}
 
-	// Set user.buyeruid from the PubMatic-synced cookie UID (user.ext.eids source=pubmatic.com).
-	// PubMatic's translator endpoint matches users via user.buyeruid, not user.id.
-	// Without this, PubMatic cannot identify the user → DSPs have no audience → 204 no-bid.
+	// Set user IDs:
+	// - user.id = TNE first-party ID (thenexusengine.com EID) — stable cross-session identifier
+	// - user.buyeruid = PubMatic cookie-synced UID — for DSP audience matching
 	if request.User != nil {
-		if uid := adapters.ExtractUIDFromEids(request.User, "pubmatic.com"); uid != "" {
-			userCopy := *request.User
-			userCopy.BuyerUID = uid
-			request.User = &userCopy
+		userCopy := *request.User
+		if userCopy.ID == "" {
+			if fpid := adapters.ExtractUIDFromEids(request.User, "thenexusengine.com"); fpid != "" {
+				userCopy.ID = fpid
+			}
 		}
+		if uid := adapters.ExtractUIDFromEids(request.User, "pubmatic.com"); uid != "" {
+			userCopy.BuyerUID = uid
+		}
+		request.User = &userCopy
 	}
 
 	// Marshal final request
@@ -488,6 +498,22 @@ func parseImpressionObject(imp *openrtb.Imp, extractWrapperExtFromImp, extractPu
 		if err := json.Unmarshal(bidderExt.SKAdNetwork, &skadnVal); err == nil {
 			finalExtMap[SKAdNetworkKey] = skadnVal
 		}
+	}
+
+	// Keep pubmatic params in imp.ext — PubMatic's translator requires publisherId and adSlot here
+	// in addition to tagid and site.publisher.id.
+	if strings.TrimSpace(pubmaticExt.PublisherId) != "" {
+		pmImpExt := map[string]interface{}{
+			"publisherId": strings.TrimSpace(pubmaticExt.PublisherId),
+		}
+		if adSlot := strings.TrimSpace(pubmaticExt.AdSlot); adSlot != "" {
+			// Use just the slot name without size suffix (before '@')
+			if idx := strings.Index(adSlot, "@"); idx >= 0 {
+				adSlot = strings.TrimSpace(adSlot[:idx])
+			}
+			pmImpExt["adSlot"] = adSlot
+		}
+		finalExtMap["pubmatic"] = pmImpExt
 	}
 
 	// Set final extension
