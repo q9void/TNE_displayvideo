@@ -1478,6 +1478,8 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 		// If IDR fails, fall back to all bidders
 	}
 
+	selectedBidders = filterBiddersWithImpExt(req.BidRequest.Imp, selectedBidders)
+
 	response.DebugInfo.SelectedBidders = selectedBidders
 
 	logger.Log.Debug().
@@ -3458,4 +3460,40 @@ func isTestRequest(req *openrtb.BidRequest, bidderCode string) bool {
 	}
 
 	return false
+}
+
+// filterBiddersWithImpExt returns only the bidders that have parameters in at
+// least one imp.Ext across all impressions, matching Prebid Server OSS behaviour.
+// "appnexus" is always included because it acts as a pass-through orchestrator
+// and does not need its own key in imp.Ext.
+// If imp.Ext is absent on all impressions, the original slice is returned unchanged
+// so the exchange degrades gracefully.
+func filterBiddersWithImpExt(imps []openrtb.Imp, bidders []string) []string {
+	configured := make(map[string]struct{})
+	for _, imp := range imps {
+		if len(imp.Ext) == 0 {
+			continue
+		}
+		var extMap map[string]json.RawMessage
+		if err := json.Unmarshal(imp.Ext, &extMap); err != nil {
+			continue
+		}
+		for bidderCode := range extMap {
+			configured[bidderCode] = struct{}{}
+		}
+	}
+	if len(configured) == 0 {
+		return bidders // no ext data — pass all through unchanged
+	}
+	filtered := make([]string, 0, len(bidders))
+	for _, b := range bidders {
+		if b == "appnexus" { // always-include pass-through orchestrator
+			filtered = append(filtered, b)
+			continue
+		}
+		if _, ok := configured[b]; ok {
+			filtered = append(filtered, b)
+		}
+	}
+	return filtered
 }
