@@ -193,9 +193,16 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		request.App = &appCopy
 	}
 
-	// NOTE: SetUserID is now handled by Identity Gating hook (no longer needed here)
-	// NOTE: site.id/app.id clearing is handled by Privacy/Consent hook
-	// This adapter sets PubMatic-specific publisher.id (lines above) which is correct
+	// Set user.buyeruid from the PubMatic-synced cookie UID (user.ext.eids source=pubmatic.com).
+	// PubMatic's translator endpoint matches users via user.buyeruid, not user.id.
+	// Without this, PubMatic cannot identify the user → DSPs have no audience → 204 no-bid.
+	if request.User != nil {
+		if uid := adapters.ExtractUIDFromEids(request.User, "pubmatic.com"); uid != "" {
+			userCopy := *request.User
+			userCopy.BuyerUID = uid
+			request.User = &userCopy
+		}
+	}
 
 	// Marshal final request
 	requestJSON, err := json.Marshal(request)

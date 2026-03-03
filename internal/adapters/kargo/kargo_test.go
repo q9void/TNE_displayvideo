@@ -66,20 +66,8 @@ func TestMakeRequests(t *testing.T) {
 		t.Errorf("Expected URI %s, got %s", defaultEndpoint, req.URI)
 	}
 
-	// Decompress the GZIP-compressed body
-	gzipReader, err := gzip.NewReader(bytes.NewReader(req.Body))
-	if err != nil {
-		t.Fatalf("Failed to create gzip reader: %v", err)
-	}
-	defer gzipReader.Close()
-
-	var decompressed bytes.Buffer
-	if _, err := decompressed.ReadFrom(gzipReader); err != nil {
-		t.Fatalf("Failed to decompress body: %v", err)
-	}
-
 	var parsed openrtb.BidRequest
-	if err := json.Unmarshal(decompressed.Bytes(), &parsed); err != nil {
+	if err := json.Unmarshal(req.Body, &parsed); err != nil {
 		t.Errorf("Request body is not valid JSON: %v", err)
 	}
 

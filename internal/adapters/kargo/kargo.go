@@ -85,28 +85,14 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		return nil, []error{fmt.Errorf("failed to marshal request: %w", err)}
 	}
 
-	// Compress request body with GZIP
-	var compressedBody bytes.Buffer
-	gzipWriter := gzip.NewWriter(&compressedBody)
-	if _, err := gzipWriter.Write(requestBody); err != nil {
-		return nil, []error{fmt.Errorf("failed to gzip request body: %w", err)}
-	}
-	if err := gzipWriter.Close(); err != nil {
-		return nil, []error{fmt.Errorf("failed to close gzip writer: %w", err)}
-	}
-
 	headers := http.Header{}
-	headers.Set("Content-Type", "application/json;charset=utf-8")
-	headers.Set("Content-Encoding", "gzip")
-	headers.Set("Accept", "application/json")
-	headers.Set("Accept-Encoding", "gzip")
-	// Task #18: Set Content-Length for gzipped requests
-	headers.Set("Content-Length", fmt.Sprintf("%d", len(compressedBody.Bytes())))
+	headers.Add("Content-Type", "application/json;charset=utf-8")
+	headers.Add("Accept", "application/json")
 
 	return []*adapters.RequestData{{
 		Method:  "POST",
 		URI:     a.endpoint,
-		Body:    compressedBody.Bytes(),
+		Body:    requestBody,
 		Headers: headers,
 	}}, nil
 }
