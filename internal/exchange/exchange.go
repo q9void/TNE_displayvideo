@@ -2298,7 +2298,8 @@ func (e *Exchange) callBiddersWithFPD(ctx context.Context, req *openrtb.BidReque
 						if e.metrics != nil {
 							e.metrics.RecordBidderCircuitFailure(code)
 						}
-					} else if len(result.Bids) > 0 {
+					} else {
+						// Any valid response (including no-bid) counts as success
 						breaker.RecordSuccess()
 						// Record success metric
 						if e.metrics != nil {

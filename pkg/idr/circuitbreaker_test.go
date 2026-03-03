@@ -529,3 +529,44 @@ func TestRecordFailureSuccess_ConcurrentAccess(t *testing.T) {
 		t.Errorf("expected circuit to remain closed, got %s", cb.State())
 	}
 }
+
+// TestCircuitBreakerIsOpenTriggersHalfOpenTransition verifies that calling IsOpen()
+// after the recovery timeout has elapsed transitions OPEN -> HALF-OPEN and allows
+// a probe request through. This tests the exchange's usage pattern (IsOpen check +
+// manual RecordFailure/RecordSuccess) rather than the Execute() path.
+func TestCircuitBreakerIsOpenTriggersHalfOpenTransition(t *testing.T) {
+	cb := NewCircuitBreaker(&CircuitBreakerConfig{
+		FailureThreshold: 2,
+		SuccessThreshold: 2,
+		Timeout:          50 * time.Millisecond,
+	})
+
+	// Trip the circuit via direct RecordFailure (exchange pattern)
+	cb.RecordFailure()
+	cb.RecordFailure()
+
+	if cb.State() != StateOpen {
+		t.Fatalf("expected state open after threshold failures, got %s", cb.State())
+	}
+	if !cb.IsOpen() {
+		t.Fatal("IsOpen() should return true when circuit is open")
+	}
+
+	// Wait for recovery timeout
+	time.Sleep(60 * time.Millisecond)
+
+	// IsOpen() should now trigger OPEN -> HALF-OPEN transition and return false
+	if cb.IsOpen() {
+		t.Fatal("IsOpen() should return false after recovery timeout (should transition to half-open)")
+	}
+	if cb.State() != StateHalfOpen {
+		t.Errorf("expected state half-open after timeout, got %s", cb.State())
+	}
+
+	// A successful probe closes the circuit after SuccessThreshold successes
+	cb.RecordSuccess()
+	cb.RecordSuccess()
+	if cb.State() != StateClosed {
+		t.Errorf("expected circuit closed after successes in half-open, got %s", cb.State())
+	}
+}

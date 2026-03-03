@@ -265,10 +265,15 @@ func (cb *CircuitBreaker) ForceOpen() {
 	cb.lastFailureTime = time.Now()
 }
 
-// IsOpen returns true if the circuit breaker is open
+// IsOpen returns true if the circuit breaker is currently blocking requests.
+// If the circuit was open but the recovery timeout has elapsed, it transitions
+// to half-open and returns false, allowing a probe request through.
 func (cb *CircuitBreaker) IsOpen() bool {
-	cb.mu.RLock()
-	defer cb.mu.RUnlock()
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	if cb.state == StateOpen && time.Since(cb.lastFailureTime) > cb.config.Timeout {
+		cb.setState(StateHalfOpen)
+	}
 	return cb.state == StateOpen
 }
 
