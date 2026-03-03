@@ -2400,9 +2400,12 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 				clone.Imp[i].Ext = filterImpExtForBidder(clone.Imp[i].Ext, bidderCode)
 			}
 
-			// Only set BidFloorCur if not already set (preserve original currency)
-			if clone.Imp[i].BidFloorCur == "" {
+			// Only set BidFloorCur when a BidFloor value is present.
+			// Sending bidfloorcur without bidfloor is malformed per OpenRTB spec.
+			if clone.Imp[i].BidFloor > 0 && clone.Imp[i].BidFloorCur == "" {
 				clone.Imp[i].BidFloorCur = e.config.DefaultCurrency
+			} else if clone.Imp[i].BidFloor == 0 {
+				clone.Imp[i].BidFloorCur = ""
 			}
 
 			// Deep copy pointer fields to prevent data corruption (CVE-2026-XXXX)
@@ -2440,9 +2443,16 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 	}
 	hasFPD := fpdData != nil && e.fpdProcessor != nil
 
-	// Clone Site only if FPD will modify it
-	if req.Site != nil && hasFPD && fpdData.Site != nil {
+	// Always deep-copy Site+Publisher to prevent cross-bidder data races.
+	// Without this, all clones share the same Publisher pointer. The Rubicon
+	// adapter mutates Publisher.Ext through that pointer, poisoning every
+	// other bidder's clone (e.g. site.publisher.ext.rp leaking into PubMatic).
+	if req.Site != nil {
 		siteCopy := *req.Site
+		if req.Site.Publisher != nil {
+			pubCopy := *req.Site.Publisher
+			siteCopy.Publisher = &pubCopy
+		}
 		clone.Site = &siteCopy
 	}
 

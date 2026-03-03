@@ -1101,11 +1101,6 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 				userExt["eids"] = eids
 			}
 
-			// Add consent hash if available (GDPR transparency)
-			if maiBid.User != nil && maiBid.User.ConsentGiven {
-				userExt["consent"] = "1"
-			}
-
 			extJSON, _ := json.Marshal(userExt)
 			user.Ext = extJSON
 
@@ -1123,30 +1118,20 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 			for k, v := range maiBid.User.Ext {
 				userExt[k] = v
 			}
-			if maiBid.User.ConsentGiven {
-				userExt["consent"] = "1"
-			}
 			extJSON, _ := json.Marshal(userExt)
 			user.Ext = extJSON
 		}
 
 		// Set TCF consent string (OpenRTB 2.5+ compliance)
+		// Only populate user.Consent when we have an actual TCF v2 string.
+		// "1" / "0" are not valid consent strings and confuse SSPs on non-GDPR traffic.
 		if maiBid.User != nil {
-			// Use actual TCF string from SDK if available
 			if maiBid.User.ConsentString != "" {
 				user.Consent = maiBid.User.ConsentString
 				previewLen := min(20, len(maiBid.User.ConsentString))
 				logger.Log.Debug().
 					Str("consent_string_preview", maiBid.User.ConsentString[:previewLen]).
 					Msg("Using TCFv2 consent string from SDK")
-			} else if maiBid.User.ConsentGiven {
-				// Fallback: If no TCF string but consent was given
-				logger.Log.Warn().
-					Str("account_id", maiBid.AccountID).
-					Msg("GDPR consent given but no TCF string provided - bidders may reject")
-				user.Consent = "1"  // Non-compliant fallback
-			} else {
-				user.Consent = "0"  // No consent
 			}
 
 			// Format user.data segments for first-party data targeting (OpenRTB 2.6)
