@@ -2802,8 +2802,8 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 		} else {
 			// Log request body for debugging
 			requestPreview := string(reqData.Body)
-			if len(requestPreview) > 2000 {
-				requestPreview = requestPreview[:2000] + "..."
+			if len(requestPreview) > 10000 {
+				requestPreview = requestPreview[:10000] + "..."
 			}
 
 			logger.Log.Debug().
