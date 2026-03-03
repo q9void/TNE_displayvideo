@@ -149,6 +149,7 @@ type MAIUser struct {
 	GDPRApplies    bool                     `json:"gdprApplies,omitempty"`
 	USPConsent     string                   `json:"uspConsent,omitempty"`
 	UserIds        map[string]string        `json:"userIds,omitempty"`        // Bidder-specific user IDs from cookie sync
+	Eids           []map[string]interface{} `json:"eids,omitempty"`           // Prebid ID module EIDs (id5, pubCommonId, etc.)
 	Data           []map[string]interface{} `json:"data,omitempty"`           // ORTB2 user data segments
 	Ext            map[string]interface{}   `json:"ext,omitempty"`            // Additional user extensions
 }
@@ -1041,12 +1042,49 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 				Msg("Including FPID in bid request as user.id")
 		}
 
-		// MODERN: Store all bidder IDs in user.ext.eids (OpenRTB 2.6+ standard)
-		// This provides transparency about ID sources and supports multiple ID types
-		if len(userIDs) > 0 {
-			eids := make([]map[string]interface{}, 0, len(userIDs))
+		// Build user.ext.eids from all sources, deduplicating by source domain.
+		// Priority order:
+		//   1. Prebid ID module EIDs (id5, pubCommonId, …) sent by SDK in user.eids
+		//   2. SDK-provided user.ext.eids (legacy path, same EIDs may arrive here)
+		//   3. Server-side bidder UIDs from database / cookie sync
+		hasPrebidEids := maiBid.User != nil && len(maiBid.User.Eids) > 0
+		if len(userIDs) > 0 || hasPrebidEids {
+			seenSources := make(map[string]struct{})
+			eids := make([]map[string]interface{}, 0)
 
-			// Map bidder codes to proper source domains
+			// 1. Prebid ID module EIDs (id5-sync.com, pubcid.org, etc.)
+			if hasPrebidEids {
+				for _, eid := range maiBid.User.Eids {
+					if src, ok := eid["source"].(string); ok && src != "" {
+						seenSources[src] = struct{}{}
+					}
+					eids = append(eids, eid)
+				}
+			}
+
+			// 2. SDK's user.ext.eids (may overlap with above — skip duplicates)
+			userExt := make(map[string]interface{})
+			if maiBid.User != nil && maiBid.User.Ext != nil {
+				for k, v := range maiBid.User.Ext {
+					userExt[k] = v
+				}
+			}
+			if existingEids, ok := userExt["eids"].([]interface{}); ok {
+				for _, raw := range existingEids {
+					if eid, ok := raw.(map[string]interface{}); ok {
+						src, _ := eid["source"].(string)
+						if _, seen := seenSources[src]; seen {
+							continue
+						}
+						if src != "" {
+							seenSources[src] = struct{}{}
+						}
+						eids = append(eids, eid)
+					}
+				}
+			}
+
+			// 3. Server-side bidder UIDs
 			sourceDomains := map[string]string{
 				"rubicon":    "rubiconproject.com",
 				"kargo":      "kargo.com",
@@ -1055,65 +1093,36 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 				"triplelift": "3lift.com",
 				"appnexus":   "adnxs.com",
 			}
-
 			for bidder, uid := range userIDs {
 				source := sourceDomains[bidder]
 				if source == "" {
-					source = bidder + ".com" // Fallback
+					source = bidder + ".com"
 				}
-
+				if _, seen := seenSources[source]; seen {
+					continue
+				}
+				seenSources[source] = struct{}{}
 				eids = append(eids, map[string]interface{}{
 					"source": source,
 					"uids": []map[string]interface{}{
-						{
-							"id":    uid,
-							"atype": 1, // Browser cookie-based ID
-						},
+						{"id": uid, "atype": 1},
 					},
 				})
 			}
 
-			// Merge with existing user.ext instead of overwriting
-			// Preserve SDK-provided eids and other extensions
-			userExt := make(map[string]interface{})
-
-			// Start with SDK-provided user.ext if it exists
-			if maiBid.User != nil && maiBid.User.Ext != nil {
-				for k, v := range maiBid.User.Ext {
-					userExt[k] = v
-				}
-			}
-
-			// Merge eids: combine SDK eids with server-side UIDs
-			if existingEids, ok := userExt["eids"].([]interface{}); ok && len(existingEids) > 0 {
-				// SDK provided eids - merge with our server-side UIDs
-				logger.Log.Debug().
-					Int("sdk_eids", len(existingEids)).
-					Int("server_eids", len(eids)).
-					Msg("Merging SDK eids with server UIDs")
-
-				for _, serverEid := range eids {
-					existingEids = append(existingEids, serverEid)
-				}
-				userExt["eids"] = existingEids
-			} else {
-				// No SDK eids, just use server-side UIDs
-				userExt["eids"] = eids
-			}
-
+			userExt["eids"] = eids
 			extJSON, _ := json.Marshal(userExt)
 			user.Ext = extJSON
 
 			logger.Log.Info().
 				Str("fpid", user.ID).
-				Int("user_ids", len(userIDs)).
-				Strs("bidders", getBidderKeys(userIDs)).
-				Msg("Populated user IDs from cookie sync")
+				Int("prebid_eids", len(maiBid.User.Eids)).
+				Int("server_uids", len(userIDs)).
+				Int("total_eids", len(eids)).
+				Msg("Populated user EIDs for auction")
 		} else if maiBid.User != nil && maiBid.User.Ext != nil {
-			// No server-side UIDs yet, but always preserve the SDK's user.ext.
-			// It contains the FPID eid (source: "thenexusengine.com") which the
-			// identity_gating hook checks to determine consent. Without it, the
-			// hook sees empty eids and skips injecting synced UIDs on future requests.
+			// No server-side UIDs or Prebid EIDs, but always preserve SDK's user.ext
+			// (contains the FPID eid used by identity_gating hook).
 			userExt := make(map[string]interface{})
 			for k, v := range maiBid.User.Ext {
 				userExt[k] = v
