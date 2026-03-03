@@ -2394,6 +2394,12 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 		for i := 0; i < impCount; i++ {
 			clone.Imp[i] = req.Imp[i] // Shallow copy of Imp struct
 
+			// Strip all other SSP keys from imp.ext — each bidder only sees its own params.
+			// This prevents Rubicon params leaking into PubMatic requests, etc.
+			if len(clone.Imp[i].Ext) > 0 {
+				clone.Imp[i].Ext = filterImpExtForBidder(clone.Imp[i].Ext, bidderCode)
+			}
+
 			// Only set BidFloorCur if not already set (preserve original currency)
 			if clone.Imp[i].BidFloorCur == "" {
 				clone.Imp[i].BidFloorCur = e.config.DefaultCurrency
@@ -2452,6 +2458,16 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 		clone.User = &userCopy
 	}
 
+	// Strip Rubicon-specific publisher.ext.rp for non-Rubicon bidders.
+	// These bleed in from the Rubicon adapter config and confuse other SSPs.
+	if bidderCode != "rubicon" && clone.Site != nil && clone.Site.Publisher != nil && len(clone.Site.Publisher.Ext) > 0 {
+		siteCopy := *clone.Site
+		pubCopy := *clone.Site.Publisher
+		pubCopy.Ext = stripPublisherExtRP(pubCopy.Ext)
+		siteCopy.Publisher = &pubCopy
+		clone.Site = &siteCopy
+	}
+
 	// Apply FPD if available (now safe since we cloned the affected objects)
 	if hasFPD {
 		_ = e.fpdProcessor.ApplyFPDToRequest(&clone, bidderCode, fpdData) //nolint:errcheck
@@ -2461,6 +2477,77 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 	e.augmentSChain(&clone, bidderCode)
 
 	return &clone
+}
+
+// filterImpExtForBidder strips all known SSP keys from imp.ext except the one
+// belonging to bidderCode. This ensures each SSP only receives its own params
+// and prevents cross-SSP data bleed (e.g. Rubicon params leaking into PubMatic).
+// Unknown keys (e.g. "gpid", "tid", "data") are preserved as-is.
+func filterImpExtForBidder(impExt []byte, bidderCode string) []byte {
+	// All known bidder keys in imp.ext (must match adapter names as used in the ext object)
+	knownBidders := map[string]struct{}{
+		"33across":     {},
+		"adform":       {},
+		"appnexus":     {},
+		"beachfront":   {},
+		"conversant":   {},
+		"criteo":       {},
+		"gumgum":       {},
+		"improvedigital": {},
+		"ix":           {},
+		"kargo":        {},
+		"medianet":     {},
+		"onetag":       {},
+		"openx":        {},
+		"outbrain":     {},
+		"pubmatic":     {},
+		"rubicon":      {},
+		"sharethrough": {},
+		"smartadserver": {},
+		"sovrn":        {},
+		"spotx":        {},
+		"taboola":      {},
+		"teads":        {},
+		"triplelift":   {},
+		"unruly":       {},
+	}
+
+	var ext map[string]json.RawMessage
+	if err := json.Unmarshal(impExt, &ext); err != nil {
+		// If we can't parse, return unchanged
+		return impExt
+	}
+
+	for key := range ext {
+		if _, isKnownBidder := knownBidders[key]; isKnownBidder && key != bidderCode {
+			delete(ext, key)
+		}
+	}
+
+	filtered, err := json.Marshal(ext)
+	if err != nil {
+		return impExt
+	}
+	return filtered
+}
+
+// stripPublisherExtRP removes the Rubicon-specific "rp" key from site.publisher.ext.
+// This prevents Rubicon account IDs from being sent to non-Rubicon SSPs.
+func stripPublisherExtRP(pubExt []byte) []byte {
+	var ext map[string]json.RawMessage
+	if err := json.Unmarshal(pubExt, &ext); err != nil {
+		return pubExt
+	}
+	if _, ok := ext["rp"]; !ok {
+		// Nothing to strip
+		return pubExt
+	}
+	delete(ext, "rp")
+	stripped, err := json.Marshal(ext)
+	if err != nil {
+		return pubExt
+	}
+	return stripped
 }
 
 // augmentSChain augments the supply chain with platform and bidder nodes
