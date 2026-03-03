@@ -164,6 +164,9 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		origReqExt[k] = v
 	}
 
+	// PubMatic does not want ext.prebid
+	delete(origReqExt, "prebid")
+
 	// Marshal final request.ext
 	rawExt, err := json.Marshal(origReqExt)
 	if err != nil {
@@ -176,6 +179,16 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		siteCopy := *request.Site
 		// Clear internal site.id - PubMatic doesn't need our internal account ID
 		siteCopy.ID = ""
+		// Strip non-IAB content categories (PubMatic rejects numeric/internal codes)
+		if len(siteCopy.Cat) > 0 {
+			iabCats := siteCopy.Cat[:0]
+			for _, c := range siteCopy.Cat {
+				if strings.HasPrefix(c, "IAB") {
+					iabCats = append(iabCats, c)
+				}
+			}
+			siteCopy.Cat = iabCats
+		}
 		if siteCopy.Publisher != nil {
 			publisherCopy := *siteCopy.Publisher
 			publisherCopy.ID = pubID
@@ -198,21 +211,44 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		request.App = &appCopy
 	}
 
-	// Set user IDs:
-	// - user.id = TNE first-party ID (thenexusengine.com EID) — stable cross-session identifier
-	// - user.buyeruid = PubMatic cookie-synced UID — for DSP audience matching
+	// Set user.id = PubMatic cookie-synced UID (preferred) or TNE FPID as fallback.
+	// PubMatic does not want buyeruid — clear it.
 	if request.User != nil {
 		userCopy := *request.User
-		if userCopy.ID == "" {
+		if uid := adapters.ExtractUIDFromEids(request.User, "pubmatic.com"); uid != "" {
+			userCopy.ID = uid
+		} else if userCopy.ID == "" {
 			if fpid := adapters.ExtractUIDFromEids(request.User, "thenexusengine.com"); fpid != "" {
 				userCopy.ID = fpid
 			}
 		}
-		if uid := adapters.ExtractUIDFromEids(request.User, "pubmatic.com"); uid != "" {
-			userCopy.BuyerUID = uid
-		}
+		userCopy.BuyerUID = ""
 		request.User = &userCopy
 	}
+
+	// Move regs.us_privacy to regs.ext.us_privacy (PubMatic wants the older location)
+	if request.Regs != nil && request.Regs.USPrivacy != "" {
+		regsCopy := *request.Regs
+		usPrivacy := regsCopy.USPrivacy
+		regsCopy.USPrivacy = ""
+		var regsExt map[string]json.RawMessage
+		if len(regsCopy.Ext) > 0 {
+			json.Unmarshal(regsCopy.Ext, &regsExt)
+		}
+		if regsExt == nil {
+			regsExt = make(map[string]json.RawMessage)
+		}
+		if b, err := json.Marshal(usPrivacy); err == nil {
+			regsExt["us_privacy"] = b
+		}
+		if b, err := json.Marshal(regsExt); err == nil {
+			regsCopy.Ext = b
+		}
+		request.Regs = &regsCopy
+	}
+
+	// PubMatic does not want a source object
+	request.Source = nil
 
 	// Marshal final request
 	requestJSON, err := json.Marshal(request)
