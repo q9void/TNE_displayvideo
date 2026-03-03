@@ -1196,9 +1196,13 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 	}
 
 	// Handle regulations (GDPR/CCPA)
+	// Server-side geo (MaxMind) is authoritative for GDPR applicability.
+	// Client-reported gdprApplies is ignored — CMP caching can cause false positives
+	// (e.g. a UK browser session with a US VPN still sends gdprApplies=true).
+	// If the server-resolved IP is not in a GDPR country, gdpr defaults to 0.
 	if maiBid.User != nil {
 		regs = &openrtb.Regs{}
-		if maiBid.User.GDPRApplies {
+		if middleware.DetectRegulationFromGeo(deviceObj.Geo) == middleware.RegulationGDPR {
 			gdpr := 1
 			regs.GDPR = &gdpr
 		}
