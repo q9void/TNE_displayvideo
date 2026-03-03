@@ -285,6 +285,20 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// If every slot was skipped (no bidder config found), return empty bids immediately
+	// without touching the exchange — avoids spurious circuit breaker trips.
+	if len(ortbReq.Imp) == 0 {
+		log.Warn().
+			Str("account_id", maiBidReq.AccountID).
+			Int("slots", len(maiBidReq.Slots)).
+			Msg("All slots have no bidder config — returning empty bids without calling exchange")
+		h.writeMAIResponse(w, &MAIBidResponse{
+			Bids:         []MAIBid{},
+			ResponseTime: int(time.Since(startTime).Milliseconds()),
+		})
+		return
+	}
+
 	// Execute request-level hooks (BEFORE auction)
 	// Hook execution order is critical:
 	// 1. Request Validation - validates and normalizes request
@@ -733,12 +747,13 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 					Msg("❌ Failed to marshal bidder parameters")
 			}
 		} else {
-			logger.Log.Error().
+			logger.Log.Warn().
 				Str("publisher", maiBid.AccountID).
 				Str("domain", domain).
 				Str("ad_unit", adUnitPath).
 				Str("div_id", slot.DivID).
-				Msg("❌ ZERO bidder configuration found - no bids will be returned for this slot!")
+				Msg("No bidder config for slot — skipping imp to avoid exchange errors")
+			continue // do not append an imp with no bidder params; avoids spurious circuit breaker trips
 		}
 	}
 
