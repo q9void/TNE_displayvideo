@@ -18,6 +18,7 @@ import (
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
 	"github.com/thenexusengine/tne_springwire/internal/storage"
 	"github.com/thenexusengine/tne_springwire/internal/usersync"
+	"github.com/thenexusengine/tne_springwire/internal/validation"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 )
 
@@ -72,9 +73,10 @@ type TripleliftParams struct {
 // CatalystBidHandler handles MAI Publisher-compatible bid requests
 type CatalystBidHandler struct {
 	exchange       *exchange.Exchange
-	mapping        *BidderMapping             // Legacy: static mapping file (fallback)
-	publisherStore *storage.PublisherStore    // Dynamic hierarchical config from database
-	userSyncStore  *storage.UserSyncStore     // User sync storage for persistent UIDs
+	mapping        *BidderMapping          // Legacy: static mapping file (fallback)
+	publisherStore *storage.PublisherStore // Dynamic hierarchical config from database
+	userSyncStore  *storage.UserSyncStore  // User sync storage for persistent UIDs
+	syncAwaiter    *usersync.SyncAwaiter
 }
 
 // LoadBidderMapping loads bidder parameter mapping from JSON file
@@ -98,12 +100,13 @@ func LoadBidderMapping(path string) (*BidderMapping, error) {
 }
 
 // NewCatalystBidHandler creates a new Catalyst bid handler
-func NewCatalystBidHandler(ex *exchange.Exchange, mapping *BidderMapping, publisherStore *storage.PublisherStore, userSyncStore *storage.UserSyncStore) *CatalystBidHandler {
+func NewCatalystBidHandler(ex *exchange.Exchange, mapping *BidderMapping, publisherStore *storage.PublisherStore, userSyncStore *storage.UserSyncStore, syncAwaiter *usersync.SyncAwaiter) *CatalystBidHandler {
 	return &CatalystBidHandler{
 		exchange:       ex,
 		mapping:        mapping,
 		publisherStore: publisherStore,
 		userSyncStore:  userSyncStore,
+		syncAwaiter:    syncAwaiter,
 	}
 }
 
@@ -449,6 +452,10 @@ func normalizeSlotPattern(domain, divID, adUnitPath string) []string {
 		}
 	}
 
+	// 5. Domain-level wildcard catch-all (lowest priority)
+	// Matches slots configured with pattern "domain/*" in the DB.
+	patterns = append(patterns, fmt.Sprintf("%s/*", domain))
+
 	return patterns
 }
 
@@ -714,6 +721,16 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 
 			// Add params to impExt if found
 			if params != nil && len(params) > 0 {
+				if valid, errs := validation.ValidateBidderParams(bidderCode, params); !valid {
+					logger.Log.Warn().
+						Str("bidder", bidderCode).
+						Str("publisher", maiBid.AccountID).
+						Str("domain", domain).
+						Str("ad_unit", adUnitPath).
+						Strs("missing_fields", errs).
+						Msg("⚠️  Skipping bidder — required params missing or invalid")
+					continue
+				}
 				impExt[bidderCode] = params
 			} else {
 				logger.Log.Warn().
