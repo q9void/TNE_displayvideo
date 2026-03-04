@@ -14,10 +14,11 @@ type SetUIDHandler struct {
 	validBidders  map[string]bool
 	idGraphStore  *storage.IDGraphStore
 	userSyncStore *storage.UserSyncStore
+	syncAwaiter   *usersync.SyncAwaiter
 }
 
 // NewSetUIDHandler creates a new setuid handler
-func NewSetUIDHandler(validBidders []string, idGraphStore *storage.IDGraphStore, userSyncStore *storage.UserSyncStore) *SetUIDHandler {
+func NewSetUIDHandler(validBidders []string, idGraphStore *storage.IDGraphStore, userSyncStore *storage.UserSyncStore, syncAwaiter *usersync.SyncAwaiter) *SetUIDHandler {
 	bidderMap := make(map[string]bool)
 	for _, b := range validBidders {
 		bidderMap[strings.ToLower(b)] = true
@@ -26,6 +27,7 @@ func NewSetUIDHandler(validBidders []string, idGraphStore *storage.IDGraphStore,
 		validBidders:  bidderMap,
 		idGraphStore:  idGraphStore,
 		userSyncStore: userSyncStore,
+		syncAwaiter:   syncAwaiter,
 	}
 }
 
@@ -120,6 +122,13 @@ func (h *SetUIDHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					Str("bidder", bidderLower).
 					Str("uid", uid).
 					Msg("Successfully updated UID in database")
+				logger.Log.Info().
+					Str("fpid", cookie.GetFPID()).
+					Str("bidder", bidderLower).
+					Msg("sync_stored")
+				if h.syncAwaiter != nil {
+					h.syncAwaiter.Signal(cookie.GetFPID())
+				}
 			}
 		}
 

@@ -26,6 +26,7 @@ import (
 	"github.com/thenexusengine/tne_springwire/internal/metrics"
 	"github.com/thenexusengine/tne_springwire/internal/middleware"
 	"github.com/thenexusengine/tne_springwire/internal/storage"
+	"github.com/thenexusengine/tne_springwire/internal/usersync"
 	"github.com/thenexusengine/tne_springwire/pkg/currency"
 	"github.com/thenexusengine/tne_springwire/pkg/idr"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
@@ -275,7 +276,8 @@ func (s *Server) initHandlers() {
 	// Cookie sync handlers
 	cookieSyncConfig := endpoints.DefaultCookieSyncConfig(s.config.HostURL)
 	cookieSyncHandler := endpoints.NewCookieSyncHandler(cookieSyncConfig, s.userSyncStore)
-	setuidHandler := endpoints.NewSetUIDHandler(cookieSyncHandler.ListBidders(), s.idGraphStore, s.userSyncStore)
+	syncAwaiter := usersync.NewSyncAwaiter()
+	setuidHandler := endpoints.NewSetUIDHandler(cookieSyncHandler.ListBidders(), s.idGraphStore, s.userSyncStore, syncAwaiter)
 	optoutHandler := endpoints.NewOptOutHandler()
 
 	log.Info().
@@ -347,7 +349,7 @@ func (s *Server) initHandlers() {
 		Strs("bidders", bidderMapping.Publisher.DefaultBidders).
 		Msg("Loaded bidder mapping configuration")
 
-	catalystBidHandler := endpoints.NewCatalystBidHandler(s.exchange, bidderMapping, s.publisher, s.userSyncStore)
+	catalystBidHandler := endpoints.NewCatalystBidHandler(s.exchange, bidderMapping, s.publisher, s.userSyncStore, syncAwaiter)
 	mux.Handle("/v1/bid", privacyMiddleware(http.HandlerFunc(catalystBidHandler.HandleBidRequest)))
 
 	log.Info().

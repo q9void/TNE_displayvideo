@@ -12,7 +12,7 @@ import (
 
 func TestNewSetUIDHandler(t *testing.T) {
 	bidders := []string{"AppNexus", "Rubicon", "PubMatic"}
-	handler := NewSetUIDHandler(bidders)
+	handler := NewSetUIDHandler(bidders, nil, nil, nil)
 
 	if handler == nil {
 		t.Fatal("Expected handler to be created")
@@ -31,7 +31,7 @@ func TestNewSetUIDHandler(t *testing.T) {
 }
 
 func TestSetUIDHandler_MissingBidder(t *testing.T) {
-	handler := NewSetUIDHandler([]string{"appnexus"})
+	handler := NewSetUIDHandler([]string{"appnexus"}, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/setuid?uid=test123", nil)
 	w := httptest.NewRecorder()
@@ -48,7 +48,7 @@ func TestSetUIDHandler_MissingBidder(t *testing.T) {
 }
 
 func TestSetUIDHandler_ValidUID(t *testing.T) {
-	handler := NewSetUIDHandler([]string{"appnexus"})
+	handler := NewSetUIDHandler([]string{"appnexus"}, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/setuid?bidder=appnexus&uid=user123", nil)
 	req.Host = "example.com"
@@ -94,7 +94,7 @@ func TestSetUIDHandler_ValidUID(t *testing.T) {
 }
 
 func TestSetUIDHandler_EmptyUID(t *testing.T) {
-	handler := NewSetUIDHandler([]string{"appnexus"})
+	handler := NewSetUIDHandler([]string{"appnexus"}, nil, nil, nil)
 
 	// First set a UID
 	req1 := httptest.NewRequest("GET", "/setuid?bidder=appnexus&uid=user123", nil)
@@ -126,7 +126,7 @@ func TestSetUIDHandler_EmptyUID(t *testing.T) {
 }
 
 func TestSetUIDHandler_PlaceholderUID(t *testing.T) {
-	handler := NewSetUIDHandler([]string{"appnexus"})
+	handler := NewSetUIDHandler([]string{"appnexus"}, nil, nil, nil)
 
 	testCases := []string{"$UID", "0"}
 
@@ -151,7 +151,7 @@ func TestSetUIDHandler_PlaceholderUID(t *testing.T) {
 }
 
 func TestSetUIDHandler_OptOut(t *testing.T) {
-	handler := NewSetUIDHandler([]string{"appnexus"})
+	handler := NewSetUIDHandler([]string{"appnexus"}, nil, nil, nil)
 
 	// Create a cookie with opt-out set
 	optOutCookie := usersync.NewCookie()
@@ -176,7 +176,7 @@ func TestSetUIDHandler_OptOut(t *testing.T) {
 }
 
 func TestSetUIDHandler_UnknownBidder(t *testing.T) {
-	handler := NewSetUIDHandler([]string{"appnexus"})
+	handler := NewSetUIDHandler([]string{"appnexus"}, nil, nil, nil)
 
 	// Try to set UID for unknown bidder
 	req := httptest.NewRequest("GET", "/setuid?bidder=unknown&uid=user123", nil)
@@ -196,7 +196,7 @@ func TestSetUIDHandler_UnknownBidder(t *testing.T) {
 }
 
 func TestSetUIDHandler_GetCookieDomain(t *testing.T) {
-	handler := NewSetUIDHandler([]string{})
+	handler := NewSetUIDHandler([]string{}, nil, nil, nil)
 
 	testCases := []struct {
 		host     string
@@ -222,7 +222,7 @@ func TestSetUIDHandler_GetCookieDomain(t *testing.T) {
 }
 
 func TestSetUIDHandler_PixelResponse(t *testing.T) {
-	handler := NewSetUIDHandler([]string{"appnexus"})
+	handler := NewSetUIDHandler([]string{"appnexus"}, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/setuid?bidder=appnexus&uid=user123", nil)
 	req.Host = "example.com"
@@ -254,7 +254,7 @@ func TestSetUIDHandler_PixelResponse(t *testing.T) {
 }
 
 func TestSetUIDHandler_AddBidder(t *testing.T) {
-	handler := NewSetUIDHandler([]string{"appnexus"})
+	handler := NewSetUIDHandler([]string{"appnexus"}, nil, nil, nil)
 
 	// Initially unknown bidder
 	if handler.validBidders["rubicon"] {
@@ -282,7 +282,7 @@ func TestSetUIDHandler_AddBidder(t *testing.T) {
 }
 
 func TestSetUIDHandler_CaseInsensitive(t *testing.T) {
-	handler := NewSetUIDHandler([]string{"AppNexus"})
+	handler := NewSetUIDHandler([]string{"AppNexus"}, nil, nil, nil)
 
 	testCases := []string{"appnexus", "AppNexus", "APPNEXUS", "aPpNeXuS"}
 
@@ -447,7 +447,7 @@ func TestOptOutHandler_DomainWithPort(t *testing.T) {
 
 func TestSetUIDHandler_GDPR_NoConsent(t *testing.T) {
 	// When GDPR=1 but no consent string, should return pixel without storing UID
-	handler := NewSetUIDHandler([]string{"appnexus"})
+	handler := NewSetUIDHandler([]string{"appnexus"}, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/setuid?bidder=appnexus&uid=testuid&gdpr=1", nil)
 	w := httptest.NewRecorder()
@@ -478,7 +478,7 @@ func TestSetUIDHandler_GDPR_NoConsent(t *testing.T) {
 
 func TestSetUIDHandler_GDPR_InvalidConsent(t *testing.T) {
 	// When GDPR=1 but invalid consent string, should return pixel without storing UID
-	handler := NewSetUIDHandler([]string{"appnexus"})
+	handler := NewSetUIDHandler([]string{"appnexus"}, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/setuid?bidder=appnexus&uid=testuid&gdpr=1&gdpr_consent=short", nil)
 	w := httptest.NewRecorder()
@@ -498,7 +498,7 @@ func TestSetUIDHandler_GDPR_InvalidConsent(t *testing.T) {
 
 func TestSetUIDHandler_GDPR_ValidConsent(t *testing.T) {
 	// When GDPR=1 with valid consent, should store UID normally
-	handler := NewSetUIDHandler([]string{"appnexus"})
+	handler := NewSetUIDHandler([]string{"appnexus"}, nil, nil, nil)
 
 	validConsent := "CPXxRfAPXxRfAAfKABENB-CgAAAAAAAAAAYgAAAAAAAA"
 	req := httptest.NewRequest("GET", "/setuid?bidder=appnexus&uid=testuid&gdpr=1&gdpr_consent="+validConsent, nil)
@@ -534,7 +534,7 @@ func TestSetUIDHandler_GDPR_ValidConsent(t *testing.T) {
 
 func TestSetUIDHandler_NoGDPR_Works(t *testing.T) {
 	// When GDPR=0, should store UID normally
-	handler := NewSetUIDHandler([]string{"appnexus"})
+	handler := NewSetUIDHandler([]string{"appnexus"}, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/setuid?bidder=appnexus&uid=testuid&gdpr=0", nil)
 	w := httptest.NewRecorder()
