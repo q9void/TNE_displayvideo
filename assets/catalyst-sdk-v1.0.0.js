@@ -516,9 +516,24 @@
       }
       if (ortb2Data.user.ext && Object.keys(ortb2Data.user.ext).length > 0) {
         bidRequest.user.ext = bidRequest.user.ext || {};
-        for (var key in ortb2Data.user.ext) {
-          if (ortb2Data.user.ext.hasOwnProperty(key)) {
-            bidRequest.user.ext[key] = ortb2Data.user.ext[key];
+        for (var ukey in ortb2Data.user.ext) {
+          if (!ortb2Data.user.ext.hasOwnProperty(ukey)) { continue; }
+          if (ukey === 'eids') {
+            // Merge eids arrays — don't overwrite the EIDs we already built
+            var existingEids = bidRequest.user.ext.eids || [];
+            var ortb2Eids = ortb2Data.user.ext.eids || [];
+            var eidSources = {};
+            for (var e = 0; e < existingEids.length; e++) {
+              if (existingEids[e].source) { eidSources[existingEids[e].source] = true; }
+            }
+            for (var o = 0; o < ortb2Eids.length; o++) {
+              if (!ortb2Eids[o].source || !eidSources[ortb2Eids[o].source]) {
+                existingEids.push(ortb2Eids[o]);
+              }
+            }
+            bidRequest.user.ext.eids = existingEids;
+          } else {
+            bidRequest.user.ext[ukey] = ortb2Data.user.ext[ukey];
           }
         }
       }
@@ -681,15 +696,12 @@
   catalyst._getUserIds = function() {
     var userIds = {};
 
-    // 1. Read from Catalyst's own uids cookie
+    // Read from Catalyst's own uids cookie (server-side synced bidder IDs)
     var uids = catalyst._getCookie('uids');
     if (uids) {
       try {
-        // Cookie is base64-encoded JSON
         var decoded = atob(uids);
         var data = JSON.parse(decoded);
-
-        // Extract just the UID values (strip expires timestamps)
         for (var bidder in data.uids || {}) {
           if (data.uids[bidder].uid && !catalyst._isExpired(data.uids[bidder].expires)) {
             userIds[bidder] = data.uids[bidder].uid;
@@ -697,49 +709,6 @@
         }
       } catch (e) {
         catalyst.log('Failed to parse uids cookie:', e);
-      }
-    }
-
-    // 2. Get user IDs from Prebid.js if available
-    if (window.pbjs && typeof window.pbjs.getUserIds === 'function') {
-      try {
-        var prebidUserIds = window.pbjs.getUserIds();
-        if (prebidUserIds && typeof prebidUserIds === 'object') {
-          // Prebid returns IDs like: { id5id: {...}, pubcid: "...", ... }
-          // Map known ID sources to bidder codes
-          var idSourceToBidder = {
-            'id5id': 'id5',
-            'pubcid': 'pubcommon',
-            'pubProvidedId': 'pubprovided',
-            'uid2': 'uid2',
-            'parrableId': 'parrable',
-            'identityLink': 'liveramp',
-            'criteoId': 'criteo',
-            'netId': 'netid'
-          };
-
-          for (var source in prebidUserIds) {
-            var bidderCode = idSourceToBidder[source] || source;
-            var idValue = prebidUserIds[source];
-
-            // Handle different ID formats
-            if (idValue && typeof idValue === 'object') {
-              if (idValue.uid) {
-                userIds[bidderCode] = idValue.uid;
-              } else if (idValue.id) {
-                userIds[bidderCode] = idValue.id;
-              }
-            } else if (idValue && typeof idValue === 'string') {
-              userIds[bidderCode] = idValue;
-            }
-          }
-
-          if (Object.keys(prebidUserIds).length > 0) {
-            catalyst.log('Added', Object.keys(prebidUserIds).length, 'user IDs from Prebid.js');
-          }
-        }
-      } catch (e) {
-        catalyst.log('Failed to get Prebid user IDs:', e);
       }
     }
 
@@ -755,8 +724,38 @@
    */
   catalyst._buildEids = function(userIds, fpid) {
     var eids = [];
+    var seenSources = {};
 
-    // Bidder source mapping (bidder code → eid source domain)
+    // 1. First-party ID first
+    if (fpid) {
+      seenSources['thenexusengine.com'] = true;
+      eids.push({
+        source: 'thenexusengine.com',
+        uids: [{ id: fpid, atype: 1 }]
+      });
+    }
+
+    // 2. Prebid ID module EIDs via getUserIdsAsEids() — returns proper OpenRTB format
+    //    with correct source domains (id5-sync.com, pubcid.org, etc.), no manual mapping needed
+    if (window.pbjs && typeof window.pbjs.getUserIdsAsEids === 'function') {
+      try {
+        var prebidEids = window.pbjs.getUserIdsAsEids() || [];
+        for (var p = 0; p < prebidEids.length; p++) {
+          var peid = prebidEids[p];
+          if (peid && peid.source && !seenSources[peid.source]) {
+            seenSources[peid.source] = true;
+            eids.push(peid);
+          }
+        }
+        if (prebidEids.length > 0) {
+          catalyst.log('Added', prebidEids.length, 'EIDs from Prebid.js getUserIdsAsEids()');
+        }
+      } catch (e) {
+        catalyst.log('Failed to get Prebid EIDs:', e);
+      }
+    }
+
+    // 3. Catalyst cookie-synced bidder UIDs (server-side syncs), skip if already present
     var bidderSources = {
       'kargo': 'kargo.com',
       'rubicon': 'rubiconproject.com',
@@ -764,34 +763,19 @@
       'appnexus': 'appnexus.com',
       'sovrn': 'lijit.com',
       'triplelift': 'triplelift.com',
-      'id5': 'id5-sync.com',
       'liveintent': 'liveintent.com',
       'criteo': 'criteo.com',
-      'thetradedesk': 'adsrvr.org',
-      'pubcid': 'pubcid.org'
+      'thetradedesk': 'adsrvr.org'
     };
-
-    // Add first-party ID first
-    if (fpid) {
-      eids.push({
-        source: 'thenexusengine.com',
-        uids: [{
-          id: fpid,
-          atype: 1  // atype 1 = cookie/device ID
-        }]
-      });
-    }
-
-    // Add bidder-specific IDs
     for (var bidder in userIds) {
       var source = bidderSources[bidder] || (bidder + '.com');
-      eids.push({
-        source: source,
-        uids: [{
-          id: userIds[bidder],
-          atype: 1
-        }]
-      });
+      if (!seenSources[source]) {
+        seenSources[source] = true;
+        eids.push({
+          source: source,
+          uids: [{ id: userIds[bidder], atype: 1 }]
+        });
+      }
     }
 
     return eids;
