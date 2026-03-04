@@ -733,12 +733,12 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 				}
 				impExt[bidderCode] = params
 			} else {
-				logger.Log.Warn().
+				logger.Log.Debug().
 					Str("bidder", bidderCode).
 					Str("publisher", maiBid.AccountID).
 					Str("domain", domain).
 					Str("ad_unit", adUnitPath).
-					Msg("⚠️  No configuration found for bidder")
+					Msg("No configuration found for bidder")
 			}
 		}
 
@@ -1021,6 +1021,23 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 				logger.Log.Warn().
 					Str("fpid", fpid).
 					Msg("No user syncs found in database for this FPID")
+				if h.syncAwaiter != nil && fpid != "" {
+					if signaled := h.syncAwaiter.Wait(r.Context(), fpid, 75*time.Millisecond); signaled {
+						if reloaded, err := h.userSyncStore.GetSyncsForUser(r.Context(), fpid); err == nil {
+							for bidder, uid := range reloaded {
+								userIDs[bidder] = uid
+							}
+							logger.Log.Info().
+								Str("fpid", fpid).
+								Int("syncs_reloaded", len(reloaded)).
+								Msg("sync_awaiter_hit")
+						}
+					} else {
+						logger.Log.Info().
+							Str("fpid", fpid).
+							Msg("sync_awaiter_timeout")
+					}
+				}
 			}
 		}
 	} else {
@@ -1047,6 +1064,14 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 			}
 		}
 	}
+
+	// Sync coverage telemetry — measure UID availability at bid time
+	logger.Log.Info().
+		Str("fpid", fpid).
+		Int("uid_count", len(userIDs)).
+		Bool("has_syncs", len(userIDs) > 0).
+		Strs("synced_bidders", getBidderKeys(userIDs)).
+		Msg("sync_coverage")
 
 	// Log final user ID collection status before building OpenRTB request
 	logger.Log.Info().
