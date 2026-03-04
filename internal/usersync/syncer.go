@@ -151,21 +151,15 @@ func DefaultSyncerConfigs() map[string]SyncerConfig {
 			SupportCORS:     true,
 			Enabled:         true,
 		},
-		// BLOCKED: Rubicon requires a custom p= key registered via header-bidding@rubiconproject.com.
-		// The shared p=prebid key belongs to prebid.org's hosted server; using it redirects callbacks
-		// to prebid.adnxs.com instead of ads.thenexusengine.com, so no UIDs are ever stored.
-		//
-		// Action: Email header-bidding@rubiconproject.com requesting registration of:
-		//   https://ads.thenexusengine.com/setuid?bidder=rubicon&uid=$UID
-		// They will provide a custom p=<KEY> value.
-		//
-		// TODO: Once the key is received, set Enabled: true and replace p=prebid with p=<KEY> in both URLs below.
+		// Magnite confirmed our redirect URL is registered:
+		//   https://ads.thenexusengine.com/setuid?bidder=rubicon&uid={storage_id}
+		// XAPI credentials: pb_thenexusengine (set via RUBICON_XAPI_USER/PASS env vars)
 		"rubicon": {
 			BidderCode:      "rubicon",
 			RedirectSyncURL: "https://pixel.rubiconproject.com/exchange/sync.php?p=prebid&gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}&redir={{redirect_url}}",
 			IframeSyncURL:   "https://eus.rubiconproject.com/usync.html?p=prebid&gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}",
 			SupportCORS:     true,
-			Enabled:         false, // Disabled until custom p= key is registered with Magnite
+			Enabled:         true,
 		},
 		// NOTE: PubMatic's UID macro is #PMUID (not $UID).  The '#' character is a URL
 		// fragment delimiter and would be stripped by the browser if placed outside a

@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	defaultEndpoint = "https://fastlane.rubiconproject.com/a/api/fastlane.json"
+	// Authenticated regional endpoint (US-East) — requires RUBICON_XAPI_USER/PASS
+	defaultEndpoint = "http://exapi-us-east.rubiconproject.com/a/api/exchange.json?tk_sdc=us-east"
 )
 
 // Rubicon-specific extension structures
@@ -73,6 +74,9 @@ type Adapter struct {
 
 // New creates a new Rubicon adapter
 func New(endpoint string) *Adapter {
+	if endpoint == "" {
+		endpoint = os.Getenv("RUBICON_ENDPOINT")
+	}
 	if endpoint == "" {
 		endpoint = defaultEndpoint
 	}
