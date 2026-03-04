@@ -989,56 +989,74 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		}
 	}
 
-	// 1. From database (most persistent and reliable source)
+	// 1. From database + fresh sync awaiter (concurrent race, prefer fresh)
 	if fpid != "" && h.userSyncStore != nil {
-		logger.Log.Debug().
-			Str("fpid", fpid).
-			Msg("Attempting to load user syncs from database")
+		type syncResult struct {
+			syncs map[string]string
+			fresh bool
+		}
+		resultCh := make(chan syncResult, 2)
 
-		dbSyncs, err := h.userSyncStore.GetSyncsForUser(r.Context(), fpid)
-		if err != nil {
-			logger.Log.Warn().
-				Err(err).
-				Str("fpid", fpid).
-				Msg("Failed to load user syncs from database")
-		} else {
-			logger.Log.Debug().
-				Str("fpid", fpid).
-				Int("uids_from_db", len(dbSyncs)).
-				Interface("db_syncs", dbSyncs).
-				Msg("Database UID lookup result")
+		// Path A: cached syncs from DB (fast, ~2ms)
+		go func() {
+			syncs, err := h.userSyncStore.GetSyncsForUser(r.Context(), fpid)
+			if err != nil {
+				logger.Log.Warn().Err(err).Str("fpid", fpid).Msg("Failed to load user syncs from database")
+				syncs = nil
+			}
+			resultCh <- syncResult{syncs: syncs, fresh: false}
+		}()
 
-			if len(dbSyncs) > 0 {
-				for bidder, uid := range dbSyncs {
-					userIDs[bidder] = uid
-				}
-				logger.Log.Info().
-					Str("fpid", fpid).
-					Int("syncs_loaded", len(dbSyncs)).
-					Strs("bidders", getBidderKeys(dbSyncs)).
-					Msg("Loaded user syncs from database")
-			} else {
-				logger.Log.Warn().
-					Str("fpid", fpid).
-					Msg("No user syncs found in database for this FPID")
-				if h.syncAwaiter != nil && fpid != "" {
-					if signaled := h.syncAwaiter.Wait(r.Context(), fpid, 75*time.Millisecond); signaled {
-						if reloaded, err := h.userSyncStore.GetSyncsForUser(r.Context(), fpid); err == nil {
-							for bidder, uid := range reloaded {
-								userIDs[bidder] = uid
-							}
-							logger.Log.Info().
-								Str("fpid", fpid).
-								Int("syncs_reloaded", len(reloaded)).
-								Msg("sync_awaiter_hit")
-						}
-					} else {
-						logger.Log.Info().
-							Str("fpid", fpid).
-							Msg("sync_awaiter_timeout")
-					}
+		// Path B: fresh sync from in-flight setuid callback (preferred)
+		go func() {
+			if h.syncAwaiter != nil {
+				if signaled := h.syncAwaiter.Wait(r.Context(), fpid, 50*time.Millisecond); signaled {
+					syncs, _ := h.userSyncStore.GetSyncsForUser(r.Context(), fpid)
+					resultCh <- syncResult{syncs: syncs, fresh: true}
+					return
 				}
 			}
+			resultCh <- syncResult{fresh: true} // timeout or no awaiter
+		}()
+
+		// Collect both results (always exactly 2 sends on resultCh)
+		var cached, fresh map[string]string
+		for i := 0; i < 2; i++ {
+			res := <-resultCh
+			if res.fresh {
+				fresh = res.syncs
+			} else {
+				cached = res.syncs
+			}
+		}
+
+		// Merge: cached first, fresh overrides (preferred)
+		for bidder, uid := range cached {
+			userIDs[bidder] = uid
+		}
+		for bidder, uid := range fresh {
+			userIDs[bidder] = uid // fresh wins
+		}
+
+		// Telemetry
+		switch {
+		case len(fresh) > 0:
+			logger.Log.Info().
+				Str("fpid", fpid).
+				Int("fresh_syncs", len(fresh)).
+				Int("cached_syncs", len(cached)).
+				Strs("bidders", getBidderKeys(fresh)).
+				Msg("sync_awaiter_hit")
+		case len(cached) > 0:
+			logger.Log.Info().
+				Str("fpid", fpid).
+				Int("syncs_loaded", len(cached)).
+				Strs("bidders", getBidderKeys(cached)).
+				Msg("Loaded user syncs from database")
+		default:
+			logger.Log.Info().
+				Str("fpid", fpid).
+				Msg("sync_awaiter_timeout")
 		}
 	} else {
 		logger.Log.Debug().

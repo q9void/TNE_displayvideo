@@ -46,7 +46,7 @@ func TestNewCookieSyncHandler(t *testing.T) {
 		},
 	}
 
-	handler := NewCookieSyncHandler(config)
+	handler := NewCookieSyncHandler(config, nil)
 
 	if handler.hostURL != config.HostURL {
 		t.Errorf("expected hostURL %s, got %s", config.HostURL, handler.hostURL)
@@ -393,10 +393,10 @@ func TestGetCookieDomain(t *testing.T) {
 		host     string
 		expected string
 	}{
-		{"example.com", "example.com"},
-		{"example.com:8080", "example.com"},
-		{"sub.example.com", "sub.example.com"},
-		{"sub.example.com:443", "sub.example.com"},
+		{"example.com", ".example.com"},
+		{"example.com:8080", ".example.com"},
+		{"sub.example.com", ".example.com"},
+		{"sub.example.com:443", ".example.com"},
 	}
 
 	for _, tt := range tests {
@@ -581,7 +581,7 @@ func createTestHandler() *CookieSyncHandler {
 			},
 		},
 	}
-	return NewCookieSyncHandler(config)
+	return NewCookieSyncHandler(config, nil)
 }
 
 // GDPR FIX: Tests for consent validation

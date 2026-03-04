@@ -202,10 +202,10 @@ func TestSetUIDHandler_GetCookieDomain(t *testing.T) {
 		host     string
 		expected string
 	}{
-		{"example.com", "example.com"},
-		{"example.com:8080", "example.com"},
+		{"example.com", ".example.com"},
+		{"example.com:8080", ".example.com"},
 		{"localhost:3000", "localhost"},
-		{"sub.example.com", "sub.example.com"},
+		{"sub.example.com", ".example.com"},
 	}
 
 	for _, tc := range testCases {

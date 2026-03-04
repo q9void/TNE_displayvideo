@@ -85,7 +85,7 @@ func TestNewVideoHandler(t *testing.T) {
 	})
 	trackingURL := "https://track.example.com"
 
-	handler := NewVideoHandler(ex, trackingURL)
+	handler := NewVideoHandler(ex, trackingURL, nil)
 
 	if handler == nil {
 		t.Fatal("expected non-nil handler")
@@ -103,7 +103,7 @@ func TestNewVideoHandler(t *testing.T) {
 
 func TestHandleVASTRequest_MethodNotAllowed(t *testing.T) {
 	ex := newEmptyTestVideoExchange()
-	handler := NewVideoHandler(ex, "https://track.example.com")
+	handler := NewVideoHandler(ex, "https://track.example.com", nil)
 
 	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch}
 	for _, method := range methods {
@@ -122,7 +122,7 @@ func TestHandleVASTRequest_MethodNotAllowed(t *testing.T) {
 
 func TestHandleVASTRequest_ValidRequest(t *testing.T) {
 	ex := newTestVideoExchange()
-	handler := NewVideoHandler(ex, "https://track.example.com")
+	handler := NewVideoHandler(ex, "https://track.example.com", nil)
 
 	queryParams := url.Values{
 		"id":          {"test-request-1"},
@@ -171,7 +171,7 @@ func TestHandleVASTRequest_ValidRequest(t *testing.T) {
 
 func TestHandleVASTRequest_MinimalParameters(t *testing.T) {
 	ex := newTestVideoExchange()
-	handler := NewVideoHandler(ex, "https://track.example.com")
+	handler := NewVideoHandler(ex, "https://track.example.com", nil)
 
 	// Request with minimal parameters - should use defaults
 	req := httptest.NewRequest(http.MethodGet, "/video/vast", nil)
@@ -192,7 +192,7 @@ func TestHandleVASTRequest_MinimalParameters(t *testing.T) {
 
 func TestHandleVASTRequest_AuctionError(t *testing.T) {
 	ex := newEmptyTestVideoExchange()
-	handler := NewVideoHandler(ex, "https://track.example.com")
+	handler := NewVideoHandler(ex, "https://track.example.com", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/video/vast?id=test-1", nil)
 	w := httptest.NewRecorder()
@@ -212,7 +212,7 @@ func TestHandleVASTRequest_AuctionError(t *testing.T) {
 
 func TestHandleVASTRequest_EmptyAuction(t *testing.T) {
 	ex := newEmptyTestVideoExchange()
-	handler := NewVideoHandler(ex, "https://track.example.com")
+	handler := NewVideoHandler(ex, "https://track.example.com", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/video/vast?id=test-1", nil)
 	w := httptest.NewRecorder()
@@ -231,7 +231,7 @@ func TestHandleVASTRequest_EmptyAuction(t *testing.T) {
 
 func TestHandleVASTRequest_SkippableAd(t *testing.T) {
 	ex := newTestVideoExchange()
-	handler := NewVideoHandler(ex, "https://track.example.com")
+	handler := NewVideoHandler(ex, "https://track.example.com", nil)
 
 	queryParams := url.Values{
 		"id":        {"test-skip"},
@@ -256,7 +256,7 @@ func TestHandleVASTRequest_SkippableAd(t *testing.T) {
 
 func TestHandleVASTRequest_CTVOptimization(t *testing.T) {
 	ex := newTestVideoExchange()
-	handler := NewVideoHandler(ex, "https://track.example.com")
+	handler := NewVideoHandler(ex, "https://track.example.com", nil)
 
 	// Request with Roku user agent
 	req := httptest.NewRequest(http.MethodGet, "/video/vast?id=test-ctv", nil)
@@ -272,7 +272,7 @@ func TestHandleVASTRequest_CTVOptimization(t *testing.T) {
 
 func TestHandleOpenRTBVideo_MethodNotAllowed(t *testing.T) {
 	ex := newEmptyTestVideoExchange()
-	handler := NewVideoHandler(ex, "https://track.example.com")
+	handler := NewVideoHandler(ex, "https://track.example.com", nil)
 
 	methods := []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch}
 	for _, method := range methods {
@@ -291,7 +291,7 @@ func TestHandleOpenRTBVideo_MethodNotAllowed(t *testing.T) {
 
 func TestHandleOpenRTBVideo_ValidRequest(t *testing.T) {
 	ex := newTestVideoExchange()
-	handler := NewVideoHandler(ex, "https://track.example.com")
+	handler := NewVideoHandler(ex, "https://track.example.com", nil)
 
 	bidReq := &openrtb.BidRequest{
 		ID: "test-openrtb-1",
@@ -352,7 +352,7 @@ func TestHandleOpenRTBVideo_ValidRequest(t *testing.T) {
 
 func TestHandleOpenRTBVideo_InvalidJSON(t *testing.T) {
 	ex := newEmptyTestVideoExchange()
-	handler := NewVideoHandler(ex, "https://track.example.com")
+	handler := NewVideoHandler(ex, "https://track.example.com", nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/video/openrtb", strings.NewReader("not valid json"))
 	req.Header.Set("Content-Type", "application/json")
@@ -373,7 +373,7 @@ func TestHandleOpenRTBVideo_InvalidJSON(t *testing.T) {
 
 func TestHandleOpenRTBVideo_NoVideoImpressions(t *testing.T) {
 	ex := newEmptyTestVideoExchange()
-	handler := NewVideoHandler(ex, "https://track.example.com")
+	handler := NewVideoHandler(ex, "https://track.example.com", nil)
 
 	// Request with banner impression (no video)
 	bidReq := &openrtb.BidRequest{
@@ -413,7 +413,7 @@ func TestHandleOpenRTBVideo_NoVideoImpressions(t *testing.T) {
 
 func TestHandleOpenRTBVideo_AuctionError(t *testing.T) {
 	ex := newEmptyTestVideoExchange()
-	handler := NewVideoHandler(ex, "https://track.example.com")
+	handler := NewVideoHandler(ex, "https://track.example.com", nil)
 
 	bidReq := &openrtb.BidRequest{
 		ID: "test-error",
@@ -679,6 +679,7 @@ func TestWriteVASTError_Headers(t *testing.T) {
 }
 
 func TestGetClientIP(t *testing.T) {
+	t.Setenv("TRUST_X_FORWARDED_FOR", "true")
 	tests := []struct {
 		name           string
 		remoteAddr     string

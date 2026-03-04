@@ -880,6 +880,7 @@ func TestVideoEvent_AllFields(t *testing.T) {
 }
 
 func TestGetClientIP_VideoEvents(t *testing.T) {
+	t.Setenv("TRUST_X_FORWARDED_FOR", "true")
 	// Test getClientIP function used in video_events.go
 	tests := []struct {
 		name           string
