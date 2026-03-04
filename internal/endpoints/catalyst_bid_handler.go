@@ -779,7 +779,15 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 			site.Keywords = strings.Join(maiBid.Page.Keywords, ",")
 		}
 		if len(maiBid.Page.Categories) > 0 {
-			site.Cat = maiBid.Page.Categories
+			iabCats := make([]string, 0, len(maiBid.Page.Categories))
+			for _, cat := range maiBid.Page.Categories {
+				if strings.HasPrefix(cat, "IAB") {
+					iabCats = append(iabCats, cat)
+				}
+			}
+			if len(iabCats) > 0 {
+				site.Cat = iabCats
+			}
 		}
 	}
 
@@ -1136,11 +1144,17 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		// "1" / "0" are not valid consent strings and confuse SSPs on non-GDPR traffic.
 		if maiBid.User != nil {
 			if maiBid.User.ConsentString != "" {
-				user.Consent = maiBid.User.ConsentString
+				extMap := make(map[string]interface{})
+				if user.Ext != nil {
+					_ = json.Unmarshal(user.Ext, &extMap)
+				}
+				extMap["consent"] = maiBid.User.ConsentString
+				consentExtJSON, _ := json.Marshal(extMap)
+				user.Ext = consentExtJSON
 				previewLen := min(20, len(maiBid.User.ConsentString))
 				logger.Log.Debug().
 					Str("consent_string_preview", maiBid.User.ConsentString[:previewLen]).
-					Msg("Using TCFv2 consent string from SDK")
+					Msg("Using TCFv2 consent string in user.ext.consent")
 			}
 
 			// Format user.data segments for first-party data targeting (OpenRTB 2.6)
@@ -1201,7 +1215,9 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 			regs.GDPR = &gdpr
 		}
 		if maiBid.User.USPConsent != "" {
-			regs.USPrivacy = maiBid.User.USPConsent
+			regsExtMap := map[string]string{"us_privacy": maiBid.User.USPConsent}
+			regsExtJSON, _ := json.Marshal(regsExtMap)
+			regs.Ext = regsExtJSON
 		}
 	}
 
