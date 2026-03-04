@@ -167,12 +167,16 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 	// PubMatic does not want ext.prebid
 	delete(origReqExt, "prebid")
 
-	// Marshal final request.ext
-	rawExt, err := json.Marshal(origReqExt)
-	if err != nil {
-		return nil, []error{fmt.Errorf("failed to marshal request extension: %w", err)}
+	// Marshal final request.ext; omit entirely if nothing remains after stripping prebid
+	if len(origReqExt) == 0 {
+		request.Ext = nil
+	} else {
+		rawExt, err := json.Marshal(origReqExt)
+		if err != nil {
+			return nil, []error{fmt.Errorf("failed to marshal request extension: %w", err)}
+		}
+		request.Ext = rawExt
 	}
-	request.Ext = rawExt
 
 	// Set publisher ID on Site or App
 	if request.Site != nil {
@@ -213,6 +217,7 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 
 	// Set user.id = PubMatic cookie-synced UID (preferred) or TNE FPID as fallback.
 	// PubMatic does not want buyeruid — clear it.
+	// Move user.consent → user.ext.consent (Prebid PBS convention; translator reads from ext).
 	if request.User != nil {
 		userCopy := *request.User
 		if uid := adapters.ExtractUIDFromEids(request.User, "pubmatic.com"); uid != "" {
@@ -223,6 +228,26 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 			}
 		}
 		userCopy.BuyerUID = ""
+
+		// Move TCF consent string from user.consent (OpenRTB top-level) to
+		// user.ext.consent (Prebid Server convention that PubMatic translator expects).
+		if userCopy.Consent != "" {
+			var userExt map[string]json.RawMessage
+			if len(userCopy.Ext) > 0 {
+				json.Unmarshal(userCopy.Ext, &userExt)
+			}
+			if userExt == nil {
+				userExt = make(map[string]json.RawMessage)
+			}
+			if b, err := json.Marshal(userCopy.Consent); err == nil {
+				userExt["consent"] = b
+			}
+			if b, err := json.Marshal(userExt); err == nil {
+				userCopy.Ext = b
+			}
+			userCopy.Consent = ""
+		}
+
 		request.User = &userCopy
 	}
 
