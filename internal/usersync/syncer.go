@@ -30,13 +30,19 @@ type SyncerConfig struct {
 	// {{redirect_url}}, {{redirect_url_base}}
 	RedirectSyncURL string
 	// UserMacro is the UID placeholder the SSP substitutes in the redirect URL.
-	// Defaults to "$UID" when empty. Use "#PMUID" for PubMatic.
+	// Defaults to "$UID" when empty. Use "#PMUID" for PubMatic, "{storage_id}" for Magnite.
 	// The macro is embedded in the callback URL (via {{redirect_url}}) and gets
 	// URL-encoded when passed to the SSP, so the SSP must substitute it before
 	// redirecting. Macros containing "#" (e.g. #PMUID) MUST use {{redirect_url}}
 	// so the "#" is percent-encoded (%23) inside the query parameter and not
 	// interpreted as a URL fragment by the browser.
 	UserMacro string
+	// RedirectURLSuffix is an optional query string appended to the redirect callback
+	// URL after the uid= macro, before the whole URL is URL-encoded into redir=.
+	// Supports {{gdpr_consent}} and {{us_privacy}} placeholders (substituted with
+	// actual values from the current sync request).
+	// Example: "&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}"
+	RedirectURLSuffix string
 	// SupportCORS indicates if the bidder supports CORS for the sync
 	SupportCORS bool
 	// Enabled indicates if syncing is enabled for this bidder
@@ -114,6 +120,12 @@ func (s *Syncer) GetSync(syncType SyncType, gdpr string, consent string, usPriva
 	// The macro stays as a literal suffix outside the encoding, so the SSP can find and
 	// substitute it in the raw URL string.
 	redirectURL := fmt.Sprintf("%s/setuid?bidder=%s&uid=%s", s.hostURL, url.QueryEscape(s.config.BidderCode), macro)
+	if s.config.RedirectURLSuffix != "" {
+		suffix := s.config.RedirectURLSuffix
+		suffix = strings.ReplaceAll(suffix, "{{gdpr_consent}}", url.QueryEscape(consent))
+		suffix = strings.ReplaceAll(suffix, "{{us_privacy}}", url.QueryEscape(usPrivacy))
+		redirectURL += suffix
+	}
 	redirectURLBase := fmt.Sprintf("%s/setuid?bidder=%s&uid=", s.hostURL, url.QueryEscape(s.config.BidderCode))
 
 	// Replace placeholders
@@ -151,15 +163,17 @@ func DefaultSyncerConfigs() map[string]SyncerConfig {
 			SupportCORS:     true,
 			Enabled:         true,
 		},
-		// Magnite confirmed our redirect URL is registered:
-		//   https://ads.thenexusengine.com/setuid?bidder=rubicon&uid={storage_id}
+		// Magnite confirmed our redirect URL is registered with UID macro {storage_id}:
+		//   https://ads.thenexusengine.com/setuid?bidder=rubicon&uid={storage_id}&gdpr_consent={{.GDPRConsent}}&us_privacy={{.USPrivacy}}
 		// XAPI credentials: pb_thenexusengine (set via RUBICON_XAPI_USER/PASS env vars)
 		"rubicon": {
-			BidderCode:      "rubicon",
-			RedirectSyncURL: "https://pixel.rubiconproject.com/exchange/sync.php?p=prebid&gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}&redir={{redirect_url}}",
-			IframeSyncURL:   "https://eus.rubiconproject.com/usync.html?p=prebid&gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}",
-			SupportCORS:     true,
-			Enabled:         true,
+			BidderCode:        "rubicon",
+			RedirectSyncURL:   "https://pixel.rubiconproject.com/exchange/sync.php?p=prebid&gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}&redir={{redirect_url}}",
+			IframeSyncURL:     "https://eus.rubiconproject.com/usync.html?p=prebid&gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}",
+			UserMacro:         "{storage_id}",
+			RedirectURLSuffix: "&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}",
+			SupportCORS:       true,
+			Enabled:           true,
 		},
 		// NOTE: PubMatic's UID macro is #PMUID (not $UID).  The '#' character is a URL
 		// fragment delimiter and would be stripped by the browser if placed outside a
