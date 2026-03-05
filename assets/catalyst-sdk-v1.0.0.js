@@ -36,6 +36,7 @@
   catalyst._bidRequests = {};
   catalyst._initialized = false;
   catalyst._userSyncComplete = false;
+  catalyst._pendingBidRequests = [];  // Queued calls waiting for sync
   catalyst._syncedBidders = [];
 
   // Geolocation cache (15-30% CPM lift when available)
@@ -360,9 +361,11 @@
       return;
     }
 
-    // Warn if user sync hasn't completed yet (may result in lower bid responses)
+    // Queue if user sync hasn't completed yet — replay with UIDs after sync
     if (catalyst._config.userSync.enabled && !catalyst._userSyncComplete) {
-      catalyst.log('Warning: requestBids called before user sync completed - bidders may not have synced IDs yet');
+      catalyst.log('requestBids queued — waiting for user sync to complete');
+      catalyst._pendingBidRequests.push({ config: config, callback: callback });
+      return;
     }
 
     if (!config || !config.slots || config.slots.length === 0) {
@@ -999,6 +1002,15 @@
       return;
     }
 
+    // Wrap onComplete so queue is drained before the init callback fires
+    var _originalComplete = onComplete;
+    onComplete = function() {
+      catalyst._drainPendingBidRequests();
+      if (typeof _originalComplete === 'function') {
+        _originalComplete();
+      }
+    };
+
     // Privacy consent will be checked when we gather privacy data for the sync request
     // Server also validates consent as a backup (defense in depth)
     catalyst.log('Starting user sync for bidders:', catalyst._config.userSync.bidders);
@@ -1535,6 +1547,14 @@
     });
 
     return filtered;
+  };
+
+  catalyst._drainPendingBidRequests = function() {
+    var pending = catalyst._pendingBidRequests.splice(0); // atomic drain
+    for (var i = 0; i < pending.length; i++) {
+      catalyst.log('Replaying queued requestBids (sync now complete)');
+      catalyst.requestBids(pending[i].config, pending[i].callback);
+    }
   };
 
   /**
