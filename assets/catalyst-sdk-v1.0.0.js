@@ -377,6 +377,9 @@
     var startTime = Date.now();
     var timeoutMs = catalyst._config.timeout;
 
+    // Detect device type once — used for both the request and per-slot size filtering
+    var deviceType = catalyst._detectDeviceType();
+
     // Build MAI bid request
     var bidRequest = {
       accountId: catalyst._config.accountId,
@@ -391,7 +394,7 @@
       device: {
         width: window.screen.width,
         height: window.screen.height,
-        deviceType: catalyst._detectDeviceType(),
+        deviceType: deviceType,
         userAgent: navigator.userAgent,
         geo: null // Will be populated if available
       }
@@ -423,10 +426,19 @@
         continue;
       }
 
+      // Filter to device-appropriate sizes and sort largest first
+      var readySizes = catalyst._filterAndSortSizes(normalizedSizes, deviceType);
+
+      // Resolve adUnitPath: publisher config → GPT slot → empty
+      var adUnitPath = slot.adUnitPath || catalyst._getGPTAdUnitPath(slot.divId) || '';
+
+      catalyst.log('Slot', slot.divId, '| adUnitPath:', adUnitPath || '(none)',
+                   '| sizes:', JSON.stringify(readySizes));
+
       bidRequest.slots.push({
         divId: slot.divId,
-        sizes: normalizedSizes,
-        adUnitPath: slot.adUnitPath || '',
+        sizes: readySizes,
+        adUnitPath: adUnitPath,
         position: slot.position || '',
         enabled_bidders: slot.enabled_bidders || ['catalyst']
       });
@@ -1451,6 +1463,78 @@
     }
 
     return 'desktop';
+  };
+
+  /**
+   * Resolve adUnitPath for a divId from the GPT slot registry.
+   * GPT paths look like "/21912959776/domain.com/leaderboard-wide".
+   * We strip the network code and any domain segment, returning e.g. "/leaderboard-wide".
+   * @param {string} divId
+   * @returns {string|null}
+   * @private
+   */
+  catalyst._getGPTAdUnitPath = function(divId) {
+    if (!window.googletag || !window.googletag.pubads) return null;
+    try {
+      var slots = window.googletag.pubads().getSlots();
+      for (var i = 0; i < slots.length; i++) {
+        if (slots[i].getSlotElementId() === divId) {
+          var full = slots[i].getAdUnitPath(); // e.g. "/21912959776/domain.com/leaderboard-wide"
+          var parts = full.replace(/^\//, '').split('/');
+          // parts[0] = network code; parts[1] may be domain (contains '.'), rest = path
+          var start = 1;
+          if (parts.length > 2 && parts[1].indexOf('.') !== -1) {
+            start = 2;
+          }
+          var path = '/' + parts.slice(start).join('/');
+          catalyst.log('Resolved GPT adUnitPath for', divId, ':', path);
+          return path;
+        }
+      }
+    } catch (e) {
+      catalyst.log('Warning: GPT adUnitPath lookup failed for', divId, ':', e.message);
+    }
+    return null;
+  };
+
+  /**
+   * Filter sizes to those appropriate for the device type, then sort largest-area first.
+   * Desktop: strips pure mobile banner sizes (width ≤ 320 AND height ≤ 100).
+   * Mobile/tablet: strips large desktop-only formats (width ≥ 600).
+   * Falls back to full set if filtering would leave nothing.
+   * @param {Array} sizes - Normalised [[w,h], ...] array
+   * @param {string} deviceType - 'desktop', 'tablet', or 'mobile'
+   * @returns {Array}
+   * @private
+   */
+  catalyst._filterAndSortSizes = function(sizes, deviceType) {
+    if (!sizes || sizes.length === 0) return sizes;
+
+    var filtered;
+    if (deviceType === 'desktop') {
+      // Remove mobile-only strips: narrow width AND short height
+      filtered = sizes.filter(function(s) {
+        return !(s[0] <= 320 && s[1] <= 100);
+      });
+    } else {
+      // mobile / tablet: remove large desktop-only formats
+      filtered = sizes.filter(function(s) {
+        return s[0] < 600;
+      });
+    }
+
+    // Safety: if filter removed everything, send the full set
+    if (filtered.length === 0) {
+      catalyst.log('_filterAndSortSizes: filter left no sizes for', deviceType, '— using full set');
+      filtered = sizes.slice();
+    }
+
+    // Sort by area descending so the largest (most valuable) size is primary
+    filtered.sort(function(a, b) {
+      return (b[0] * b[1]) - (a[0] * a[1]);
+    });
+
+    return filtered;
   };
 
   /**
