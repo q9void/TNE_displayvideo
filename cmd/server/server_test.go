@@ -128,7 +128,7 @@ func TestServer_ReadyHandler_NoRedis(t *testing.T) {
 		t.Skip("Test server not initialized")
 	}
 
-	handler := readyHandler(nil, nil, testServer.exchange) // nil Redis client
+	handler := readyHandler(nil, nil, testServer.exchange, nil) // nil Redis client
 
 	req := httptest.NewRequest("GET", "/health/ready", nil)
 	rr := httptest.NewRecorder()
@@ -620,7 +620,7 @@ func TestReadyHandler_IDRDisabled(t *testing.T) {
 	}
 
 	// Test with IDR disabled (our test server has IDR disabled)
-	handler := readyHandler(nil, nil, testServer.exchange)
+	handler := readyHandler(nil, nil, testServer.exchange, nil)
 
 	req := httptest.NewRequest("GET", "/health/ready", nil)
 	rr := httptest.NewRecorder()
@@ -697,7 +697,7 @@ func TestReadyHandler_WithMockRedis(t *testing.T) {
 		t.Fatalf("Failed to create Redis client: %v", err)
 	}
 
-	handler := readyHandler(testRedis, nil, testServer.exchange)
+	handler := readyHandler(testRedis, nil, testServer.exchange, nil)
 
 	req := httptest.NewRequest("GET", "/health/ready", nil)
 	rr := httptest.NewRecorder()
@@ -751,7 +751,7 @@ func TestReadyHandler_RedisConnectionClosed(t *testing.T) {
 	// Close miniredis to simulate unhealthy connection
 	mr.Close()
 
-	handler := readyHandler(testRedis, nil, testServer.exchange)
+	handler := readyHandler(testRedis, nil, testServer.exchange, nil)
 
 	req := httptest.NewRequest("GET", "/health/ready", nil)
 	rr := httptest.NewRecorder()
@@ -998,7 +998,7 @@ func TestReadyHandler_JSONFormat(t *testing.T) {
 		t.Skip("Test server not initialized")
 	}
 
-	handler := readyHandler(nil, nil, testServer.exchange)
+	handler := readyHandler(nil, nil, testServer.exchange, nil)
 
 	req := httptest.NewRequest("GET", "/health/ready", nil)
 	rr := httptest.NewRecorder()
@@ -1111,7 +1111,7 @@ func TestReadyHandler_ChecksStructure(t *testing.T) {
 		t.Skip("Test server or exchange not initialized")
 	}
 
-	handler := readyHandler(nil, nil, testServer.exchange)
+	handler := readyHandler(nil, nil, testServer.exchange, nil)
 
 	req := httptest.NewRequest("GET", "/health/ready", nil)
 	rr := httptest.NewRecorder()

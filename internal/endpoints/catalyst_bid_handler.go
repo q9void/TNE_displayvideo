@@ -150,6 +150,8 @@ type MAIUser struct {
 	ConsentString  string                   `json:"consentString,omitempty"`  // TCFv2 consent string
 	GDPRApplies    *bool                    `json:"gdprApplies,omitempty"`
 	USPConsent     string                   `json:"uspConsent,omitempty"`
+	GPPString      string                   `json:"gppString,omitempty"`      // IAB GPP consent string from __gpp()
+	GPPSIDs        []int                    `json:"gppSids,omitempty"`        // Applicable GPP section IDs
 	UserIds        map[string]string        `json:"userIds,omitempty"`        // Bidder-specific user IDs from cookie sync
 	Eids           []map[string]interface{} `json:"eids,omitempty"`           // Prebid ID module EIDs (id5, pubCommonId, etc.)
 	Data           []map[string]interface{} `json:"data,omitempty"`           // ORTB2 user data segments
@@ -1000,6 +1002,13 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 	}
 
 	// 1. From database + fresh sync awaiter (concurrent race, prefer fresh)
+	// Compute consent hash once for use in both goroutines: UIDs synced with a different
+	// consent string (e.g. after user revoked or updated consent) are excluded.
+	var currentConsentHash string
+	if maiBid.User != nil {
+		currentConsentHash = storage.ConsentHash(maiBid.User.ConsentString)
+	}
+
 	if fpid != "" && h.userSyncStore != nil {
 		type syncResult struct {
 			syncs map[string]string
@@ -1009,7 +1018,7 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 
 		// Path A: cached syncs from DB (fast, ~2ms)
 		go func() {
-			syncs, err := h.userSyncStore.GetSyncsForUser(r.Context(), fpid)
+			syncs, err := h.userSyncStore.GetSyncsForUserFiltered(r.Context(), fpid, currentConsentHash)
 			if err != nil {
 				logger.Log.Warn().Err(err).Str("fpid", fpid).Msg("Failed to load user syncs from database")
 				syncs = nil
@@ -1021,7 +1030,7 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		go func() {
 			if h.syncAwaiter != nil {
 				if signaled := h.syncAwaiter.Wait(r.Context(), fpid, 50*time.Millisecond); signaled {
-					syncs, _ := h.userSyncStore.GetSyncsForUser(r.Context(), fpid)
+					syncs, _ := h.userSyncStore.GetSyncsForUserFiltered(r.Context(), fpid, currentConsentHash)
 					resultCh <- syncResult{syncs: syncs, fresh: true}
 					return
 				}
@@ -1296,30 +1305,75 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		}
 	}
 
-	// Handle regulations (GDPR/CCPA)
-	// Policy: trust the client CMP report (gdprApplies) when present.
-	// The CMP runs in the user's browser and has direct knowledge of regulatory context.
-	// Only fall back to server-side IP geo when the client sends no gdprApplies signal
-	// (e.g. pages without a CMP installed).
-	if maiBid.User != nil {
-		regs = &openrtb.Regs{}
+	// Handle regulations (GDPR / CCPA / GPP)
+	//
+	// US traffic:  GDPR never applies. Use GPP (SID 7 = US National minimum).
+	//              Pass through the GPP string from the client __gpp() API if present.
+	// Non-US:      Trust client gdprApplies when sent; fall back to IP geo otherwise.
+	//
+	// US detection uses IP geo country, which is always available regardless of
+	// whether the client also sent GPS coordinates.
+	regs = &openrtb.Regs{}
+
+	// Resolve IP country — deviceObj.Geo.Country is set by IP geo lookup but empty
+	// when GPS coordinates were used instead. In that case do a second lookup just
+	// for compliance purposes (fast in-memory MaxMind call).
+	ipCountry := ""
+	if deviceObj.Geo != nil {
+		ipCountry = deviceObj.Geo.Country
+	}
+	if ipCountry == "" && deviceObj.IP != "" {
+		if geoService, err := geo.GetDefaultService(); err == nil && geoService != nil {
+			if geoInfo := geoService.LookupSafe(deviceObj.IP); geoInfo != nil {
+				ipCountry = geoInfo.Country
+			}
+		}
+	}
+	isUS := ipCountry == "US"
+
+	if isUS {
+		// US traffic: GDPR does not apply
+		gdpr := 0
+		regs.GDPR = &gdpr
+
+		// GPP — use string from client __gpp() if provided, otherwise signal US National
+		if maiBid.User != nil && maiBid.User.GPPString != "" {
+			regs.GPP = maiBid.User.GPPString
+			regs.GPPSID = maiBid.User.GPPSIDs
+		} else {
+			// SID 7 = US National Privacy (MSPA) — minimum signal for US traffic
+			regs.GPPSID = []int{7}
+		}
+
+		logger.Log.Debug().
+			Str("ip_country", ipCountry).
+			Msg("US traffic: GDPR disabled, GPP applied")
+	} else if maiBid.User != nil {
+		// Non-US: trust client gdprApplies; fall back to IP geo if absent
 		var gdprApplies bool
 		if maiBid.User.GDPRApplies != nil {
-			// Client CMP is authoritative
 			gdprApplies = *maiBid.User.GDPRApplies
 		} else {
-			// No client signal: fall back to IP-based geo detection
 			gdprApplies = middleware.DetectRegulationFromGeo(deviceObj.Geo) == middleware.RegulationGDPR
 		}
 		if gdprApplies {
 			gdpr := 1
 			regs.GDPR = &gdpr
 		}
-		if maiBid.User.USPConsent != "" {
-			regsExtMap := map[string]string{"us_privacy": maiBid.User.USPConsent}
-			regsExtJSON, _ := json.Marshal(regsExtMap)
-			regs.Ext = regsExtJSON
+
+		// Pass through GPP string from client if provided for non-US regions
+		if maiBid.User.GPPString != "" {
+			regs.GPP = maiBid.User.GPPString
+			regs.GPPSID = maiBid.User.GPPSIDs
 		}
+	}
+
+	// USP string: set at top-level regs.us_privacy (OpenRTB 2.6).
+	// Sovrn reads Regs.USPrivacy for its X-US-Privacy header.
+	// Pubmatic adapter automatically moves it to regs.ext.us_privacy.
+	// All other adapters get it in the marshaled regs.us_privacy field.
+	if maiBid.User != nil && maiBid.User.USPConsent != "" {
+		regs.USPrivacy = maiBid.User.USPConsent
 	}
 
 	// Build supply chain object (schain) - REQUIRED for transparency and fraud prevention

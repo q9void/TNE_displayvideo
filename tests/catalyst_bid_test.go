@@ -24,7 +24,7 @@ func TestCatalystBidHandler_ValidRequest(t *testing.T) {
 	ex := exchange.New(registry, exchangeConfig)
 
 	// Create handler
-	handler := endpoints.NewCatalystBidHandler(ex)
+	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil)
 
 	// Create test request
 	bidRequest := endpoints.MAIBidRequest{
@@ -150,7 +150,7 @@ func TestCatalystBidHandler_InvalidRequest(t *testing.T) {
 				DefaultTimeout: 2500 * time.Millisecond,
 			}
 			ex := exchange.New(registry, exchangeConfig)
-			handler := endpoints.NewCatalystBidHandler(ex)
+			handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil)
 
 			// Create request
 			body, _ := json.Marshal(tt.request)
@@ -178,7 +178,7 @@ func TestCatalystBidHandler_Timeout(t *testing.T) {
 		MaxBidders:     10,
 	}
 	ex := exchange.New(registry, exchangeConfig)
-	handler := endpoints.NewCatalystBidHandler(ex)
+	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil)
 
 	// Create request
 	bidRequest := endpoints.MAIBidRequest{
@@ -220,7 +220,7 @@ func TestCatalystBidHandler_CORS(t *testing.T) {
 		DefaultTimeout: 2500 * time.Millisecond,
 	}
 	ex := exchange.New(registry, exchangeConfig)
-	handler := endpoints.NewCatalystBidHandler(ex)
+	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil)
 
 	// Test OPTIONS preflight
 	req := httptest.NewRequest("OPTIONS", "/v1/bid", nil)
@@ -245,7 +245,7 @@ func TestCatalystBidHandler_MultipleSlots(t *testing.T) {
 		MaxBidders:     10,
 	}
 	ex := exchange.New(registry, exchangeConfig)
-	handler := endpoints.NewCatalystBidHandler(ex)
+	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil)
 
 	// Create request with 3 slots
 	bidRequest := endpoints.MAIBidRequest{
@@ -285,7 +285,7 @@ func TestCatalystBidHandler_PrivacyConsent(t *testing.T) {
 		MaxBidders:     10,
 	}
 	ex := exchange.New(registry, exchangeConfig)
-	handler := endpoints.NewCatalystBidHandler(ex)
+	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil)
 
 	// Create request with privacy consent
 	bidRequest := endpoints.MAIBidRequest{
@@ -319,7 +319,7 @@ func TestOpenRTBConversion(t *testing.T) {
 		DefaultTimeout: 2500 * time.Millisecond,
 	}
 	ex := exchange.New(registry, exchangeConfig)
-	handler := endpoints.NewCatalystBidHandler(ex)
+	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil)
 
 	// Create MAI request
 	maiReq := &endpoints.MAIBidRequest{
