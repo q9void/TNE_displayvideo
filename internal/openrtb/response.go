@@ -2,7 +2,7 @@ package openrtb
 
 import "encoding/json"
 
-// BidResponse represents an OpenRTB 2.5/2.6 bid response
+// BidResponse represents an OpenRTB 2.6 bid response
 type BidResponse struct {
 	ID         string          `json:"id"`
 	SeatBid    []SeatBid       `json:"seatbid,omitempty"`
@@ -38,17 +38,22 @@ type Bid struct {
 	CRID           string          `json:"crid,omitempty"`
 	Tactic         string          `json:"tactic,omitempty"`
 	Cat            []string        `json:"cat,omitempty"`
+	CatTax         int             `json:"cattax,omitempty"`    // 2.6: Category taxonomy used in cat
 	Attr           []int           `json:"attr,omitempty"`
 	API            int             `json:"api,omitempty"`
+	APIs           []int           `json:"apis,omitempty"`      // 2.6: List of supported APIs for markup
 	Protocol       int             `json:"protocol,omitempty"`
 	QAGMediaRating int             `json:"qagmediarating,omitempty"`
 	Language       string          `json:"language,omitempty"`
+	LangB          string          `json:"langb,omitempty"`     // 2.6: BCP-47 language of creative
 	DealID         string          `json:"dealid,omitempty"`
 	W              int             `json:"w,omitempty"`
 	H              int             `json:"h,omitempty"`
 	WRatio         int             `json:"wratio,omitempty"`
 	HRatio         int             `json:"hratio,omitempty"`
 	Exp            int             `json:"exp,omitempty"`
+	Dur            int             `json:"dur,omitempty"`       // 2.6: Creative duration in seconds (video/audio)
+	SlotInPod      int             `json:"slotinpod,omitempty"` // 2.6: Slot position in pod the bid is targeting
 	Ext            json.RawMessage `json:"ext,omitempty"`
 }
 

@@ -58,6 +58,7 @@ type CapabilitiesConfig struct {
 	Currencies     []string `json:"currencies"`
 	SiteEnabled    bool     `json:"site_enabled"`
 	AppEnabled     bool     `json:"app_enabled"`
+	DOOHEnabled    bool     `json:"dooh_enabled"`    // 2.6: Supports Digital Out-of-Home inventory
 	VideoProtocols []int    `json:"video_protocols"`
 	VideoMimes     []string `json:"video_mimes"`
 	SupportsGDPR   bool     `json:"supports_gdpr"`
@@ -69,6 +70,8 @@ type CapabilitiesConfig struct {
 	SupportsFPD    bool     `json:"supports_first_party_data"`
 	SupportsCTV    bool     `json:"supports_ctv"`
 	SupportsAdPods bool     `json:"supports_ad_pods"`
+	SupportsDOOH   bool     `json:"supports_dooh"`   // 2.6: Full DOOH support (Qty, venue types)
+	SupportsSUA    bool     `json:"supports_sua"`    // 2.6: Structured User-Agent
 }
 
 // RateLimitsConfig holds rate limiting configuration
@@ -490,6 +493,13 @@ func (a *GenericAdapter) Info() adapters.BidderInfo {
 
 	if config.Capabilities.AppEnabled {
 		info.Capabilities.App = &adapters.PlatformInfo{
+			MediaTypes: mediaTypes,
+		}
+	}
+
+	// 2.6: DOOH capability registration
+	if config.Capabilities.DOOHEnabled {
+		info.Capabilities.DOOH = &adapters.PlatformInfo{
 			MediaTypes: mediaTypes,
 		}
 	}

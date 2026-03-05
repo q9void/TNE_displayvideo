@@ -472,19 +472,30 @@ func ValidateRequest(req *openrtb.BidRequest) *RequestValidationError {
 		impIDs[imp.ID] = struct{}{}
 	}
 
-	// Validate Site XOR App (exactly one must be present, not both, not neither)
+	// Validate exactly one distribution channel: Site XOR App XOR DOOH (OpenRTB 2.6)
 	hasSite := req.Site != nil
 	hasApp := req.App != nil
-	if hasSite && hasApp {
+	hasDOOH := req.DOOH != nil
+	channelCount := 0
+	if hasSite {
+		channelCount++
+	}
+	if hasApp {
+		channelCount++
+	}
+	if hasDOOH {
+		channelCount++
+	}
+	if channelCount > 1 {
 		return &RequestValidationError{
-			Field:  "site/app",
-			Reason: "request cannot contain both site and app objects",
+			Field:  "site/app/dooh",
+			Reason: "request must contain only one of site, app, or dooh objects",
 		}
 	}
-	if !hasSite && !hasApp {
+	if channelCount == 0 {
 		return &RequestValidationError{
-			Field:  "site/app",
-			Reason: "request must contain either site or app object",
+			Field:  "site/app/dooh",
+			Reason: "request must contain one of site, app, or dooh objects",
 		}
 	}
 
@@ -1356,14 +1367,25 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 			maxImpressions, len(req.BidRequest.Imp))
 	}
 
-	// P2-3: Validate Site/App mutual exclusivity per OpenRTB 2.5 section 3.2.1
+	// P2-3: Validate Site/App/DOOH mutual exclusivity per OpenRTB 2.6 section 3.2.1
 	hasSite := req.BidRequest.Site != nil
 	hasApp := req.BidRequest.App != nil
-	if !hasSite && !hasApp {
-		return nil, NewValidationError("invalid bid request: must have either 'site' or 'app' object (OpenRTB 2.5)")
+	hasDOOH := req.BidRequest.DOOH != nil
+	distChannels := 0
+	if hasSite {
+		distChannels++
 	}
-	if hasSite && hasApp {
-		return nil, NewValidationError("invalid bid request: cannot have both 'site' and 'app' objects (OpenRTB 2.5)")
+	if hasApp {
+		distChannels++
+	}
+	if hasDOOH {
+		distChannels++
+	}
+	if distChannels == 0 {
+		return nil, NewValidationError("invalid bid request: must have one of 'site', 'app', or 'dooh' object (OpenRTB 2.6)")
+	}
+	if distChannels > 1 {
+		return nil, NewValidationError("invalid bid request: must have only one of 'site', 'app', or 'dooh' objects (OpenRTB 2.6)")
 	}
 
 	// P1-NEW-2: Validate impression IDs are unique and non-empty per OpenRTB 2.5 section 3.2.4
@@ -2226,6 +2248,15 @@ func (e *Exchange) callBiddersWithFPD(ctx context.Context, req *openrtb.BidReque
 		// Try static registry first
 		adapterWithInfo, ok := e.registry.Get(bidderCode)
 		if ok {
+			// Filter bidders by inventory type capability (OpenRTB 2.6)
+			if !bidderSupportsInventoryType(req, adapterWithInfo) {
+				logger.Log.Debug().
+					Str("bidder", bidderCode).
+					Str("inventory_type", string(inventoryTypeLabel(req))).
+					Msg("Skipping bidder - does not support inventory type")
+				continue
+			}
+
 			wg.Add(1)
 			go func(code string, awi adapters.AdapterWithInfo) {
 				defer wg.Done()
@@ -2354,6 +2385,23 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 			geoCopy := *req.Device.Geo
 			deviceCopy.Geo = &geoCopy
 		}
+		// Deep copy SUA (2.6: Structured User-Agent)
+		if req.Device.SUA != nil {
+			suaCopy := *req.Device.SUA
+			if len(req.Device.SUA.Browsers) > 0 {
+				suaCopy.Browsers = make([]openrtb.BrandVersion, len(req.Device.SUA.Browsers))
+				copy(suaCopy.Browsers, req.Device.SUA.Browsers)
+			}
+			if req.Device.SUA.Platform != nil {
+				platCopy := *req.Device.SUA.Platform
+				suaCopy.Platform = &platCopy
+			}
+			if req.Device.SUA.Mobile != nil {
+				mobileCopy := *req.Device.SUA.Mobile
+				suaCopy.Mobile = &mobileCopy
+			}
+			deviceCopy.SUA = &suaCopy
+		}
 		clone.Device = &deviceCopy
 	}
 
@@ -2433,6 +2481,20 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 				secureCopy := *req.Imp[i].Secure
 				clone.Imp[i].Secure = &secureCopy
 			}
+			// Deep copy Qty (2.6: DOOH multiplier)
+			if req.Imp[i].Qty != nil {
+				qtyCopy := *req.Imp[i].Qty
+				clone.Imp[i].Qty = &qtyCopy
+			}
+			// Deep copy Refresh (2.6: auto-refresh settings)
+			if req.Imp[i].Refresh != nil {
+				refreshCopy := *req.Imp[i].Refresh
+				if len(req.Imp[i].Refresh.RefSettings) > 0 {
+					refreshCopy.RefSettings = make([]openrtb.RefInfo, len(req.Imp[i].Refresh.RefSettings))
+					copy(refreshCopy.RefSettings, req.Imp[i].Refresh.RefSettings)
+				}
+				clone.Imp[i].Refresh = &refreshCopy
+			}
 		}
 	}
 
@@ -2460,6 +2522,16 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 	if req.App != nil && hasFPD && fpdData.App != nil {
 		appCopy := *req.App
 		clone.App = &appCopy
+	}
+
+	// Always deep-copy DOOH+Publisher to prevent cross-bidder data races (2.6)
+	if req.DOOH != nil {
+		doohCopy := *req.DOOH
+		if req.DOOH.Publisher != nil {
+			pubCopy := *req.DOOH.Publisher
+			doohCopy.Publisher = &pubCopy
+		}
+		clone.DOOH = &doohCopy
 	}
 
 	// Clone User only if FPD will modify it
@@ -2651,6 +2723,10 @@ func deepCloneRequest(req *openrtb.BidRequest, limits *CloneLimits) *openrtb.Bid
 		clone.BApp = make([]string, len(req.BApp))
 		copy(clone.BApp, req.BApp)
 	}
+	if len(req.WLangB) > 0 {
+		clone.WLangB = make([]string, len(req.WLangB))
+		copy(clone.WLangB, req.WLangB)
+	}
 
 	// Deep copy Site
 	if req.Site != nil {
@@ -2660,17 +2736,7 @@ func deepCloneRequest(req *openrtb.BidRequest, limits *CloneLimits) *openrtb.Bid
 			siteCopy.Publisher = &pubCopy
 		}
 		if req.Site.Content != nil {
-			contentCopy := *req.Site.Content
-			// P2-5: Clone and limit Content.Data segments
-			if len(req.Site.Content.Data) > 0 {
-				dataCount := len(req.Site.Content.Data)
-				if dataCount > limits.MaxDataPerUser {
-					dataCount = limits.MaxDataPerUser
-				}
-				contentCopy.Data = make([]openrtb.Data, dataCount)
-				copy(contentCopy.Data, req.Site.Content.Data[:dataCount])
-			}
-			siteCopy.Content = &contentCopy
+			deepCloneContent(req.Site.Content, &siteCopy.Content, limits)
 		}
 		clone.Site = &siteCopy
 	}
@@ -2683,19 +2749,30 @@ func deepCloneRequest(req *openrtb.BidRequest, limits *CloneLimits) *openrtb.Bid
 			appCopy.Publisher = &pubCopy
 		}
 		if req.App.Content != nil {
-			contentCopy := *req.App.Content
-			// P2-5: Clone and limit Content.Data segments
-			if len(req.App.Content.Data) > 0 {
-				dataCount := len(req.App.Content.Data)
-				if dataCount > limits.MaxDataPerUser {
-					dataCount = limits.MaxDataPerUser
-				}
-				contentCopy.Data = make([]openrtb.Data, dataCount)
-				copy(contentCopy.Data, req.App.Content.Data[:dataCount])
-			}
-			appCopy.Content = &contentCopy
+			deepCloneContent(req.App.Content, &appCopy.Content, limits)
 		}
 		clone.App = &appCopy
+	}
+
+	// Deep copy DOOH (2.6)
+	if req.DOOH != nil {
+		doohCopy := *req.DOOH
+		if req.DOOH.Publisher != nil {
+			pubCopy := *req.DOOH.Publisher
+			doohCopy.Publisher = &pubCopy
+		}
+		if req.DOOH.Content != nil {
+			deepCloneContent(req.DOOH.Content, &doohCopy.Content, limits)
+		}
+		if len(req.DOOH.VenueType) > 0 {
+			doohCopy.VenueType = make([]string, len(req.DOOH.VenueType))
+			copy(doohCopy.VenueType, req.DOOH.VenueType)
+		}
+		if len(req.DOOH.KwArray) > 0 {
+			doohCopy.KwArray = make([]string, len(req.DOOH.KwArray))
+			copy(doohCopy.KwArray, req.DOOH.KwArray)
+		}
+		clone.DOOH = &doohCopy
 	}
 
 	// Deep copy User
@@ -2733,12 +2810,33 @@ func deepCloneRequest(req *openrtb.BidRequest, limits *CloneLimits) *openrtb.Bid
 			geoCopy := *req.Device.Geo
 			deviceCopy.Geo = &geoCopy
 		}
+		// Deep copy SUA (2.6: Structured User-Agent)
+		if req.Device.SUA != nil {
+			suaCopy := *req.Device.SUA
+			if len(req.Device.SUA.Browsers) > 0 {
+				suaCopy.Browsers = make([]openrtb.BrandVersion, len(req.Device.SUA.Browsers))
+				copy(suaCopy.Browsers, req.Device.SUA.Browsers)
+			}
+			if req.Device.SUA.Platform != nil {
+				platCopy := *req.Device.SUA.Platform
+				suaCopy.Platform = &platCopy
+			}
+			if req.Device.SUA.Mobile != nil {
+				mobileCopy := *req.Device.SUA.Mobile
+				suaCopy.Mobile = &mobileCopy
+			}
+			deviceCopy.SUA = &suaCopy
+		}
 		clone.Device = &deviceCopy
 	}
 
 	// Deep copy Regs
 	if req.Regs != nil {
 		regsCopy := *req.Regs
+		if len(req.Regs.GPPSID) > 0 {
+			regsCopy.GPPSID = make([]int, len(req.Regs.GPPSID))
+			copy(regsCopy.GPPSID, req.Regs.GPPSID)
+		}
 		clone.Regs = &regsCopy
 	}
 
@@ -2800,11 +2898,56 @@ func deepCloneRequest(req *openrtb.BidRequest, limits *CloneLimits) *openrtb.Bid
 				}
 				impCopy.PMP = &pmpCopy
 			}
+			// Deep copy Qty (2.6: DOOH multiplier)
+			if imp.Qty != nil {
+				qtyCopy := *imp.Qty
+				impCopy.Qty = &qtyCopy
+			}
+			// Deep copy Refresh (2.6: auto-refresh settings)
+			if imp.Refresh != nil {
+				refreshCopy := *imp.Refresh
+				if len(imp.Refresh.RefSettings) > 0 {
+					refreshCopy.RefSettings = make([]openrtb.RefInfo, len(imp.Refresh.RefSettings))
+					copy(refreshCopy.RefSettings, imp.Refresh.RefSettings)
+				}
+				impCopy.Refresh = &refreshCopy
+			}
 			clone.Imp[i] = impCopy
 		}
 	}
 
 	return &clone
+}
+
+// deepCloneContent creates a deep copy of a Content object with all 2.6 sub-objects
+func deepCloneContent(src *openrtb.Content, dst **openrtb.Content, limits *CloneLimits) {
+	contentCopy := *src
+	if len(src.Data) > 0 {
+		dataCount := len(src.Data)
+		if dataCount > limits.MaxDataPerUser {
+			dataCount = limits.MaxDataPerUser
+		}
+		contentCopy.Data = make([]openrtb.Data, dataCount)
+		copy(contentCopy.Data, src.Data[:dataCount])
+	}
+	if len(src.KwArray) > 0 {
+		contentCopy.KwArray = make([]string, len(src.KwArray))
+		copy(contentCopy.KwArray, src.KwArray)
+	}
+	if src.Producer != nil {
+		prodCopy := *src.Producer
+		contentCopy.Producer = &prodCopy
+	}
+	// 2.6: Deep copy Network and Channel (CTV context)
+	if src.Network != nil {
+		netCopy := *src.Network
+		contentCopy.Network = &netCopy
+	}
+	if src.Channel != nil {
+		chanCopy := *src.Channel
+		contentCopy.Channel = &chanCopy
+	}
+	*dst = &contentCopy
 }
 
 // callBidder calls a single bidder
@@ -2824,10 +2967,14 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 	hookExecutor.RegisterBidderRequestHook(hooks.NewIdentityGatingHook())
 
 	// Get account ID from request for schain
-	// Extract from site.publisher.name or default to request ID
+	// Extract from site/app/dooh publisher.name or default to request ID
 	accountID := req.ID
 	if req.Site != nil && req.Site.Publisher != nil && req.Site.Publisher.Name != "" {
 		accountID = req.Site.Publisher.Name
+	} else if req.App != nil && req.App.Publisher != nil && req.App.Publisher.Name != "" {
+		accountID = req.App.Publisher.Name
+	} else if req.DOOH != nil && req.DOOH.Publisher != nil && req.DOOH.Publisher.Name != "" {
+		accountID = req.DOOH.Publisher.Name
 	}
 	hookExecutor.RegisterBidderRequestHook(hooks.NewSChainAugmentationHook("thenexusengine.com", accountID))
 
@@ -3408,6 +3555,11 @@ func (e *Exchange) buildMinimalIDRRequest(req *openrtb.BidRequest) *idr.MinimalR
 		if req.App.Publisher != nil {
 			publisher = req.App.Publisher.ID
 		}
+	} else if req.DOOH != nil {
+		domain = req.DOOH.Domain
+		if req.DOOH.Publisher != nil {
+			publisher = req.DOOH.Publisher.ID
+		}
 	}
 
 	// Extract geo info
@@ -3424,20 +3576,22 @@ func (e *Exchange) buildMinimalIDRRequest(req *openrtb.BidRequest) *idr.MinimalR
 	var deviceType string
 	if req.Device != nil {
 		switch req.Device.DeviceType {
-		case 1:
+		case openrtb.DeviceTypeMobile:
 			deviceType = "mobile"
-		case 2:
+		case openrtb.DeviceTypePC:
 			deviceType = "pc"
-		case 3:
+		case openrtb.DeviceTypeCTV:
 			deviceType = "ctv"
-		case 4:
+		case openrtb.DeviceTypePhone:
 			deviceType = "phone"
-		case 5:
+		case openrtb.DeviceTypeTablet:
 			deviceType = "tablet"
-		case 6:
+		case openrtb.DeviceTypeConnected:
 			deviceType = "connected_device"
-		case 7:
+		case openrtb.DeviceTypeSetTopBox:
 			deviceType = "set_top_box"
+		case openrtb.DeviceTypeOOH:
+			deviceType = "ooh"
 		}
 	}
 
@@ -3593,4 +3747,39 @@ func filterBiddersWithImpExt(imps []openrtb.Imp, bidders []string) []string {
 		}
 	}
 	return filtered
+}
+
+// bidderSupportsInventoryType checks if a bidder supports the inventory type
+// present in the bid request (Site, App, or DOOH per OpenRTB 2.6).
+// If no capability info is available, the bidder is assumed to support the inventory type.
+func bidderSupportsInventoryType(req *openrtb.BidRequest, awi adapters.AdapterWithInfo) bool {
+	caps := awi.Info.Capabilities
+	if caps == nil {
+		return true // No capabilities declared — allow through
+	}
+
+	switch {
+	case req.DOOH != nil:
+		return caps.DOOH != nil
+	case req.App != nil:
+		return caps.App != nil
+	case req.Site != nil:
+		return caps.Site != nil
+	default:
+		return true
+	}
+}
+
+// inventoryTypeLabel returns a human-readable label for the request's inventory type
+func inventoryTypeLabel(req *openrtb.BidRequest) string {
+	switch {
+	case req.DOOH != nil:
+		return "dooh"
+	case req.App != nil:
+		return "app"
+	case req.Site != nil:
+		return "site"
+	default:
+		return "unknown"
+	}
 }

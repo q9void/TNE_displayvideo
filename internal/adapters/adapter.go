@@ -126,6 +126,7 @@ type MaintainerInfo struct {
 type CapabilitiesInfo struct {
 	App  *PlatformInfo
 	Site *PlatformInfo
+	DOOH *PlatformInfo // 2.6: Digital Out-of-Home support
 }
 
 // PlatformInfo contains platform capabilities
