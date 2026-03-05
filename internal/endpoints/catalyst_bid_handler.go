@@ -491,8 +491,6 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		// Add banner if sizes are provided (default format)
 		if len(slot.Sizes) > 0 {
 			imp.Banner = &openrtb.Banner{
-				W:      slot.Sizes[0][0], // Use first size as primary
-				H:      slot.Sizes[0][1],
 				Format: formats,
 			}
 		}
