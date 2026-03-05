@@ -442,8 +442,7 @@
         divId: slot.divId,
         sizes: readySizes,
         adUnitPath: adUnitPath,
-        position: slot.position || '',
-        enabled_bidders: slot.enabled_bidders || ['catalyst']
+        position: slot.position || ''
       });
     }
 

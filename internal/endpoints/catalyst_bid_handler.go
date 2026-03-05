@@ -126,7 +126,6 @@ type MAISlot struct {
 	Sizes                  [][]int     `json:"sizes"`                            // Banner sizes
 	AdUnitPath             string      `json:"adUnitPath,omitempty"`
 	Position               string      `json:"position,omitempty"`
-	EnabledBidders         []string    `json:"enabled_bidders,omitempty"`
 	Video                  bool        `json:"video,omitempty"`                  // Enable video format
 	VideoWidth             int         `json:"videoWidth,omitempty"`             // Video player width
 	VideoHeight            int         `json:"videoHeight,omitempty"`            // Video player height
@@ -149,7 +148,7 @@ type MAIUser struct {
 	FPID           string                   `json:"fpid,omitempty"`           // First-party identifier
 	ConsentGiven   bool                     `json:"consentGiven,omitempty"`
 	ConsentString  string                   `json:"consentString,omitempty"`  // TCFv2 consent string
-	GDPRApplies    bool                     `json:"gdprApplies,omitempty"`
+	GDPRApplies    *bool                    `json:"gdprApplies,omitempty"`
 	USPConsent     string                   `json:"uspConsent,omitempty"`
 	UserIds        map[string]string        `json:"userIds,omitempty"`        // Bidder-specific user IDs from cookie sync
 	Eids           []map[string]interface{} `json:"eids,omitempty"`           // Prebid ID module EIDs (id5, pubCommonId, etc.)
@@ -706,6 +705,29 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 			}
 		}
 
+		// Issue 6: After slot-level lookup, supplement any bidders missing from the slot
+		// config with hierarchical (domain -> publisher) fallback. The slot config wins
+		// where it has entries; gaps cascade down rather than silently dropping bidders.
+		if matchedPattern != "" && len(allConfigs) < len(bidders) && h.publisherStore != nil {
+			missingBidders := make([]string, 0, len(bidders)-len(allConfigs))
+			for _, b := range bidders {
+				if _, ok := allConfigs[b]; !ok {
+					missingBidders = append(missingBidders, b)
+				}
+			}
+			fallbackConfigs, fbErr := h.publisherStore.GetAllBidderConfigsHierarchical(
+				r.Context(), maiBid.AccountID, domain, adUnitPath, missingBidders,
+			)
+			if fbErr == nil {
+				for bidder, params := range fallbackConfigs {
+					allConfigs[bidder] = params
+				}
+				logger.Log.Debug().
+					Strs("bidders", missingBidders).
+					Msg("Filled missing slot bidders from hierarchical config")
+			}
+		}
+
 		// Now populate impExt with configs
 		for _, bidderCode := range bidders {
 			params := allConfigs[bidderCode]
@@ -826,13 +848,14 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 
 	// Build device
 	deviceObj := &openrtb.Device{
-		UA: r.Header.Get("User-Agent"),
 		IP: getClientIP(r),
 	}
 
 	if maiBid.Device != nil {
 		if maiBid.Device.UserAgent != "" {
 			deviceObj.UA = maiBid.Device.UserAgent
+		} else {
+			deviceObj.UA = r.Header.Get("User-Agent")
 		}
 		if maiBid.Device.Width > 0 && maiBid.Device.Height > 0 {
 			deviceObj.W = maiBid.Device.Width
@@ -849,6 +872,8 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		case "tv", "ctv", "connected_tv":
 			deviceObj.DeviceType = 3 // Connected TV
 		}
+	} else {
+		deviceObj.UA = r.Header.Get("User-Agent")
 	}
 
 	// Parse User-Agent to extract device details (OpenRTB 2.6 enhancement)
@@ -878,32 +903,19 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 	// Add geolocation data (OpenRTB 2.6 critical enhancement - 15-30% CPM lift)
 	// Priority: Client-side geo (GPS/browser) > IP-based geo
 	if maiBid.Device != nil && maiBid.Device.Geo != nil && maiBid.Device.Geo.Lat != 0 && maiBid.Device.Geo.Lon != 0 {
-		// Client-side geolocation available (most accurate)
+		// Client-side geolocation available (most accurate).
+		// Do NOT enrich with IP-based country/region — for VPN/proxy users the IP geo
+		// would contradict the GPS coordinates (e.g. GPS=New York, IP=China), producing
+		// an incoherent geo object that breaks GDPR enforcement and geo-fenced campaigns.
 		deviceObj.Geo = &openrtb.Geo{
 			Lat:  maiBid.Device.Geo.Lat,
 			Lon:  maiBid.Device.Geo.Lon,
 			Type: 1, // GPS/Location Services
 		}
 
-		// Try to reverse geocode for country/region/city using IP geo service
-		// This enriches client-side lat/lon with administrative region data
-		if deviceObj.IP != "" {
-			geoService, err := geo.GetDefaultService()
-			if err == nil && geoService != nil {
-				if geoInfo := geoService.LookupSafe(deviceObj.IP); geoInfo != nil {
-					deviceObj.Geo.Country = geoInfo.Country
-					deviceObj.Geo.Region = geoInfo.Region
-					deviceObj.Geo.City = geoInfo.City
-					deviceObj.Geo.Metro = geoInfo.Metro
-					deviceObj.Geo.ZIP = geoInfo.Zip
-				}
-			}
-		}
-
 		logger.Log.Info().
 			Float64("lat", deviceObj.Geo.Lat).
 			Float64("lon", deviceObj.Geo.Lon).
-			Str("country", deviceObj.Geo.Country).
 			Int("accuracy", maiBid.Device.Geo.Accuracy).
 			Msg("Using client-side geolocation (GPS/browser)")
 	} else if deviceObj.IP != "" {
@@ -1180,6 +1192,29 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 			extJSON, _ := json.Marshal(userExt)
 			user.Ext = extJSON
 
+			// Also populate user.EIDs (typed struct) so the EID filter in exchange.go
+			// can enforce the allowed-source list. Without this, EIDs only exist in
+			// user.ext.eids (raw JSON) and bypass ProcessRequestEIDs entirely.
+			typedEIDs := make([]openrtb.EID, 0, len(eids))
+			for _, eid := range eids {
+				src, _ := eid["source"].(string)
+				typed := openrtb.EID{Source: src}
+				if rawUIDs, ok := eid["uids"].([]map[string]interface{}); ok {
+					for _, u := range rawUIDs {
+						uid := openrtb.UID{}
+						if id, ok := u["id"].(string); ok {
+							uid.ID = id
+						}
+						if atype, ok := u["atype"].(int); ok {
+							uid.AType = atype
+						}
+						typed.UIDs = append(typed.UIDs, uid)
+					}
+				}
+				typedEIDs = append(typedEIDs, typed)
+			}
+			user.EIDs = typedEIDs
+
 			logger.Log.Info().
 				Str("fpid", user.ID).
 				Int("prebid_eids", len(maiBid.User.Eids)).
@@ -1262,13 +1297,21 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 	}
 
 	// Handle regulations (GDPR/CCPA)
-	// Server-side geo (MaxMind) is authoritative for GDPR applicability.
-	// Client-reported gdprApplies is ignored — CMP caching can cause false positives
-	// (e.g. a UK browser session with a US VPN still sends gdprApplies=true).
-	// If the server-resolved IP is not in a GDPR country, gdpr defaults to 0.
+	// Policy: trust the client CMP report (gdprApplies) when present.
+	// The CMP runs in the user's browser and has direct knowledge of regulatory context.
+	// Only fall back to server-side IP geo when the client sends no gdprApplies signal
+	// (e.g. pages without a CMP installed).
 	if maiBid.User != nil {
 		regs = &openrtb.Regs{}
-		if middleware.DetectRegulationFromGeo(deviceObj.Geo) == middleware.RegulationGDPR {
+		var gdprApplies bool
+		if maiBid.User.GDPRApplies != nil {
+			// Client CMP is authoritative
+			gdprApplies = *maiBid.User.GDPRApplies
+		} else {
+			// No client signal: fall back to IP-based geo detection
+			gdprApplies = middleware.DetectRegulationFromGeo(deviceObj.Geo) == middleware.RegulationGDPR
+		}
+		if gdprApplies {
 			gdpr := 1
 			regs.GDPR = &gdpr
 		}

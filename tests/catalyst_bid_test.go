@@ -295,7 +295,7 @@ func TestCatalystBidHandler_PrivacyConsent(t *testing.T) {
 		},
 		User: &endpoints.MAIUser{
 			ConsentGiven: true,
-			GDPRApplies:  true,
+			GDPRApplies:  func() *bool { b := true; return &b }(),
 			USPConsent:   "1YNN",
 		},
 	}
