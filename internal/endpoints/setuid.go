@@ -45,6 +45,11 @@ func (h *SetUIDHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	gdpr := query.Get("gdpr")
 	gdprConsent := query.Get("gdpr_consent")
 
+	// FPID: prefer the value embedded in the callback URL by the SDK (survives
+	// ITP/ETP because it was set on the publisher's first-party domain and passed
+	// through as a query param rather than relying on the server-side uids cookie).
+	fpid := query.Get("fpid")
+
 	// GDPR FIX: Validate GDPR consent before storing UIDs
 	// If GDPR=1 but no valid consent, do not store the UID
 	if gdpr == "1" {
@@ -76,6 +81,11 @@ func (h *SetUIDHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Parse existing cookie
 	cookie := usersync.ParseCookie(r)
 
+	// Fall back to cookie FPID if not in URL (older SDK versions / direct calls)
+	if fpid == "" {
+		fpid = cookie.GetFPID()
+	}
+
 	// Check for opt-out
 	if cookie.IsOptOut() {
 		h.respondWithPixel(w)
@@ -99,46 +109,39 @@ func (h *SetUIDHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Msg("Stored UID in cookie")
 
 		// Store UID in database if FPID and userSyncStore are available
-		if h.userSyncStore != nil && cookie.GetFPID() != "" {
-			// Enhanced logging: Log actual UID value and all details for debugging
+		if h.userSyncStore != nil && fpid != "" {
 			logger.Log.Info().
-				Str("fpid", cookie.GetFPID()).
+				Str("fpid", fpid).
 				Str("bidder", bidderLower).
 				Str("uid", uid).
 				Int("uid_length", len(uid)).
 				Msg("SetUID callback received - storing in database")
 
-			if err := h.userSyncStore.UpdateUID(r.Context(), cookie.GetFPID(), bidderLower, uid); err != nil {
-				// Change from Warn to Error for database storage failures
+			if err := h.userSyncStore.UpdateUID(r.Context(), fpid, bidderLower, uid); err != nil {
 				logger.Log.Error().
 					Err(err).
-					Str("fpid", cookie.GetFPID()).
+					Str("fpid", fpid).
 					Str("bidder", bidderLower).
 					Str("uid", uid).
 					Msg("FAILED to update UID in database")
 			} else {
 				logger.Log.Info().
-					Str("fpid", cookie.GetFPID()).
+					Str("fpid", fpid).
 					Str("bidder", bidderLower).
 					Str("uid", uid).
 					Msg("Successfully updated UID in database")
 				logger.Log.Info().
-					Str("fpid", cookie.GetFPID()).
+					Str("fpid", fpid).
 					Str("bidder", bidderLower).
 					Msg("sync_stored")
 				if h.syncAwaiter != nil {
-					h.syncAwaiter.Signal(cookie.GetFPID())
+					h.syncAwaiter.Signal(fpid)
 				}
 			}
 		}
 
 		// Record ID graph mapping (GDPR-compliant)
-		// Only record if:
-		// 1. ID graph store is available
-		// 2. FPID exists in cookie
-		// 3. Either GDPR doesn't apply OR valid consent is provided
-		if h.idGraphStore != nil && cookie.GetFPID() != "" {
-			// Check GDPR compliance
+		if h.idGraphStore != nil && fpid != "" {
 			hasConsent := gdpr != "1" || (gdprConsent != "" && len(gdprConsent) >= 20)
 
 			if hasConsent {
@@ -151,19 +154,19 @@ func (h *SetUIDHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 				if err := h.idGraphStore.RecordMapping(
 					r.Context(),
-					cookie.GetFPID(),
+					fpid,
 					bidderLower,
 					uid,
 					metadata,
 				); err != nil {
 					logger.Log.Warn().
 						Err(err).
-						Str("fpid", cookie.GetFPID()).
+						Str("fpid", fpid).
 						Str("bidder", bidderLower).
 						Msg("Failed to store ID graph mapping")
 				} else {
 					logger.Log.Debug().
-						Str("fpid", cookie.GetFPID()).
+						Str("fpid", fpid).
 						Str("bidder", bidderLower).
 						Str("uid", uid).
 						Bool("gdpr_applies", gdpr == "1").
@@ -171,7 +174,7 @@ func (h *SetUIDHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			} else {
 				logger.Log.Warn().
-					Str("fpid", cookie.GetFPID()).
+					Str("fpid", fpid).
 					Str("bidder", bidderLower).
 					Msg("ID graph mapping blocked - GDPR applies but no valid TCF consent")
 			}

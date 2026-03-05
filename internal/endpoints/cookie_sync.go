@@ -256,7 +256,7 @@ func (h *CookieSyncHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Get sync URL
-		syncInfo, err := syncer.GetSync(syncType, gdprStr, req.GDPRConsent, req.USPrivacy)
+		syncInfo, err := syncer.GetSync(syncType, gdprStr, req.GDPRConsent, req.USPrivacy, req.FPID)
 		if err != nil {
 			logger.Log.Warn().
 				Err(err).
@@ -294,12 +294,14 @@ func (h *CookieSyncHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Store sync records in database if FPID is available and database is enabled
 	fpid := cookie.GetFPID()
 	if fpid != "" && h.userSyncStore != nil && len(syncedBidders) > 0 {
-		// Store each synced bidder in database (UID will be NULL until callback)
+		// Store each synced bidder in database (UID will be NULL until callback).
+		// Record the consent hash so bid-time filtering can detect revoked consent.
 		ctx := r.Context()
 		expiresAt := time.Now().Add(90 * 24 * time.Hour) // 90 days typical cookie lifetime
+		consentHash := storage.ConsentHash(req.GDPRConsent)
 
 		for _, bidderCode := range syncedBidders {
-			if err := h.userSyncStore.UpsertSync(ctx, fpid, bidderCode, nil, &expiresAt); err != nil {
+			if err := h.userSyncStore.UpsertSync(ctx, fpid, bidderCode, nil, &expiresAt, consentHash); err != nil {
 				logger.Log.Warn().
 					Err(err).
 					Str("fpid", fpid).

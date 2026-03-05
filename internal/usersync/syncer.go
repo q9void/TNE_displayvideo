@@ -70,8 +70,12 @@ type SyncInfo struct {
 	Bidder string   `json:"bidder"`
 }
 
-// GetSync returns the sync info for this bidder
-func (s *Syncer) GetSync(syncType SyncType, gdpr string, consent string, usPrivacy string) (*SyncInfo, error) {
+// GetSync returns the sync info for this bidder.
+// fpid is the publisher first-party ID; when non-empty it is appended to the
+// setuid callback URL so the handler can link the bidder UID to the right user
+// without relying on the server-side uids cookie (which is third-party to the
+// publisher's domain and blocked by ITP/ETP).
+func (s *Syncer) GetSync(syncType SyncType, gdpr string, consent string, usPrivacy string, fpid string) (*SyncInfo, error) {
 	if !s.config.Enabled {
 		return nil, fmt.Errorf("syncing disabled for %s", s.config.BidderCode)
 	}
@@ -106,6 +110,9 @@ func (s *Syncer) GetSync(syncType SyncType, gdpr string, consent string, usPriva
 	}
 
 	// Build the redirect URLs (where the bidder will send the UID back to us).
+	// The FPID is embedded directly in the callback URL so /setuid can link the
+	// bidder UID to the right user without reading the server-side uids cookie
+	// (which is third-party to the publisher's domain and blocked by ITP/ETP).
 	//
 	// {{redirect_url}} — full callback URL with the SSP's UID macro embedded; the
 	// entire URL is URL-encoded when substituted.  The SSP substitutes its macro
@@ -120,6 +127,9 @@ func (s *Syncer) GetSync(syncType SyncType, gdpr string, consent string, usPriva
 	// The macro stays as a literal suffix outside the encoding, so the SSP can find and
 	// substitute it in the raw URL string.
 	redirectURL := fmt.Sprintf("%s/setuid?bidder=%s&uid=%s", s.hostURL, url.QueryEscape(s.config.BidderCode), macro)
+	if fpid != "" {
+		redirectURL += "&fpid=" + url.QueryEscape(fpid)
+	}
 	if s.config.RedirectURLSuffix != "" {
 		suffix := s.config.RedirectURLSuffix
 		suffix = strings.ReplaceAll(suffix, "{{gdpr_consent}}", url.QueryEscape(consent))

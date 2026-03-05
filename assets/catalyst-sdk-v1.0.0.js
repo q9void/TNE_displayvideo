@@ -1,7 +1,7 @@
 /**
  * Catalyst Bidder SDK for MAI Publisher Integration
  * Server-side header bidding adapter
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 (function(window) {
@@ -138,8 +138,7 @@
 
   // First-Party ID Manager
   catalyst._fpidManager = {
-    cookieName: 'uids',  // Store in existing uids cookie
-    fpidKey: 'fpid',
+    cookieName: '_cid',  // Dedicated first-party cookie on publisher's domain
     expiryDays: 365,
 
     // Check if we have consent to generate/use FPID
@@ -213,51 +212,22 @@
       return 'fpi_' + timestamp + '_' + random;
     },
 
-    // Get FPID from cookie (parse uids cookie JSON)
+    // Get FPID from dedicated first-party cookie (_cid) on publisher's domain
     get: function() {
-      var uids = catalyst._getCookie(this.cookieName);
-      if (uids) {
-        try {
-          var decoded = atob(uids);
-          var data = JSON.parse(decoded);
-          return data.fpid || null;
-        } catch (e) {
-          catalyst.log('Failed to parse fpid from cookie:', e);
-          return null;
-        }
-      }
-      return null;
+      return catalyst._getCookie(this.cookieName) || null;
     },
 
-    // Set FPID in cookie
+    // Set FPID as a simple plain-text first-party cookie on the publisher's domain.
+    // No explicit domain= so the browser scopes it to the current hostname (1PD).
+    // SameSite=Lax: sent on top-level navigations (including SSP redirects back to us).
     set: function(fpid) {
-      // Store FPID in uids cookie structure
-      var uids = catalyst._getCookie(this.cookieName);
-      var data = {};
-
-      if (uids) {
-        try {
-          var decoded = atob(uids);
-          data = JSON.parse(decoded);
-        } catch (e) {
-          catalyst.log('Failed to parse existing uids cookie, creating new:', e);
-        }
-      }
-
-      data.fpid = fpid;
-      var encoded = btoa(JSON.stringify(data));
-
-      // Calculate expiry date
       var expiryDate = new Date();
       expiryDate.setTime(expiryDate.getTime() + (this.expiryDays * 24 * 60 * 60 * 1000));
-
-      // Set cookie with SameSite=Lax for cross-site compatibility
-      document.cookie = this.cookieName + '=' + encoded +
+      document.cookie = this.cookieName + '=' + fpid +
                        '; expires=' + expiryDate.toUTCString() +
                        '; path=/' +
                        '; SameSite=Lax';
-
-      catalyst.log('Saved FPID to cookie:', fpid);
+      catalyst.log('Saved FPID to first-party cookie (_cid):', fpid);
     },
 
     // Generate or retrieve existing FPID (respects GDPR consent)
@@ -618,7 +588,7 @@
       }
 
       // Add privacy/consent info if available, then send request
-      if (window.__tcfapi || window.__uspapi || window.__cmp) {
+      if (window.__tcfapi || window.__uspapi || window.__cmp || window.__gpp) {
         catalyst._addPrivacyConsent(bidRequest, sendBidRequest);
       } else {
         // No privacy APIs available, send immediately
@@ -897,11 +867,12 @@
 
     var tcfDone = false;
     var uspDone = false;
+    var gppDone = false;
     var timeout = 200; // Max 200ms wait for consent data
     var timeoutId = null;
 
     var checkComplete = function() {
-      if ((tcfDone || !window.__tcfapi) && (uspDone || !window.__uspapi)) {
+      if ((tcfDone || !window.__tcfapi) && (uspDone || !window.__uspapi) && (gppDone || !window.__gpp)) {
         if (timeoutId) clearTimeout(timeoutId);
         if (callback) callback();
       }
@@ -919,6 +890,7 @@
       }
       tcfDone = true;
       uspDone = true;
+      gppDone = true;
       if (callback) callback();
     }, timeout);
 
@@ -956,26 +928,48 @@
           if (success && uspData && uspData.uspString) {
             bidRequest.user.uspConsent = uspData.uspString;
           } else {
-            // FIXED #9: Use safe default indicating no data available
             bidRequest.user.uspConsent = '1---';
           }
           checkComplete();
         });
       } catch (e) {
         catalyst.log('Error getting USP consent:', e);
-        // FIXED #9: Use safe default on error
         bidRequest.user.uspConsent = '1---';
         uspDone = true;
         checkComplete();
       }
     } else {
-      // FIXED #9: Use safe default indicating no CMP/data available
       bidRequest.user.uspConsent = '1---';
       uspDone = true;
     }
 
-    // If neither API is available, call back immediately
-    if (!window.__tcfapi && !window.__uspapi) {
+    // Try to get GPP string via IAB GPP API
+    if (window.__gpp) {
+      try {
+        window.__gpp('getGPPData', function(gppData, success) {
+          gppDone = true;
+          if (success && gppData) {
+            if (gppData.gppString) {
+              bidRequest.user.gppString = gppData.gppString;
+              catalyst.log('Added GPP string');
+            }
+            if (gppData.applicableSections && gppData.applicableSections.length > 0) {
+              bidRequest.user.gppSids = gppData.applicableSections;
+            }
+          }
+          checkComplete();
+        });
+      } catch (e) {
+        catalyst.log('Error getting GPP data:', e);
+        gppDone = true;
+        checkComplete();
+      }
+    } else {
+      gppDone = true;
+    }
+
+    // If no privacy APIs available, call back immediately
+    if (!window.__tcfapi && !window.__uspapi && !window.__gpp) {
       checkComplete();
     }
   };
@@ -1711,7 +1705,7 @@
    * @returns {string} Version string
    */
   catalyst.version = function() {
-    return '1.0.0';
+    return '1.1.0';
   };
 
   // Process command queue
@@ -1745,6 +1739,6 @@
   // Process existing commands
   catalyst._processCommandQueue();
 
-  catalyst.log('Catalyst SDK v1.0.0 loaded');
+  catalyst.log('Catalyst SDK v1.1.0 loaded');
 
 })(window);

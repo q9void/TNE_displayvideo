@@ -31,7 +31,7 @@ func TestSyncerGetSync_Redirect(t *testing.T) {
 
 	syncer := NewSyncer(config, "https://pbs.example.com")
 
-	syncInfo, err := syncer.GetSync(SyncTypeRedirect, "1", "consent-string", "")
+	syncInfo, err := syncer.GetSync(SyncTypeRedirect, "1", "consent-string", "", "")
 	if err != nil {
 		t.Fatalf("GetSync failed: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestSyncerGetSync_Iframe(t *testing.T) {
 
 	syncer := NewSyncer(config, "https://pbs.example.com")
 
-	syncInfo, err := syncer.GetSync(SyncTypeIframe, "0", "", "")
+	syncInfo, err := syncer.GetSync(SyncTypeIframe, "0", "", "", "")
 	if err != nil {
 		t.Fatalf("GetSync failed: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestSyncerGetSync_DefaultType(t *testing.T) {
 	syncer := NewSyncer(config, "https://pbs.example.com")
 
 	// Empty string should prefer redirect
-	syncInfo, err := syncer.GetSync("", "0", "", "")
+	syncInfo, err := syncer.GetSync("", "0", "", "", "")
 	if err != nil {
 		t.Fatalf("GetSync failed: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestSyncerGetSync_Disabled(t *testing.T) {
 
 	syncer := NewSyncer(config, "https://pbs.example.com")
 
-	_, err := syncer.GetSync(SyncTypeRedirect, "0", "", "")
+	_, err := syncer.GetSync(SyncTypeRedirect, "0", "", "", "")
 	if err == nil {
 		t.Error("Should return error when disabled")
 	}
@@ -117,7 +117,7 @@ func TestSyncerGetSync_NoURL(t *testing.T) {
 
 	syncer := NewSyncer(config, "https://pbs.example.com")
 
-	_, err := syncer.GetSync(SyncTypeRedirect, "0", "", "")
+	_, err := syncer.GetSync(SyncTypeRedirect, "0", "", "", "")
 	if err == nil {
 		t.Error("Should return error when no URL configured")
 	}
@@ -155,7 +155,7 @@ func TestSyncerUSPrivacy(t *testing.T) {
 
 	syncer := NewSyncer(config, "https://pbs.example.com")
 
-	syncInfo, err := syncer.GetSync(SyncTypeRedirect, "0", "", "1YNN")
+	syncInfo, err := syncer.GetSync(SyncTypeRedirect, "0", "", "1YNN", "")
 	if err != nil {
 		t.Fatalf("GetSync failed: %v", err)
 	}
