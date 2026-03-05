@@ -1311,12 +1311,6 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		TMax: publisherTMaxMs(r.Context()),
 	}
 
-	// Propagate test flag — append ?test=1 to the bid endpoint URL to surface
-	// requests in SSP dashboards (Magnite, etc.) without charging impressions.
-	if r.URL.Query().Get("test") == "1" {
-		ortbReq.Test = 1
-	}
-
 	logger.Log.Debug().
 		Str("account_id", maiBid.AccountID).
 		Msg("Added supply chain (schain) to bid request")
