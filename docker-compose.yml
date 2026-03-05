@@ -22,7 +22,7 @@ services:
       - IDR_ENABLED=false
       - RUBICON_XAPI_USER=pb_thenexusengine
       - RUBICON_XAPI_PASS=WMYH7Y2S5A
-      - RUBICON_ENDPOINT=http://exapi-us-east.rubiconproject.com/a/api/exchange.json?tk_sdc=us-east
+      - RUBICON_ENDPOINT=https://exapi-us-east.rubiconproject.com/a/api/exchange.json?tk_sdc=us-east
       - DB_HOST=catalyst-postgres
       - DB_PORT=5432
       - DB_NAME=catalyst_production
