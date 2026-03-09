@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	_ "github.com/lib/pq" // registers the "postgres" driver via init()
 )
 
 // PublisherVideoConfig holds per-publisher video inventory defaults (OpenRTB 2.5 Video object).
