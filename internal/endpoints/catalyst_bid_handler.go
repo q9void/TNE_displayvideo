@@ -490,9 +490,13 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		}
 
 		// Add banner if sizes are provided (default format)
+		// Set w/h from the first (largest) format entry — required by Kargo and
+		// standard PBS exchange behaviour; format array carries all acceptable sizes.
 		if len(slot.Sizes) > 0 {
 			imp.Banner = &openrtb.Banner{
 				Format: formats,
+				W:      formats[0].W,
+				H:      formats[0].H,
 			}
 		}
 
