@@ -402,7 +402,7 @@ func (h *CookieSyncHandler) getBiddersToSync(req CookieSyncRequest, cookie *user
 		}
 	} else {
 		// No bidders specified and no coop sync - return common bidders
-		bidders = []string{"appnexus", "rubicon", "pubmatic", "openx", "triplelift"}
+		bidders = []string{"appnexus", "rubicon", "pubmatic", "openx", "triplelift", "kargo"}
 	}
 
 	// Filter out bidders that already have UIDs (optimization to avoid redundant syncs)
