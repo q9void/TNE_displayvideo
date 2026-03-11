@@ -1349,7 +1349,7 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 			Nodes: []openrtb.SupplyChainNode{
 				{
 					ASI:  "thenexusengine.com",
-					SID:  maiBid.AccountID,
+					SID:  "NXS001",
 					HP:   1,
 					Name: "The Nexus Engine (Catalyst)",
 				},
