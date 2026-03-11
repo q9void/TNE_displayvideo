@@ -1350,6 +1350,7 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 				{
 					ASI:  "thenexusengine.com",
 					SID:  "NXS001",
+					RID:  requestID,
 					HP:   1,
 					Name: "The Nexus Engine (Catalyst)",
 				},
