@@ -77,52 +77,55 @@ func (h *SChainAugmentationHook) ProcessBidderRequest(ctx context.Context, req *
 			Msg("Platform node already exists in schain")
 	}
 
-	// Set schain back in source.ext
+	// Set schain in source.SChain (typed field)
 	h.setSChain(req, &schain)
 
 	return nil
 }
 
-// getExistingSChain extracts existing schain from source.ext
+// getExistingSChain extracts existing schain, preferring typed source.SChain (OpenRTB 2.6)
+// and falling back to source.ext.schain for backward compatibility.
 func (h *SChainAugmentationHook) getExistingSChain(req *openrtb.BidRequest) openrtb.SupplyChain {
+	// Prefer typed field (OpenRTB 2.6)
+	if req.Source != nil && req.Source.SChain != nil {
+		return *req.Source.SChain
+	}
+	// Legacy: source.ext.schain
 	var schain openrtb.SupplyChain
-
 	if req.Source == nil || req.Source.Ext == nil {
 		return schain
 	}
-
 	var sourceExt struct {
 		SChain *openrtb.SupplyChain `json:"schain"`
 	}
-
 	if err := json.Unmarshal(req.Source.Ext, &sourceExt); err == nil && sourceExt.SChain != nil {
 		return *sourceExt.SChain
 	}
-
 	return schain
 }
 
-// setSChain sets the schain in source.ext
+// setSChain writes schain to source.SChain (typed, canonical OpenRTB 2.6 location)
+// and removes any legacy schain key from source.ext to prevent duplication.
 func (h *SChainAugmentationHook) setSChain(req *openrtb.BidRequest, schain *openrtb.SupplyChain) {
-	// Parse existing source.ext to preserve other fields
-	var sourceExt map[string]interface{}
+	// Write to typed field (canonical OpenRTB 2.6 location)
+	req.Source.SChain = schain
+
+	// Remove legacy schain from source.ext to prevent duplication
 	if req.Source.Ext != nil {
-		if err := json.Unmarshal(req.Source.Ext, &sourceExt); err != nil {
-			sourceExt = make(map[string]interface{})
+		var sourceExt map[string]interface{}
+		if err := json.Unmarshal(req.Source.Ext, &sourceExt); err == nil {
+			if _, hasSchain := sourceExt["schain"]; hasSchain {
+				delete(sourceExt, "schain")
+				if len(sourceExt) == 0 {
+					req.Source.Ext = nil
+				} else if extBytes, err := json.Marshal(sourceExt); err == nil {
+					req.Source.Ext = extBytes
+				} else {
+					logger.Log.Error().
+						Err(err).
+						Msg("Failed to marshal source.ext after removing legacy schain")
+				}
+			}
 		}
-	} else {
-		sourceExt = make(map[string]interface{})
-	}
-
-	// Set schain
-	sourceExt["schain"] = schain
-
-	// Marshal back to JSON
-	if extBytes, err := json.Marshal(sourceExt); err == nil {
-		req.Source.Ext = extBytes
-	} else {
-		logger.Log.Error().
-			Err(err).
-			Msg("Failed to marshal source.ext with schain")
 	}
 }

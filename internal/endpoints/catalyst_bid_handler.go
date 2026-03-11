@@ -829,7 +829,7 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		// Map device type to OpenRTB device type
 		switch strings.ToLower(maiBid.Device.DeviceType) {
 		case "mobile", "phone":
-			deviceObj.DeviceType = 1 // Mobile/Tablet
+			deviceObj.DeviceType = 4 // Phone (OpenRTB 2.6: 4=Phone, 5=Tablet, 2=PC, 3=CTV)
 		case "tablet":
 			deviceObj.DeviceType = 5 // Tablet
 		case "desktop", "pc":

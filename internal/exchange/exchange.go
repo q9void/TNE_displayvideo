@@ -2824,9 +2824,11 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 	hookExecutor.RegisterBidderRequestHook(hooks.NewIdentityGatingHook())
 
 	// Get account ID from request for schain
-	// Extract from site.publisher.name or default to request ID
+	// Prefer source.SChain seller ID (set by bid handler) to avoid conflicts with publisher name
 	accountID := req.ID
-	if req.Site != nil && req.Site.Publisher != nil && req.Site.Publisher.Name != "" {
+	if req.Source != nil && req.Source.SChain != nil && len(req.Source.SChain.Nodes) > 0 {
+		accountID = req.Source.SChain.Nodes[0].SID // Use seller ID already set by bid handler
+	} else if req.Site != nil && req.Site.Publisher != nil && req.Site.Publisher.Name != "" {
 		accountID = req.Site.Publisher.Name
 	}
 	hookExecutor.RegisterBidderRequestHook(hooks.NewSChainAugmentationHook("thenexusengine.com", accountID))

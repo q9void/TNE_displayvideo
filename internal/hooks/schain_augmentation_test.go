@@ -27,31 +27,35 @@ func TestSChainAugmentationHook_CreatesNewSChain(t *testing.T) {
 		t.Fatal("expected source object to be created")
 	}
 
-	// Should create schain
-	var sourceExt struct {
-		SChain *openrtb.SupplyChain `json:"schain"`
-	}
-	if err := json.Unmarshal(req.Source.Ext, &sourceExt); err != nil {
-		t.Fatalf("failed to unmarshal source.ext: %v", err)
+	// Should write schain to typed field
+	if req.Source.SChain == nil {
+		t.Fatal("expected source.SChain to be created")
 	}
 
-	if sourceExt.SChain == nil {
-		t.Fatal("expected schain to be created")
+	// source.ext should not contain schain key
+	if req.Source.Ext != nil {
+		var extMap map[string]interface{}
+		if err := json.Unmarshal(req.Source.Ext, &extMap); err == nil {
+			if _, hasSchain := extMap["schain"]; hasSchain {
+				t.Error("expected schain key to be absent from source.ext")
+			}
+		}
 	}
 
 	// Verify schain structure
-	if sourceExt.SChain.Ver != "1.0" {
-		t.Errorf("expected schain version 1.0, got: %s", sourceExt.SChain.Ver)
+	schain := req.Source.SChain
+	if schain.Ver != "1.0" {
+		t.Errorf("expected schain version 1.0, got: %s", schain.Ver)
 	}
-	if sourceExt.SChain.Complete != 1 {
-		t.Errorf("expected schain complete=1, got: %d", sourceExt.SChain.Complete)
+	if schain.Complete != 1 {
+		t.Errorf("expected schain complete=1, got: %d", schain.Complete)
 	}
-	if len(sourceExt.SChain.Nodes) != 1 {
-		t.Fatalf("expected 1 node, got: %d", len(sourceExt.SChain.Nodes))
+	if len(schain.Nodes) != 1 {
+		t.Fatalf("expected 1 node, got: %d", len(schain.Nodes))
 	}
 
 	// Verify platform node
-	node := sourceExt.SChain.Nodes[0]
+	node := schain.Nodes[0]
 	if node.ASI != "thenexusengine.com" {
 		t.Errorf("expected ASI 'thenexusengine.com', got: %s", node.ASI)
 	}
@@ -70,10 +74,76 @@ func TestSChainAugmentationHook_AppendsToExistingSChain(t *testing.T) {
 	hook := NewSChainAugmentationHook("thenexusengine.com", "12345")
 	ctx := context.Background()
 
-	// Create existing schain
+	// Create existing schain in typed field
 	existingSChain := openrtb.SupplyChain{
 		Ver:      "1.0",
 		Complete: 0, // Not complete yet
+		Nodes: []openrtb.SupplyChainNode{
+			{
+				ASI:    "publisher.com",
+				SID:    "pub-123",
+				HP:     1,
+				RID:    "upstream-req-id",
+				Domain: "publisher.com",
+			},
+		},
+	}
+
+	req := &openrtb.BidRequest{
+		ID: "test-request-123",
+		Source: &openrtb.Source{
+			SChain: &existingSChain,
+		},
+	}
+
+	err := hook.ProcessBidderRequest(ctx, req, "rubicon")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Result should be in typed field
+	if req.Source.SChain == nil {
+		t.Fatal("expected source.SChain to be set")
+	}
+
+	// source.ext should not contain schain key
+	if req.Source.Ext != nil {
+		var extMap map[string]interface{}
+		if err := json.Unmarshal(req.Source.Ext, &extMap); err == nil {
+			if _, hasSchain := extMap["schain"]; hasSchain {
+				t.Error("expected schain key to be absent from source.ext")
+			}
+		}
+	}
+
+	// Should have 2 nodes now (original + platform)
+	if len(req.Source.SChain.Nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got: %d", len(req.Source.SChain.Nodes))
+	}
+
+	// First node should be unchanged
+	if req.Source.SChain.Nodes[0].ASI != "publisher.com" {
+		t.Errorf("expected first node ASI 'publisher.com', got: %s", req.Source.SChain.Nodes[0].ASI)
+	}
+
+	// Second node should be platform node
+	platformNode := req.Source.SChain.Nodes[1]
+	if platformNode.ASI != "thenexusengine.com" {
+		t.Errorf("expected platform node ASI 'thenexusengine.com', got: %s", platformNode.ASI)
+	}
+	if platformNode.SID != "12345" {
+		t.Errorf("expected platform node SID '12345', got: %s", platformNode.SID)
+	}
+}
+
+func TestSChainAugmentationHook_AppendsToExistingSChainInExt(t *testing.T) {
+	hook := NewSChainAugmentationHook("thenexusengine.com", "12345")
+	ctx := context.Background()
+
+	// Legacy: existing schain in source.ext (backward compat path)
+	existingSChain := openrtb.SupplyChain{
+		Ver:      "1.0",
+		Complete: 0,
 		Nodes: []openrtb.SupplyChainNode{
 			{
 				ASI:    "publisher.com",
@@ -102,31 +172,24 @@ func TestSChainAugmentationHook_AppendsToExistingSChain(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Parse result schain
-	var resultExt struct {
-		SChain *openrtb.SupplyChain `json:"schain"`
-	}
-	if err := json.Unmarshal(req.Source.Ext, &resultExt); err != nil {
-		t.Fatalf("failed to unmarshal source.ext: %v", err)
+	// Result should be in typed field
+	if req.Source.SChain == nil {
+		t.Fatal("expected source.SChain to be set")
 	}
 
-	// Should have 2 nodes now (original + platform)
-	if len(resultExt.SChain.Nodes) != 2 {
-		t.Fatalf("expected 2 nodes, got: %d", len(resultExt.SChain.Nodes))
+	// schain key should be removed from source.ext
+	if req.Source.Ext != nil {
+		var extMap map[string]interface{}
+		if err := json.Unmarshal(req.Source.Ext, &extMap); err == nil {
+			if _, hasSchain := extMap["schain"]; hasSchain {
+				t.Error("expected schain key to be removed from source.ext")
+			}
+		}
 	}
 
-	// First node should be unchanged
-	if resultExt.SChain.Nodes[0].ASI != "publisher.com" {
-		t.Errorf("expected first node ASI 'publisher.com', got: %s", resultExt.SChain.Nodes[0].ASI)
-	}
-
-	// Second node should be platform node
-	platformNode := resultExt.SChain.Nodes[1]
-	if platformNode.ASI != "thenexusengine.com" {
-		t.Errorf("expected platform node ASI 'thenexusengine.com', got: %s", platformNode.ASI)
-	}
-	if platformNode.SID != "12345" {
-		t.Errorf("expected platform node SID '12345', got: %s", platformNode.SID)
+	// Should have 2 nodes
+	if len(req.Source.SChain.Nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got: %d", len(req.Source.SChain.Nodes))
 	}
 }
 
@@ -134,7 +197,7 @@ func TestSChainAugmentationHook_SkipsDuplicatePlatformNode(t *testing.T) {
 	hook := NewSChainAugmentationHook("thenexusengine.com", "12345")
 	ctx := context.Background()
 
-	// Create schain with platform node already present
+	// Create schain with platform node already present in typed field
 	existingSChain := openrtb.SupplyChain{
 		Ver:      "1.0",
 		Complete: 1,
@@ -149,15 +212,10 @@ func TestSChainAugmentationHook_SkipsDuplicatePlatformNode(t *testing.T) {
 		},
 	}
 
-	sourceExt := map[string]interface{}{
-		"schain": existingSChain,
-	}
-	sourceExtBytes, _ := json.Marshal(sourceExt)
-
 	req := &openrtb.BidRequest{
 		ID: "test-request-123",
 		Source: &openrtb.Source{
-			Ext: sourceExtBytes,
+			SChain: &existingSChain,
 		},
 	}
 
@@ -166,17 +224,24 @@ func TestSChainAugmentationHook_SkipsDuplicatePlatformNode(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Parse result schain
-	var resultExt struct {
-		SChain *openrtb.SupplyChain `json:"schain"`
+	// Result should be in typed field
+	if req.Source.SChain == nil {
+		t.Fatal("expected source.SChain to be set")
 	}
-	if err := json.Unmarshal(req.Source.Ext, &resultExt); err != nil {
-		t.Fatalf("failed to unmarshal source.ext: %v", err)
+
+	// source.ext should not contain schain key
+	if req.Source.Ext != nil {
+		var extMap map[string]interface{}
+		if err := json.Unmarshal(req.Source.Ext, &extMap); err == nil {
+			if _, hasSchain := extMap["schain"]; hasSchain {
+				t.Error("expected schain key to be absent from source.ext")
+			}
+		}
 	}
 
 	// Should still have only 1 node (not duplicated)
-	if len(resultExt.SChain.Nodes) != 1 {
-		t.Errorf("expected 1 node (no duplicate), got: %d", len(resultExt.SChain.Nodes))
+	if len(req.Source.SChain.Nodes) != 1 {
+		t.Errorf("expected 1 node (no duplicate), got: %d", len(req.Source.SChain.Nodes))
 	}
 }
 
@@ -184,9 +249,9 @@ func TestSChainAugmentationHook_PreservesOtherSourceExtFields(t *testing.T) {
 	hook := NewSChainAugmentationHook("thenexusengine.com", "12345")
 	ctx := context.Background()
 
-	// Create source.ext with other fields
+	// Create source.ext with other fields (no schain)
 	sourceExt := map[string]interface{}{
-		"custom_field": "custom_value",
+		"custom_field":  "custom_value",
 		"another_field": 123,
 	}
 	sourceExtBytes, _ := json.Marshal(sourceExt)
@@ -203,7 +268,15 @@ func TestSChainAugmentationHook_PreservesOtherSourceExtFields(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Parse result
+	// schain should be in typed field
+	if req.Source.SChain == nil {
+		t.Error("expected source.SChain to be set")
+	}
+
+	// source.ext should still have other fields (not cleared)
+	if req.Source.Ext == nil {
+		t.Fatal("expected source.ext to be preserved")
+	}
 	var resultExt map[string]interface{}
 	if err := json.Unmarshal(req.Source.Ext, &resultExt); err != nil {
 		t.Fatalf("failed to unmarshal source.ext: %v", err)
@@ -217,9 +290,9 @@ func TestSChainAugmentationHook_PreservesOtherSourceExtFields(t *testing.T) {
 		t.Error("expected another_field to be preserved")
 	}
 
-	// Should also have schain
-	if resultExt["schain"] == nil {
-		t.Error("expected schain to be added")
+	// source.ext should NOT contain schain
+	if _, hasSchain := resultExt["schain"]; hasSchain {
+		t.Error("expected schain key to be absent from source.ext")
 	}
 }
 
@@ -256,17 +329,12 @@ func TestSChainAugmentationHook_DifferentAccountIDs(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			// Parse result schain
-			var sourceExt struct {
-				SChain *openrtb.SupplyChain `json:"schain"`
+			// Verify SID in typed field
+			if req.Source.SChain == nil {
+				t.Fatal("expected source.SChain to be set")
 			}
-			if err := json.Unmarshal(req.Source.Ext, &sourceExt); err != nil {
-				t.Fatalf("failed to unmarshal source.ext: %v", err)
-			}
-
-			// Verify SID matches account ID
-			if sourceExt.SChain.Nodes[0].SID != tt.accountID {
-				t.Errorf("expected SID '%s', got: %s", tt.accountID, sourceExt.SChain.Nodes[0].SID)
+			if req.Source.SChain.Nodes[0].SID != tt.accountID {
+				t.Errorf("expected SID '%s', got: %s", tt.accountID, req.Source.SChain.Nodes[0].SID)
 			}
 		})
 	}
