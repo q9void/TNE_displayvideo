@@ -80,6 +80,41 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		return nil, errs
 	}
 
+	// Kargo-specific user enrichment
+	if request.User != nil {
+		userCopy := *request.User
+
+		// 1. Populate user.eids at top level from user.ext.eids
+		//    Kargo uses OpenRTB 2.6 top-level eids for identity matching.
+		//    The EID filter may have cleared the typed field; restore from raw ext.
+		if len(userCopy.EIDs) == 0 && len(userCopy.Ext) > 0 {
+			var extEIDs struct {
+				EIDs []openrtb.EID `json:"eids"`
+			}
+			if err := json.Unmarshal(userCopy.Ext, &extEIDs); err == nil && len(extEIDs.EIDs) > 0 {
+				userCopy.EIDs = extEIDs.EIDs
+			}
+		}
+
+		// 2. Set user.buyeruid from kargo.com EID
+		//    Kargo matches requests to cookie-synced users via buyeruid.
+		if uid := adapters.ExtractUIDFromEids(request.User, "kargo.com"); uid != "" {
+			userCopy.BuyerUID = uid
+		}
+
+		requestCopy.User = &userCopy
+	}
+
+	// 3. Set site.publisher.id
+	//    Kargo requires a publisher identifier to route to our supply configuration.
+	if requestCopy.Site != nil && requestCopy.Site.Publisher != nil && requestCopy.Site.Publisher.ID == "" {
+		publisherCopy := *requestCopy.Site.Publisher
+		publisherCopy.ID = "NXS001"
+		siteCopy := *requestCopy.Site
+		siteCopy.Publisher = &publisherCopy
+		requestCopy.Site = &siteCopy
+	}
+
 	requestBody, err := json.Marshal(requestCopy)
 	if err != nil {
 		return nil, []error{fmt.Errorf("failed to marshal request: %w", err)}
