@@ -1339,24 +1339,9 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		regs.USPrivacy = maiBid.User.USPConsent
 	}
 
-	// Build supply chain object (schain) - REQUIRED for transparency and fraud prevention
-	// Identifies Catalyst as the seller in the supply chain
-	// Per OpenRTB 2.5 spec, schain goes in Source.SChain (not Source.Ext)
-	source := &openrtb.Source{
-		SChain: &openrtb.SupplyChain{
-			Ver:      "1.0",
-			Complete: 1,
-			Nodes: []openrtb.SupplyChainNode{
-				{
-					ASI:  "thenexusengine.com",
-					SID:  "NXS001",
-					RID:  requestID,
-					HP:   1,
-					Name: "The Nexus Engine (Catalyst)",
-				},
-			},
-		},
-	}
+	// Source object - schain is built per-bidder by SChainAugmentationHook
+	// using the bidder-specific seller ID assigned by each SSP
+	source := &openrtb.Source{}
 
 	// Build OpenRTB request
 	ortbReq := &openrtb.BidRequest{

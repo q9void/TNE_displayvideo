@@ -2823,15 +2823,16 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 	hookExecutor := hooks.NewHookExecutor()
 	hookExecutor.RegisterBidderRequestHook(hooks.NewIdentityGatingHook())
 
-	// Get account ID from request for schain
-	// Prefer source.SChain seller ID (set by bid handler) to avoid conflicts with publisher name
-	accountID := req.ID
-	if req.Source != nil && req.Source.SChain != nil && len(req.Source.SChain.Nodes) > 0 {
-		accountID = req.Source.SChain.Nodes[0].SID // Use seller ID already set by bid handler
-	} else if req.Site != nil && req.Site.Publisher != nil && req.Site.Publisher.Name != "" {
-		accountID = req.Site.Publisher.Name
+	// Per-bidder seller IDs assigned by each SSP — used as schain node SID
+	bidderSellerIDs := map[string]string{
+		"kargo": "9131",
+		// Add other SSP-assigned seller IDs here as they are provisioned
 	}
-	hookExecutor.RegisterBidderRequestHook(hooks.NewSChainAugmentationHook("thenexusengine.com", accountID))
+	sellerID, ok := bidderSellerIDs[bidderCode]
+	if !ok {
+		sellerID = "NXS001" // default TheNexusEngine seller ID
+	}
+	hookExecutor.RegisterBidderRequestHook(hooks.NewSChainAugmentationHook("thenexusengine.com", sellerID))
 
 	if err := hookExecutor.ExecuteBidderRequestHooks(ctx, req, bidderCode); err != nil {
 		logger.Log.Error().
