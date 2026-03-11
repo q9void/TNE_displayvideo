@@ -190,8 +190,8 @@ func TestSChainAugmentation(t *testing.T) {
 				for _, node := range req.Source.SChain.Nodes {
 					if node.ASI == "thenexusengine.com" {
 						foundPlatform = true
-						if node.SID != "tne-platform" {
-							t.Errorf("Expected platform SID 'tne-platform', got %q", node.SID)
+						if node.SID != "NXS001" {
+							t.Errorf("Expected platform SID 'NXS001', got %q", node.SID)
 						}
 						if node.HP != 1 {
 							t.Errorf("Expected platform HP=1, got %d", node.HP)
@@ -247,7 +247,7 @@ func TestSChainNoDuplicatePlatformNode(t *testing.T) {
 				Nodes: []openrtb.SupplyChainNode{
 					{
 						ASI: "thenexusengine.com", // Platform node already exists
-						SID: "tne-platform",
+						SID: "NXS001",
 						HP:  1,
 						RID: "existing-req-id",
 					},

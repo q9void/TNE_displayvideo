@@ -2590,7 +2590,16 @@ func (e *Exchange) augmentSChain(req *openrtb.BidRequest, bidderCode string) {
 
 	// Append platform node if not already present
 	platformASI := "thenexusengine.com"
-	platformSID := "tne-platform" // Platform seller ID
+
+	// Per-bidder seller IDs assigned by each SSP
+	bidderSellerIDs := map[string]string{
+		"kargo": "9131",
+		// Add other SSP-assigned seller IDs here as they are provisioned
+	}
+	platformSID, ok := bidderSellerIDs[bidderCode]
+	if !ok {
+		platformSID = "NXS001" // default TheNexusEngine seller ID
+	}
 
 	// Check if platform node already exists (avoid duplicates)
 	hasPlatformNode := false
@@ -2605,7 +2614,7 @@ func (e *Exchange) augmentSChain(req *openrtb.BidRequest, bidderCode string) {
 		platformNode := openrtb.SupplyChainNode{
 			ASI: platformASI,
 			SID: platformSID,
-			HP:  1, // We are a direct seller (not reseller)
+			HP:  1,
 			RID: req.ID,
 		}
 		req.Source.SChain.Nodes = append(req.Source.SChain.Nodes, platformNode)
@@ -2823,16 +2832,8 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 	hookExecutor := hooks.NewHookExecutor()
 	hookExecutor.RegisterBidderRequestHook(hooks.NewIdentityGatingHook())
 
-	// Per-bidder seller IDs assigned by each SSP — used as schain node SID
-	bidderSellerIDs := map[string]string{
-		"kargo": "9131",
-		// Add other SSP-assigned seller IDs here as they are provisioned
-	}
-	sellerID, ok := bidderSellerIDs[bidderCode]
-	if !ok {
-		sellerID = "NXS001" // default TheNexusEngine seller ID
-	}
-	hookExecutor.RegisterBidderRequestHook(hooks.NewSChainAugmentationHook("thenexusengine.com", sellerID))
+	// SChain is built per-bidder by augmentSChain (called during request cloning)
+	// The hook below handles identity gating only; schain augmentation is complete by this point
 
 	if err := hookExecutor.ExecuteBidderRequestHooks(ctx, req, bidderCode); err != nil {
 		logger.Log.Error().
