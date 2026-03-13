@@ -490,9 +490,13 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		}
 
 		// Add banner if sizes are provided (default format)
+		// Set w/h from the first (largest) format entry — required by Kargo and
+		// standard PBS exchange behaviour; format array carries all acceptable sizes.
 		if len(slot.Sizes) > 0 {
 			imp.Banner = &openrtb.Banner{
 				Format: formats,
+				W:      formats[0].W,
+				H:      formats[0].H,
 			}
 		}
 
@@ -681,53 +685,12 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 				allConfigs = make(map[string]map[string]interface{})
 			}
 		} else {
-			// Fallback: Try legacy hierarchical lookup if slot pattern unavailable
-			if h.publisherStore != nil && adUnitPath != "" {
-				allConfigs, err = h.publisherStore.GetAllBidderConfigsHierarchical(
-					r.Context(),
-					maiBid.AccountID,
-					domain,
-					adUnitPath,
-					bidders,
-				)
-				if err != nil {
-					logger.Log.Warn().
-						Err(err).
-						Str("account_id", maiBid.AccountID).
-						Msg("⚠️  Legacy hierarchical config lookup failed - using fallback")
-					allConfigs = make(map[string]map[string]interface{})
-				}
-			} else {
-				logger.Log.Warn().
-					Str("account_id", maiBid.AccountID).
-					Str("domain", domain).
-					Str("div_id", slot.DivID).
-					Msg("⚠️  Missing slot pattern - cannot query bidder configs")
-				allConfigs = make(map[string]map[string]interface{})
-			}
-		}
-
-		// Issue 6: After slot-level lookup, supplement any bidders missing from the slot
-		// config with hierarchical (domain -> publisher) fallback. The slot config wins
-		// where it has entries; gaps cascade down rather than silently dropping bidders.
-		if matchedPattern != "" && len(allConfigs) < len(bidders) && h.publisherStore != nil {
-			missingBidders := make([]string, 0, len(bidders)-len(allConfigs))
-			for _, b := range bidders {
-				if _, ok := allConfigs[b]; !ok {
-					missingBidders = append(missingBidders, b)
-				}
-			}
-			fallbackConfigs, fbErr := h.publisherStore.GetAllBidderConfigsHierarchical(
-				r.Context(), maiBid.AccountID, domain, adUnitPath, missingBidders,
-			)
-			if fbErr == nil {
-				for bidder, params := range fallbackConfigs {
-					allConfigs[bidder] = params
-				}
-				logger.Log.Debug().
-					Strs("bidders", missingBidders).
-					Msg("Filled missing slot bidders from hierarchical config")
-			}
+			logger.Log.Warn().
+				Str("account_id", maiBid.AccountID).
+				Str("domain", domain).
+				Str("div_id", slot.DivID).
+				Msg("⚠️  Missing div_id - cannot query slot bidder configs")
+			allConfigs = make(map[string]map[string]interface{})
 		}
 
 		// Now populate impExt with configs
@@ -866,7 +829,7 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		// Map device type to OpenRTB device type
 		switch strings.ToLower(maiBid.Device.DeviceType) {
 		case "mobile", "phone":
-			deviceObj.DeviceType = 1 // Mobile/Tablet
+			deviceObj.DeviceType = 4 // Phone (OpenRTB 2.6: 4=Phone, 5=Tablet, 2=PC, 3=CTV)
 		case "tablet":
 			deviceObj.DeviceType = 5 // Tablet
 		case "desktop", "pc":
@@ -1376,23 +1339,9 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		regs.USPrivacy = maiBid.User.USPConsent
 	}
 
-	// Build supply chain object (schain) - REQUIRED for transparency and fraud prevention
-	// Identifies Catalyst as the seller in the supply chain
-	// Per OpenRTB 2.5 spec, schain goes in Source.SChain (not Source.Ext)
-	source := &openrtb.Source{
-		SChain: &openrtb.SupplyChain{
-			Ver:      "1.0",
-			Complete: 1,
-			Nodes: []openrtb.SupplyChainNode{
-				{
-					ASI:  "thenexusengine.com",
-					SID:  maiBid.AccountID,
-					HP:   1,
-					Name: "The Nexus Engine (Catalyst)",
-				},
-			},
-		},
-	}
+	// Source object - schain is built per-bidder by SChainAugmentationHook
+	// using the bidder-specific seller ID assigned by each SSP
+	source := &openrtb.Source{}
 
 	// Build OpenRTB request
 	ortbReq := &openrtb.BidRequest{

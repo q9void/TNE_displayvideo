@@ -178,7 +178,7 @@ func DefaultSyncerConfigs() map[string]SyncerConfig {
 		// XAPI credentials: pb_thenexusengine (set via RUBICON_XAPI_USER/PASS env vars)
 		"rubicon": {
 			BidderCode:        "rubicon",
-			RedirectSyncURL:   "https://pixel.rubiconproject.com/exchange/sync.php?p=prebid&gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}&redir={{redirect_url}}",
+			RedirectSyncURL:   "https://pixel.rubiconproject.com/exchange/sync.php?p=pb_thenexusengine&gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}&redir={{redirect_url}}",
 			IframeSyncURL:     "https://eus.rubiconproject.com/usync.html?p=prebid&gdpr={{gdpr}}&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}",
 			UserMacro:         "{storage_id}",
 			RedirectURLSuffix: "&gdpr_consent={{gdpr_consent}}&us_privacy={{us_privacy}}",

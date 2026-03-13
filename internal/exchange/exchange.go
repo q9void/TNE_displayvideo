@@ -2662,7 +2662,16 @@ func (e *Exchange) augmentSChain(req *openrtb.BidRequest, bidderCode string) {
 
 	// Append platform node if not already present
 	platformASI := "thenexusengine.com"
-	platformSID := "tne-platform" // Platform seller ID
+
+	// Per-bidder seller IDs assigned by each SSP
+	bidderSellerIDs := map[string]string{
+		"kargo": "9131",
+		// Add other SSP-assigned seller IDs here as they are provisioned
+	}
+	platformSID, ok := bidderSellerIDs[bidderCode]
+	if !ok {
+		platformSID = "NXS001" // default TheNexusEngine seller ID
+	}
 
 	// Check if platform node already exists (avoid duplicates)
 	hasPlatformNode := false
@@ -2677,7 +2686,7 @@ func (e *Exchange) augmentSChain(req *openrtb.BidRequest, bidderCode string) {
 		platformNode := openrtb.SupplyChainNode{
 			ASI: platformASI,
 			SID: platformSID,
-			HP:  1, // We are a direct seller (not reseller)
+			HP:  1,
 			RID: req.ID,
 		}
 		req.Source.SChain.Nodes = append(req.Source.SChain.Nodes, platformNode)
@@ -2966,17 +2975,8 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 	hookExecutor := hooks.NewHookExecutor()
 	hookExecutor.RegisterBidderRequestHook(hooks.NewIdentityGatingHook())
 
-	// Get account ID from request for schain
-	// Extract from site/app/dooh publisher.name or default to request ID
-	accountID := req.ID
-	if req.Site != nil && req.Site.Publisher != nil && req.Site.Publisher.Name != "" {
-		accountID = req.Site.Publisher.Name
-	} else if req.App != nil && req.App.Publisher != nil && req.App.Publisher.Name != "" {
-		accountID = req.App.Publisher.Name
-	} else if req.DOOH != nil && req.DOOH.Publisher != nil && req.DOOH.Publisher.Name != "" {
-		accountID = req.DOOH.Publisher.Name
-	}
-	hookExecutor.RegisterBidderRequestHook(hooks.NewSChainAugmentationHook("thenexusengine.com", accountID))
+	// SChain is built per-bidder by augmentSChain (called during request cloning)
+	// The hook below handles identity gating only; schain augmentation is complete by this point
 
 	if err := hookExecutor.ExecuteBidderRequestHooks(ctx, req, bidderCode); err != nil {
 		logger.Log.Error().

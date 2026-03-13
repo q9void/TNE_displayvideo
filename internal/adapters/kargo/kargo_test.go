@@ -451,6 +451,106 @@ func TestMakeRequests_MissingPlacementId(t *testing.T) {
 	}
 }
 
+func TestMakeRequests_SetsUserBuyerUID(t *testing.T) {
+	adapter := New("")
+
+	impExt := json.RawMessage(`{"kargo":{"placementId":"test-placement-123"}}`)
+	userExt := json.RawMessage(`{"eids":[{"source":"kargo.com","uids":[{"id":"kargo-uid-abc","atype":1}]}]}`)
+
+	request := &openrtb.BidRequest{
+		ID: "test-request-1",
+		Imp: []openrtb.Imp{
+			{ID: "imp-1", Banner: &openrtb.Banner{W: 300, H: 250}, Ext: impExt},
+		},
+		User: &openrtb.User{Ext: userExt},
+		Site: &openrtb.Site{Domain: "example.com"},
+	}
+
+	requests, errs := adapter.MakeRequests(request, nil)
+	if len(errs) > 0 {
+		t.Fatalf("Unexpected errors: %v", errs)
+	}
+
+	var parsed openrtb.BidRequest
+	if err := json.Unmarshal(requests[0].Body, &parsed); err != nil {
+		t.Fatalf("Failed to parse request body: %v", err)
+	}
+
+	if parsed.User == nil {
+		t.Fatal("Expected user to be set")
+	}
+	if parsed.User.BuyerUID != "kargo-uid-abc" {
+		t.Errorf("Expected buyeruid 'kargo-uid-abc', got '%s'", parsed.User.BuyerUID)
+	}
+}
+
+func TestMakeRequests_PopulatesTopLevelEIDs(t *testing.T) {
+	adapter := New("")
+
+	impExt := json.RawMessage(`{"kargo":{"placementId":"test-placement-123"}}`)
+	userExt := json.RawMessage(`{"eids":[{"source":"kargo.com","uids":[{"id":"kargo-uid-abc","atype":1}]},{"source":"liveramp.com","uids":[{"id":"lr-uid-xyz","atype":3}]}]}`)
+
+	request := &openrtb.BidRequest{
+		ID: "test-request-1",
+		Imp: []openrtb.Imp{
+			{ID: "imp-1", Banner: &openrtb.Banner{W: 300, H: 250}, Ext: impExt},
+		},
+		User: &openrtb.User{Ext: userExt}, // EIDs only in ext, not top-level
+		Site: &openrtb.Site{Domain: "example.com"},
+	}
+
+	requests, errs := adapter.MakeRequests(request, nil)
+	if len(errs) > 0 {
+		t.Fatalf("Unexpected errors: %v", errs)
+	}
+
+	var parsed openrtb.BidRequest
+	if err := json.Unmarshal(requests[0].Body, &parsed); err != nil {
+		t.Fatalf("Failed to parse request body: %v", err)
+	}
+
+	if parsed.User == nil {
+		t.Fatal("Expected user to be set")
+	}
+	if len(parsed.User.EIDs) != 2 {
+		t.Errorf("Expected 2 top-level EIDs, got %d", len(parsed.User.EIDs))
+	}
+}
+
+func TestMakeRequests_SetsPublisherID(t *testing.T) {
+	adapter := New("")
+
+	impExt := json.RawMessage(`{"kargo":{"placementId":"test-placement-123"}}`)
+
+	request := &openrtb.BidRequest{
+		ID: "test-request-1",
+		Imp: []openrtb.Imp{
+			{ID: "imp-1", Banner: &openrtb.Banner{W: 300, H: 250}, Ext: impExt},
+		},
+		Site: &openrtb.Site{
+			Domain:    "example.com",
+			Publisher: &openrtb.Publisher{}, // Publisher present but ID empty
+		},
+	}
+
+	requests, errs := adapter.MakeRequests(request, nil)
+	if len(errs) > 0 {
+		t.Fatalf("Unexpected errors: %v", errs)
+	}
+
+	var parsed openrtb.BidRequest
+	if err := json.Unmarshal(requests[0].Body, &parsed); err != nil {
+		t.Fatalf("Failed to parse request body: %v", err)
+	}
+
+	if parsed.Site == nil || parsed.Site.Publisher == nil {
+		t.Fatal("Expected site.publisher to be set")
+	}
+	if parsed.Site.Publisher.ID != "NXS001" {
+		t.Errorf("Expected publisher.id 'NXS001', got '%s'", parsed.Site.Publisher.ID)
+	}
+}
+
 func TestMakeRequests_EmptyPlacementId(t *testing.T) {
 	adapter := New("")
 
