@@ -982,11 +982,11 @@ func TestValidateRequest(t *testing.T) {
 			errContains: "duplicate",
 		},
 		{
-			name:        "missing site and app",
+			name:        "missing site and app and dooh",
 			request:     &openrtb.BidRequest{ID: "req1", Imp: []openrtb.Imp{{ID: "imp1"}}},
 			wantErr:     true,
-			errField:    "site/app",
-			errContains: "either site or app",
+			errField:    "site/app/dooh",
+			errContains: "one of site, app, or dooh",
 		},
 		{
 			name: "both site and app present",
@@ -997,8 +997,8 @@ func TestValidateRequest(t *testing.T) {
 				Imp:  []openrtb.Imp{{ID: "imp1"}},
 			},
 			wantErr:     true,
-			errField:    "site/app",
-			errContains: "cannot contain both",
+			errField:    "site/app/dooh",
+			errContains: "only one of site, app, or dooh",
 		},
 		{
 			name:        "tmax too low",
@@ -1098,10 +1098,10 @@ func TestValidateRequestInRunAuction(t *testing.T) {
 		t.Error("expected validation error, got nil")
 	}
 
-	// The early validation in RunAuction returns a plain error for site/app check
+	// The early validation in RunAuction returns a plain error for site/app/dooh check
 	// (before the formal ValidateRequest call), so we check for the error message
-	if !containsString(err.Error(), "site") && !containsString(err.Error(), "app") {
-		t.Errorf("expected site/app validation error, got: %v", err)
+	if !containsString(err.Error(), "site") && !containsString(err.Error(), "app") && !containsString(err.Error(), "dooh") {
+		t.Errorf("expected site/app/dooh validation error, got: %v", err)
 	}
 }
 
