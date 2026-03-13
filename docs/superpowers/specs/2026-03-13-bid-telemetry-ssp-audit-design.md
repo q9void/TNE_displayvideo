@@ -63,9 +63,9 @@ Five new structured log checkpoints. All use existing `zerolog` patterns. No new
 | ID | Fires | Location | Key fields |
 |---|---|---|---|
 | CP-1 | 1× per auction | `catalyst_bid_handler.go` after `convertToOpenRTB()` | `eids_top_level`, `eids_in_ext`, `publisher_id`, `schain_nodes`, `us_privacy` |
-| CP-2 | 1× per auction | `exchange/exchange.go` after hooks, before bidder loop | Per-EID: `source`, `uid_count`, `location` (user.eids / user.ext.eids). Warn if UID in ext only. |
-| CP-3 | N× per auction | `exchange/exchange.go` existing HTTP request log | Add `request_headers` field (extend existing log line) |
-| CP-4 | N× per auction | `exchange/exchange.go` after HTTP call, when status ≠ 200 | `response_headers`, `rejection_reason` (X-Rejection-Reason), `x_error` (X-Error) |
+| CP-2 | 1× per auction | `exchange/exchange.go` after hooks, before bidder loop | Per-EID: `source`, `uid_count`, `location`. `location` values: `"user.eids"` (top-level, correct), `"user.ext.eids"` (legacy, SSPs won't see it), `"both"`. Emit WARN when `location == "user.ext.eids"`. |
+| CP-3 | N× per auction | `exchange/exchange.go` existing HTTP request log | Add `request_headers` field (extend existing log line). Keys canonical (Go `http.Header` default). Multi-value headers joined with `, `. |
+| CP-4 | N× per auction | `exchange/exchange.go` after HTTP call, when status ≠ 200 | `response_headers` (full, same format as CP-3). `rejection_reason` = value of `X-Rejection-Reason` response header (empty string if absent). `x_error` = value of `X-Error` response header (empty string if absent). |
 | CP-5 | 1× per auction | `exchange/exchange.go` after all bidder goroutines complete | `ssp_results: [{bidder, status, latency_ms, had_bids, rejection_header}]` |
 
 ### Shared helper
@@ -76,7 +76,7 @@ One new function in `exchange/exchange.go`:
 func flattenHeaders(h http.Header) map[string]string
 ```
 
-Converts `http.Header` (map[string][]string) to flat map for clean JSON logging. Used by CP-3 and CP-4. ~8 lines.
+Converts `http.Header` (map[string][]string) to flat map for clean JSON logging. Used by CP-3 and CP-4. ~8 lines. Keys are kept in Go canonical form (e.g. `Content-Type`, not `content-type`). Multiple values for the same key are joined with `", "` (RFC 7230 list format).
 
 ### Log format example (CP-5)
 
@@ -117,9 +117,11 @@ Specifically: when iterating `eids` to build `user.ext.eids` JSON, simultaneousl
 **File:** `internal/adapters/kargo/kargo.go`
 **Function:** `MakeRequests()`
 
-**Change:** Remove the `site.publisher.id = "NXS001"` override. Pass whatever `site.publisher.id` comes in from the upstream request. If Kargo requires a specific publisher ID, that should come from Bizbudding's configuration, not be hardcoded to our internal ID.
+**Change:** Remove the `site.publisher.id = "NXS001"` override. Pass whatever `site.publisher.id` comes in from the upstream request.
 
-**Dependency:** Before deploying, confirm with Bizbudding what publisher ID Kargo expects (if any). CP-4 response headers after the first fix deploy may reveal the answer.
+**Fallback:** If Bizbudding cannot confirm the correct value within a reasonable timeframe, omit the field entirely (empty string / zero value). This matches Prebid's reference Kargo adapter behaviour exactly and is safe — Kargo's own sample requests show the field populated with the buyer's own publisher ID, which they manage on their side.
+
+**Note on F-3 resolution:** CP-4 telemetry will confirm whether `site.publisher.id` is the rejection cause (via response headers). It cannot supply the correct value. The correct value must come from Bizbudding's Kargo dashboard or Kargo tech support directly.
 
 ---
 
