@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	defaultEndpoint = "https://krk.kargo.com/api/v1/openrtb"
+	defaultEndpoint = "https://kraken.prod.kargo.com/api/v1/openrtb"
 )
 
 // Adapter implements the Kargo bidder
