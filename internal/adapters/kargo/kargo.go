@@ -105,16 +105,6 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		requestCopy.User = &userCopy
 	}
 
-	// 3. Set site.publisher.id
-	//    Kargo requires a publisher identifier to route to our supply configuration.
-	if requestCopy.Site != nil && requestCopy.Site.Publisher != nil && requestCopy.Site.Publisher.ID == "" {
-		publisherCopy := *requestCopy.Site.Publisher
-		publisherCopy.ID = "NXS001"
-		siteCopy := *requestCopy.Site
-		siteCopy.Publisher = &publisherCopy
-		requestCopy.Site = &siteCopy
-	}
-
 	requestBody, err := json.Marshal(requestCopy)
 	if err != nil {
 		return nil, []error{fmt.Errorf("failed to marshal request: %w", err)}

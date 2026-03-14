@@ -523,37 +523,56 @@ func TestMakeRequests_PopulatesTopLevelEIDs(t *testing.T) {
 	}
 }
 
-func TestMakeRequests_SetsPublisherID(t *testing.T) {
+func TestMakeRequests_DoesNotOverridePublisherID(t *testing.T) {
 	adapter := New("")
 
 	impExt := json.RawMessage(`{"kargo":{"placementId":"test-placement-123"}}`)
 
-	request := &openrtb.BidRequest{
-		ID: "test-request-1",
-		Imp: []openrtb.Imp{
-			{ID: "imp-1", Banner: &openrtb.Banner{W: 300, H: 250}, Ext: impExt},
+	tests := []struct {
+		name          string
+		incomingPubID string
+		expectedPubID string
+	}{
+		{
+			name:          "passes through non-empty publisher ID",
+			incomingPubID: "bizbudding-pub-id",
+			expectedPubID: "bizbudding-pub-id",
 		},
-		Site: &openrtb.Site{
-			Domain:    "example.com",
-			Publisher: &openrtb.Publisher{}, // Publisher present but ID empty
+		{
+			name:          "passes through empty publisher ID unchanged",
+			incomingPubID: "",
+			expectedPubID: "",
 		},
 	}
 
-	requests, errs := adapter.MakeRequests(request, nil)
-	if len(errs) > 0 {
-		t.Fatalf("Unexpected errors: %v", errs)
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			request := &openrtb.BidRequest{
+				ID:  "test-request-1",
+				Imp: []openrtb.Imp{{ID: "imp-1", Banner: &openrtb.Banner{W: 300, H: 250}, Ext: impExt}},
+				Site: &openrtb.Site{
+					Domain:    "example.com",
+					Publisher: &openrtb.Publisher{ID: tc.incomingPubID},
+				},
+			}
 
-	var parsed openrtb.BidRequest
-	if err := json.Unmarshal(requests[0].Body, &parsed); err != nil {
-		t.Fatalf("Failed to parse request body: %v", err)
-	}
+			requests, errs := adapter.MakeRequests(request, nil)
+			if len(errs) > 0 {
+				t.Fatalf("Unexpected errors: %v", errs)
+			}
 
-	if parsed.Site == nil || parsed.Site.Publisher == nil {
-		t.Fatal("Expected site.publisher to be set")
-	}
-	if parsed.Site.Publisher.ID != "NXS001" {
-		t.Errorf("Expected publisher.id 'NXS001', got '%s'", parsed.Site.Publisher.ID)
+			var parsed openrtb.BidRequest
+			if err := json.Unmarshal(requests[0].Body, &parsed); err != nil {
+				t.Fatalf("Failed to parse request body: %v", err)
+			}
+
+			if parsed.Site == nil || parsed.Site.Publisher == nil {
+				t.Fatal("Expected site.publisher to be present")
+			}
+			if parsed.Site.Publisher.ID != tc.expectedPubID {
+				t.Errorf("expected publisher.id %q, got %q", tc.expectedPubID, parsed.Site.Publisher.ID)
+			}
+		})
 	}
 }
 
