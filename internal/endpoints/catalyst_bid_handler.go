@@ -290,6 +290,35 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// CP-1: OpenRTB scaffold audit — state before any hook runs
+	eidsTopLevel := 0
+	eidsInExt := 0
+	if ortbReq.User != nil {
+		eidsTopLevel = len(ortbReq.User.EIDs)
+		eidsInExt = countExtEIDs(ortbReq.User.Ext)
+	}
+	publisherID := ""
+	schainNodes := 0
+	if ortbReq.Site != nil && ortbReq.Site.Publisher != nil {
+		publisherID = ortbReq.Site.Publisher.ID
+	}
+	if ortbReq.Source != nil && ortbReq.Source.SChain != nil {
+		schainNodes = len(ortbReq.Source.SChain.Nodes)
+	}
+	usPrivacy := ""
+	if ortbReq.Regs != nil {
+		usPrivacy = ortbReq.Regs.USPrivacy
+	}
+	log.Debug().
+		Str("request_id", ortbReq.ID).
+		Int("imp_count", len(ortbReq.Imp)).
+		Int("eids_top_level", eidsTopLevel).
+		Int("eids_in_ext", eidsInExt).
+		Str("publisher_id", publisherID).
+		Int("schain_nodes", schainNodes).
+		Str("us_privacy", usPrivacy).
+		Msg("CP-1: OpenRTB scaffold built")
+
 	// If every slot was skipped (no bidder config found), return empty bids immediately
 	// without touching the exchange — avoids spurious circuit breaker trips.
 	if len(ortbReq.Imp) == 0 {
@@ -521,9 +550,11 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 			}
 
 			imp.Video = &openrtb.Video{
-				W:     videoWidth,
-				H:     videoHeight,
-				Mimes: mimes,
+				W:         videoWidth,
+				H:         videoHeight,
+				Mimes:     mimes,
+				Protocols: []int{2, 3, 5, 6, 7, 8}, // VAST 2.0, 3.0, 4.0 + Wrappers (no VPAID)
+				Linearity: 1,                        // Linear only
 			}
 		}
 
@@ -1171,16 +1202,38 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 			for _, eid := range eids {
 				src, _ := eid["source"].(string)
 				typed := openrtb.EID{Source: src}
-				if rawUIDs, ok := eid["uids"].([]map[string]interface{}); ok {
+
+				// uids may be []map[string]interface{} (built in-process) or
+				// []interface{} (JSON-decoded from Prebid ID module). Handle both.
+				switch rawUIDs := eid["uids"].(type) {
+				case []map[string]interface{}:
 					for _, u := range rawUIDs {
 						uid := openrtb.UID{}
 						if id, ok := u["id"].(string); ok {
 							uid.ID = id
 						}
-						if atype, ok := u["atype"].(int); ok {
-							uid.AType = atype
+						// atype may be int (in-process literal) or float64 (JSON-decoded).
+						switch v := u["atype"].(type) {
+						case int:
+							uid.AType = v
+						case float64:
+							uid.AType = int(v)
 						}
 						typed.UIDs = append(typed.UIDs, uid)
+					}
+				case []interface{}:
+					for _, raw := range rawUIDs {
+						if u, ok := raw.(map[string]interface{}); ok {
+							uid := openrtb.UID{}
+							if id, ok := u["id"].(string); ok {
+								uid.ID = id
+							}
+							// JSON numbers decode as float64
+							if atype, ok := u["atype"].(float64); ok {
+								uid.AType = int(atype)
+							}
+							typed.UIDs = append(typed.UIDs, uid)
+						}
 					}
 				}
 				typedEIDs = append(typedEIDs, typed)
@@ -1556,4 +1609,19 @@ func detectDeviceType(userAgent string) string {
 	}
 
 	return "desktop"
+}
+
+// countExtEIDs returns the number of EID entries in user.ext.eids JSON.
+// Used by CP-1 telemetry to compare top-level vs ext EID counts.
+func countExtEIDs(ext json.RawMessage) int {
+	if len(ext) == 0 {
+		return 0
+	}
+	var parsed struct {
+		EIDs []json.RawMessage `json:"eids"`
+	}
+	if err := json.Unmarshal(ext, &parsed); err != nil {
+		return 0
+	}
+	return len(parsed.EIDs)
 }

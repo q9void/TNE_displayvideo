@@ -515,6 +515,12 @@ func TestMakeRequests_PopulatesTopLevelEIDs(t *testing.T) {
 	if len(parsed.User.EIDs) != 2 {
 		t.Errorf("Expected 2 top-level EIDs, got %d", len(parsed.User.EIDs))
 	}
+	// Verify that UIDs are promoted from user.ext.eids — not just the source name.
+	for _, eid := range parsed.User.EIDs {
+		if len(eid.UIDs) == 0 {
+			t.Errorf("EID source %q has no UIDs — expected UIDs promoted from user.ext.eids", eid.Source)
+		}
+	}
 }
 
 func TestMakeRequests_SetsPublisherID(t *testing.T) {
