@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -22,6 +23,16 @@ import (
 	"github.com/thenexusengine/tne_springwire/pkg/idr"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 )
+
+// flattenHeaders converts http.Header to a flat map for structured logging.
+// Multi-value headers are joined with ", " (RFC 7230). Keys are kept canonical.
+func flattenHeaders(h http.Header) map[string]string {
+	out := make(map[string]string, len(h))
+	for k, vals := range h {
+		out[k] = strings.Join(vals, ", ")
+	}
+	return out
+}
 
 // ValidationError represents a client validation error (results in 4xx response)
 type ValidationError struct {
@@ -398,7 +409,9 @@ type BidderResult struct {
 	Latency    time.Duration
 	Selected   bool
 	Score      float64
-	TimedOut   bool // P2-2: indicates if the bidder request timed out
+	TimedOut        bool   // P2-2: indicates if the bidder request timed out
+	LastStatusCode  int    // CP-5: HTTP status from the last SSP response (0 if no response)
+	RejectionReason string // CP-5: Value of X-Rejection-Reason response header if present
 }
 
 // DebugInfo contains debug information
@@ -1526,6 +1539,68 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 		}
 	}
 
+
+	// CP-2: EID field mapping audit — detect UIDs orphaned in user.ext.eids
+	if req.BidRequest.User != nil {
+		// Index top-level EIDs by source
+		topLevelSources := make(map[string]int) // source → uid count
+		for _, eid := range req.BidRequest.User.EIDs {
+			topLevelSources[eid.Source] = len(eid.UIDs)
+		}
+
+		// Walk ext.eids and cross-reference
+		var extEIDsRaw []struct {
+			Source string            `json:"source"`
+			UIDs   []json.RawMessage `json:"uids"`
+		}
+		if len(req.BidRequest.User.Ext) > 0 {
+			var userExt struct {
+				EIDs json.RawMessage `json:"eids"`
+			}
+			if err := json.Unmarshal(req.BidRequest.User.Ext, &userExt); err == nil && len(userExt.EIDs) > 0 {
+				_ = json.Unmarshal(userExt.EIDs, &extEIDsRaw)
+			}
+		}
+
+		extSources := make(map[string]int)
+		for _, eid := range extEIDsRaw {
+			extSources[eid.Source] = len(eid.UIDs)
+		}
+
+		// Log per source — flag orphans
+		allSources := make(map[string]struct{})
+		for s := range topLevelSources {
+			allSources[s] = struct{}{}
+		}
+		for s := range extSources {
+			allSources[s] = struct{}{}
+		}
+
+		for source := range allSources {
+			inTop := topLevelSources[source]
+			inExt := extSources[source]
+			location := "user.eids"
+			if inTop > 0 && inExt > 0 {
+				location = "both"
+			}
+			if inTop == 0 && inExt > 0 {
+				location = "user.ext.eids"
+			}
+
+			logEvent := logger.Log.Debug()
+			if location == "user.ext.eids" {
+				logEvent = logger.Log.Warn()
+			}
+			logEvent.
+				Str("request_id", req.BidRequest.ID).
+				Str("eid_source", source).
+				Int("uid_count_top", inTop).
+				Int("uid_count_ext", inExt).
+				Str("location", location).
+				Msg("CP-2: EID mapping")
+		}
+	}
+
 	// Call bidders in parallel
 	results := e.callBiddersWithFPD(ctx, req.BidRequest, selectedBidders, timeout, bidderFPD)
 
@@ -2359,6 +2434,40 @@ func (e *Exchange) callBiddersWithFPD(ctx context.Context, req *openrtb.BidReque
 		}
 		return true
 	})
+	// CP-5: Single auction summary -- one grep-able record per auction
+	type sspResult struct {
+		Bidder          string  `json:"bidder"`
+		Status          int     `json:"status"`
+		LatencyMS       float64 `json:"latency_ms"`
+		HadBids         bool    `json:"had_bids"`
+		RejectionReason string  `json:"rejection_reason,omitempty"`
+	}
+	summary := make([]sspResult, 0, len(finalResults))
+	totalBids := 0
+	for bidder, r := range finalResults {
+		summary = append(summary, sspResult{
+			Bidder:          bidder,
+			Status:          r.LastStatusCode,
+			LatencyMS:       r.Latency.Seconds() * 1000,
+			HadBids:         len(r.Bids) > 0,
+			RejectionReason: r.RejectionReason,
+		})
+		totalBids += len(r.Bids)
+	}
+	summaryJSON, _ := json.Marshal(summary)
+	logger.Log.Info().
+		Str("request_id", req.ID).
+		Str("domain", func() string {
+			if req.Site != nil {
+				return req.Site.Domain
+			}
+			return ""
+		}()).
+		Int("bidders_fired", len(finalResults)).
+		Int("total_bids", totalBids).
+		RawJSON("ssp_results", summaryJSON).
+		Msg("CP-5: Auction summary")
+
 	return finalResults
 }
 
@@ -2660,7 +2769,33 @@ func (e *Exchange) augmentSChain(req *openrtb.BidRequest, bidderCode string) {
 		}
 	}
 
-	// Append platform node if not already present
+	// Partner (Bizbudding) node - prepended before platform node.
+	// Bizbudding holds the direct SSP relationships; we resell through them.
+	partnerASI := "bizbudding.com"
+	bizbuddingSellerIDs := map[string]string{
+		"kargo": "9039",
+		// Add Bizbudding's seller ID at other SSPs as they are confirmed
+	}
+	if partnerSID, ok := bizbuddingSellerIDs[bidderCode]; ok {
+		hasPartnerNode := false
+		for _, node := range req.Source.SChain.Nodes {
+			if node.ASI == partnerASI {
+				hasPartnerNode = true
+				break
+			}
+		}
+		if !hasPartnerNode {
+			partnerNode := openrtb.SupplyChainNode{
+				ASI: partnerASI,
+				SID: partnerSID,
+				HP:  1,
+			}
+			// Prepend so chain reads: Bizbudding → TheNexusEngine
+			req.Source.SChain.Nodes = append([]openrtb.SupplyChainNode{partnerNode}, req.Source.SChain.Nodes...)
+		}
+	}
+
+	// Platform (TheNexusEngine) node
 	platformASI := "thenexusengine.com"
 
 	// Per-bidder seller IDs assigned by each SSP
@@ -2691,10 +2826,6 @@ func (e *Exchange) augmentSChain(req *openrtb.BidRequest, bidderCode string) {
 		}
 		req.Source.SChain.Nodes = append(req.Source.SChain.Nodes, platformNode)
 	}
-
-	// Optionally append bidder node (if bidder is acting as intermediary)
-	// For now, we don't add bidder nodes as they receive the request directly
-	// This could be configured per-bidder if needed
 }
 
 // deepCloneRequest creates a deep copy of the BidRequest to avoid race conditions
@@ -3054,6 +3185,7 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 				Str("bidder", bidderCode).
 				Str("uri", reqData.URI).
 				Str("method", reqData.Method).
+				Interface("request_headers", flattenHeaders(reqData.Headers)).
 				Str("request_body", requestPreview).
 				Msg("Making HTTP request to bidder")
 
@@ -3078,19 +3210,35 @@ func (e *Exchange) callBidder(ctx context.Context, req *openrtb.BidRequest, bidd
 			}
 		}
 
-		// Log successful HTTP response for visibility
+		// Log HTTP response
 		responsePreview := string(resp.Body)
 		if len(responsePreview) > 500 {
 			responsePreview = responsePreview[:500] + "..."
 		}
-		logger.Log.Debug().
+		respLog := logger.Log.Debug().
 			Str("bidder", bidderCode).
 			Str("uri", reqData.URI).
 			Int("status_code", resp.StatusCode).
 			Int("body_size", len(resp.Body)).
 			Str("response_preview", responsePreview).
-			Dur("elapsed", time.Since(start)).
-			Msg("bidder HTTP response received")
+			Dur("elapsed", time.Since(start))
+		// CP-4: On non-200, log all response headers — SSPs often include rejection reasons
+		if resp.StatusCode != http.StatusOK {
+			respLog = respLog.Interface("response_headers", flattenHeaders(resp.Headers))
+			if reason := resp.Headers.Get("X-Rejection-Reason"); reason != "" {
+				respLog = respLog.Str("rejection_reason", reason)
+			}
+			if xErr := resp.Headers.Get("X-Error"); xErr != "" {
+				respLog = respLog.Str("x_error", xErr)
+			}
+		}
+		respLog.Msg("bidder HTTP response received")
+
+		// CP-5: track last HTTP status and any rejection header
+		result.LastStatusCode = resp.StatusCode
+		if resp.StatusCode != http.StatusOK {
+			result.RejectionReason = resp.Headers.Get("X-Rejection-Reason")
+		}
 
 		bidderResp, errs := adapter.MakeBids(req, resp)
 
