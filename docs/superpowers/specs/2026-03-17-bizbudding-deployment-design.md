@@ -104,7 +104,14 @@ ads.bizbudding.com, [triplelift-account-id], DIRECT, 6c33edb13117fd86
 ads.bizbudding.com, [kargo-account-id], DIRECT
 ```
 
-**Publisher config:** Default publisher is Bizbudding (`domain: bizbudding.com`). The existing `slot_bidder_configs` and `publishers_new` tables in PostgreSQL are the source of truth for placement→SSP mappings. The existing `bizbudding-all-bidders-mapping.json` (currently wired to `totalprosports.com` with publisher ID `12345` — these are TotalProSports values, not Bizbudding values) cannot be used directly. **Pre-implementation blocker:** The correct Bizbudding slot names, SSP-specific account/site/zone IDs per slot, and publisher IDs must be collected from Bizbudding before the seed migration can be written. Seed script skeleton provided in `migrations/007b_seed_bizbudding_placements.sql` with `[PLACEHOLDER]` values to fill in.
+**Publisher config:** Default publisher is Bizbudding (`domain: bizbudding.com`). The existing `slot_bidder_configs` and `publishers_new` tables in PostgreSQL are the source of truth for placement→SSP mappings. Resolved: SSP params extracted from Demand Manager xlsx exports (2026-03-17) and committed as `migrations/007_bizbudding_complete_seed.sql`. Covers totalprosports.com, lamag.com, and insidetailgating.com — all Bizbudding network domains. All idempotent (ON CONFLICT DO UPDATE). **Blocker cleared.**
+
+Also discovered from xlsx files: two additional SSPs are active in the Bizbudding network that were not in the original 5 default bidders:
+- **Axonix** — `supplyId: 4311ace9-d8cd-437e-bf21-0bae2d463eb0` (all three domains)
+- **Aniview** — `AV_PUBLISHERID / AV_CHANNELID` (totalprosports + lamag only)
+- **OMS** — `publisherId: 21146` (totalprosports only)
+
+Axonix adapter exists in the repo (`internal/adapters/` + migration 002). Aniview and OMS adapters need to be verified or added.
 
 **Default active bidders:** Rubicon, Kargo, Sovrn, Pubmatic, TripleLift.
 
