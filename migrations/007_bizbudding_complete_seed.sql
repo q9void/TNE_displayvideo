@@ -3,7 +3,9 @@
 -- Full SSP placement configs for all Bizbudding network domains
 -- Generated from Demand Manager xlsx exports 2026-03-17
 -- Domains: totalprosports.com, lamag.com, insidetailgating.com
--- SSPs: rubicon, kargo, sovrn, oms, aniview, pubmatic, triplelift, axonix
+-- SSPs: rubicon, kargo, sovrn, pubmatic, triplelift, axonix
+-- Phase 2: oms, axonix (adapters to be built)
+-- Removed: aniview (not used)
 -- ==============================================================
 
 BEGIN;
@@ -13,7 +15,6 @@ INSERT INTO bidders_new (code, name, status, pbs_adapter_name) VALUES ('rubicon'
 INSERT INTO bidders_new (code, name, status, pbs_adapter_name) VALUES ('kargo', 'Kargo', 'active', 'kargo') ON CONFLICT (code) DO UPDATE SET status='active', updated_at=NOW();
 INSERT INTO bidders_new (code, name, status, pbs_adapter_name) VALUES ('sovrn', 'Sovrn', 'active', 'sovrn') ON CONFLICT (code) DO UPDATE SET status='active', updated_at=NOW();
 INSERT INTO bidders_new (code, name, status, pbs_adapter_name) VALUES ('oms', 'OMS', 'active', 'oms') ON CONFLICT (code) DO UPDATE SET status='active', updated_at=NOW();
-INSERT INTO bidders_new (code, name, status, pbs_adapter_name) VALUES ('aniview', 'Aniview', 'active', 'aniview') ON CONFLICT (code) DO UPDATE SET status='active', updated_at=NOW();
 INSERT INTO bidders_new (code, name, status, pbs_adapter_name) VALUES ('pubmatic', 'PubMatic', 'active', 'pubmatic') ON CONFLICT (code) DO UPDATE SET status='active', updated_at=NOW();
 INSERT INTO bidders_new (code, name, status, pbs_adapter_name) VALUES ('triplelift', 'TripleLift', 'active', 'triplelift') ON CONFLICT (code) DO UPDATE SET status='active', updated_at=NOW();
 INSERT INTO bidders_new (code, name, status, pbs_adapter_name) VALUES ('axonix', 'Axonix', 'active', 'axonix') ON CONFLICT (code) DO UPDATE SET status='active', updated_at=NOW();
@@ -95,12 +96,6 @@ WHERE a.slot_pattern='totalprosports.com/billboard' AND b.code='oms'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/billboard' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'desktop', '{"publisherId": "166938", "adSlot": "7079290"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/billboard' AND b.code='pubmatic'
@@ -140,12 +135,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'desktop', '{"publisherId": "21146"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/billboard-wide' AND b.code='oms'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/billboard-wide' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -191,12 +180,6 @@ WHERE a.slot_pattern='totalprosports.com/leaderboard' AND b.code='oms'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/leaderboard' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'desktop', '{"publisherId": "166938", "adSlot": "7079290"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/leaderboard' AND b.code='pubmatic'
@@ -236,12 +219,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'desktop', '{"publisherId": "21146"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/leaderboard-wide' AND b.code='oms'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/leaderboard-wide' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -287,12 +264,6 @@ WHERE a.slot_pattern='totalprosports.com/rectangle-medium' AND b.code='oms'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/rectangle-medium' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'desktop', '{"publisherId": "166938", "adSlot": "7079290"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/rectangle-medium' AND b.code='pubmatic'
@@ -332,12 +303,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'desktop', '{"publisherId": "21146"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/skyscraper' AND b.code='oms'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/skyscraper' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -383,12 +348,6 @@ WHERE a.slot_pattern='totalprosports.com/skyscraper-wide' AND b.code='oms'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/skyscraper-wide' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'desktop', '{"publisherId": "166938", "adSlot": "7079290"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/skyscraper-wide' AND b.code='pubmatic'
@@ -428,12 +387,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'desktop', '{"publisherId": "21146"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/rectangle-medium-adhesion' AND b.code='oms'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/rectangle-medium-adhesion' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -479,12 +432,6 @@ WHERE a.slot_pattern='totalprosports.com/skyscraper-wide-adhesion' AND b.code='o
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/skyscraper-wide-adhesion' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'desktop', '{"publisherId": "166938", "adSlot": "7079290"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/skyscraper-wide-adhesion' AND b.code='pubmatic'
@@ -524,12 +471,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'desktop', '{"publisherId": "21146"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/leaderboard-wide-adhesion' AND b.code='oms'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/leaderboard-wide-adhesion' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -577,12 +518,6 @@ WHERE a.slot_pattern='totalprosports.com/billboard' AND b.code='oms'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/billboard' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'mobile', '{"publisherId": "166938", "adSlot": "7079290"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/billboard' AND b.code='pubmatic'
@@ -622,12 +557,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'mobile', '{"publisherId": "21146"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/billboard-wide' AND b.code='oms'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/billboard-wide' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -673,12 +602,6 @@ WHERE a.slot_pattern='totalprosports.com/leaderboard' AND b.code='oms'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/leaderboard' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'mobile', '{"publisherId": "166938", "adSlot": "7079290"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/leaderboard' AND b.code='pubmatic'
@@ -718,12 +641,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'mobile', '{"publisherId": "21146"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/leaderboard-wide' AND b.code='oms'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/leaderboard-wide' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -769,12 +686,6 @@ WHERE a.slot_pattern='totalprosports.com/rectangle-medium' AND b.code='oms'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/rectangle-medium' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'mobile', '{"publisherId": "166938", "adSlot": "7079290"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/rectangle-medium' AND b.code='pubmatic'
@@ -811,12 +722,6 @@ WHERE a.slot_pattern='totalprosports.com/skyscraper' AND b.code='oms'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/skyscraper' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'mobile', '{"publisherId": "166938", "adSlot": "7079290"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/skyscraper' AND b.code='pubmatic'
@@ -850,12 +755,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'mobile', '{"publisherId": "21146"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/skyscraper-wide' AND b.code='oms'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/skyscraper-wide' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -901,12 +800,6 @@ WHERE a.slot_pattern='totalprosports.com/rectangle-medium-adhesion' AND b.code='
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/rectangle-medium-adhesion' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'mobile', '{"publisherId": "166938", "adSlot": "7079290"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/rectangle-medium-adhesion' AND b.code='pubmatic'
@@ -940,12 +833,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'mobile', '{"publisherId": "21146"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/skyscraper-wide-adhesion' AND b.code='oms'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/skyscraper-wide-adhesion' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -988,12 +875,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'mobile', '{"publisherId": "21146"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='totalprosports.com/leaderboard-wide-adhesion' AND b.code='oms'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "6806a79f20173d1cde0a4895"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='totalprosports.com/leaderboard-wide-adhesion' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='totalprosports.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -1080,12 +961,6 @@ WHERE a.slot_pattern='lamag.com/billboard' AND b.code='sovrn'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/billboard' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'desktop', '{"placementId": "_w52KSHRNjm"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/billboard' AND b.code='kargo'
@@ -1119,12 +994,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'desktop', '{"tagid": "1288536"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/billboard-wide' AND b.code='sovrn'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/billboard-wide' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -1164,12 +1033,6 @@ WHERE a.slot_pattern='lamag.com/leaderboard' AND b.code='sovrn'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/leaderboard' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'desktop', '{"placementId": "_w52KSHRNjm"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/leaderboard' AND b.code='kargo'
@@ -1203,12 +1066,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'desktop', '{"tagid": "1288534"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/leaderboard-wide' AND b.code='sovrn'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/leaderboard-wide' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -1248,12 +1105,6 @@ WHERE a.slot_pattern='lamag.com/rectangle-medium' AND b.code='sovrn'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/rectangle-medium' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'desktop', '{"placementId": "_hRjeN3QUzD"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/rectangle-medium' AND b.code='kargo'
@@ -1287,12 +1138,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'desktop', '{"tagid": "1288537"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/skyscraper' AND b.code='sovrn'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/skyscraper' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -1332,12 +1177,6 @@ WHERE a.slot_pattern='lamag.com/skyscraper-wide' AND b.code='sovrn'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/skyscraper-wide' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'desktop', '{"placementId": "_ulDVHh4kmG"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/skyscraper-wide' AND b.code='kargo'
@@ -1371,12 +1210,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'desktop', '{"tagid": "1294709"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/leaderboard-wide-adhesion' AND b.code='sovrn'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/leaderboard-wide-adhesion' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -1416,12 +1249,6 @@ WHERE a.slot_pattern='lamag.com/rectangle-medium-adhesion' AND b.code='sovrn'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/rectangle-medium-adhesion' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'desktop', '{"placementId": "_hRjeN3QUzD"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/rectangle-medium-adhesion' AND b.code='kargo'
@@ -1455,12 +1282,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'desktop', '{"tagid": "1294711"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/skyscraper-wide-adhesion' AND b.code='sovrn'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'desktop', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/skyscraper-wide-adhesion' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -1502,12 +1323,6 @@ WHERE a.slot_pattern='lamag.com/billboard' AND b.code='sovrn'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/billboard' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'mobile', '{"placementId": "_pqqleFeYkE"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/billboard' AND b.code='kargo'
@@ -1541,12 +1356,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'mobile', '{"tagid": "1288536"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/billboard-wide' AND b.code='sovrn'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/billboard-wide' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -1586,12 +1395,6 @@ WHERE a.slot_pattern='lamag.com/leaderboard' AND b.code='sovrn'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/leaderboard' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'mobile', '{"placementId": "_gaNAXtp16e"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/leaderboard' AND b.code='kargo'
@@ -1625,12 +1428,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'mobile', '{"tagid": "1288534"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/leaderboard-wide' AND b.code='sovrn'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/leaderboard-wide' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -1670,12 +1467,6 @@ WHERE a.slot_pattern='lamag.com/rectangle-medium' AND b.code='sovrn'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/rectangle-medium' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'mobile', '{"placementId": "_pqqleFeYkE"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/rectangle-medium' AND b.code='kargo'
@@ -1712,12 +1503,6 @@ WHERE a.slot_pattern='lamag.com/skyscraper' AND b.code='sovrn'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/skyscraper' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'mobile', '{"publisherId": "166938", "adSlot": "7079278"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/skyscraper' AND b.code='pubmatic'
@@ -1748,12 +1533,6 @@ WHERE a.slot_pattern='lamag.com/skyscraper-wide' AND b.code='sovrn'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/skyscraper-wide' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'mobile', '{"publisherId": "166938", "adSlot": "7079278"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/skyscraper-wide' AND b.code='pubmatic'
@@ -1781,12 +1560,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'mobile', '{"tagid": "1294709"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/leaderboard-wide-adhesion' AND b.code='sovrn'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/leaderboard-wide-adhesion' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
@@ -1826,12 +1599,6 @@ WHERE a.slot_pattern='lamag.com/rectangle-medium-adhesion' AND b.code='sovrn'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/rectangle-medium-adhesion' AND b.code='aniview'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
 SELECT a.id, b.id, 'mobile', '{"placementId": "_pqqleFeYkE"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/rectangle-medium-adhesion' AND b.code='kargo'
@@ -1865,12 +1632,6 @@ INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_para
 SELECT a.id, b.id, 'mobile', '{"tagid": "1294711"}'::jsonb, 'active'
 FROM ad_slots a, bidders_new b
 WHERE a.slot_pattern='lamag.com/skyscraper-wide-adhesion' AND b.code='sovrn'
-  AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
-ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
-INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)
-SELECT a.id, b.id, 'mobile', '{"AV_PUBLISHERID": "66aa757144c99c7ca504e937", "AV_CHANNELID": "68cfb39a02fdf0f37e053f28"}'::jsonb, 'active'
-FROM ad_slots a, bidders_new b
-WHERE a.slot_pattern='lamag.com/skyscraper-wide-adhesion' AND b.code='aniview'
   AND a.publisher_id=(SELECT id FROM publishers_new WHERE domain='lamag.com' AND account_id=(SELECT id FROM accounts WHERE account_id='12345'))
 ON CONFLICT (ad_slot_id, bidder_id, device_type) DO UPDATE SET bidder_params=EXCLUDED.bidder_params, updated_at=NOW();
 INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params, status)

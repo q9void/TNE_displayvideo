@@ -106,14 +106,15 @@ ads.bizbudding.com, [kargo-account-id], DIRECT
 
 **Publisher config:** Default publisher is Bizbudding (`domain: bizbudding.com`). The existing `slot_bidder_configs` and `publishers_new` tables in PostgreSQL are the source of truth for placement→SSP mappings. Resolved: SSP params extracted from Demand Manager xlsx exports (2026-03-17) and committed as `migrations/007_bizbudding_complete_seed.sql`. Covers totalprosports.com, lamag.com, and insidetailgating.com — all Bizbudding network domains. All idempotent (ON CONFLICT DO UPDATE). **Blocker cleared.**
 
-Also discovered from xlsx files: two additional SSPs are active in the Bizbudding network that were not in the original 5 default bidders:
-- **Axonix** — `supplyId: 4311ace9-d8cd-437e-bf21-0bae2d463eb0` (all three domains)
-- **Aniview** — `AV_PUBLISHERID / AV_CHANNELID` (totalprosports + lamag only)
-- **OMS** — `publisherId: 21146` (totalprosports only)
+Also discovered from xlsx files: additional SSPs active in the Bizbudding network:
+- **Axonix** — `supplyId: 4311ace9-d8cd-437e-bf21-0bae2d463eb0` (all three domains) — adapter exists in repo. **Phase 2.**
+- **OMS** — `publisherId: 21146` (totalprosports only) — no adapter in repo. **Phase 2.**
+- **Aniview** — removed entirely, not used.
 
-Axonix adapter exists in the repo (`internal/adapters/` + migration 002). Aniview and OMS adapters need to be verified or added.
+Phase 2 SSPs (Axonix, OMS) have their params seeded in `007_bizbudding_complete_seed.sql` but require adapter builds before they can serve bids.
 
-**Default active bidders:** Rubicon, Kargo, Sovrn, Pubmatic, TripleLift.
+**Default active bidders (Phase 1):** Rubicon, Kargo, Sovrn, Pubmatic, TripleLift.
+**Phase 2 bidders:** Axonix (adapter exists), OMS (adapter needs building).
 
 ### 3. Display + Video
 
