@@ -282,7 +282,9 @@ func Info() adapters.BidderInfo {
 	}
 }
 
-// NOTE: The direct Kargo adapter is intentionally NOT registered.
-// Kargo is routed via PBS (Prebid Server), which handles the imp.ext.kargo →
-// imp.ext.bidder translation and endpoint dispatch. Having 'kargo' in the
-// imp.ext PBS bidders config is sufficient.
+func init() {
+	if err := adapters.RegisterAdapter("kargo", New(""), Info()); err != nil {
+		// log at startup if registration fails
+		_ = err
+	}
+}

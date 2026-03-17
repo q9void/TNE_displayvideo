@@ -13,7 +13,7 @@ import (
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	_ "github.com/thenexusengine/tne_springwire/internal/adapters/appnexus"
 	// _ "github.com/thenexusengine/tne_springwire/internal/adapters/demo" // Disabled - no demo bids in production
-	// _ "github.com/thenexusengine/tne_springwire/internal/adapters/kargo" // Disabled - routed via PBS bidders config
+	_ "github.com/thenexusengine/tne_springwire/internal/adapters/kargo"
 	_ "github.com/thenexusengine/tne_springwire/internal/adapters/pubmatic"
 	_ "github.com/thenexusengine/tne_springwire/internal/adapters/rubicon"
 	_ "github.com/thenexusengine/tne_springwire/internal/adapters/sovrn"
