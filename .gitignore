@@ -64,3 +64,4 @@ mem.prof
 deployment/.env.production
 deployment/.env.production.backup
 deployment/.env.staging
+.worktrees/
