@@ -2388,7 +2388,8 @@ func (e *Exchange) callBiddersWithFPD(ctx context.Context, req *openrtb.BidReque
 				}
 
 				// Clone request and apply bidder-specific FPD
-				bidderReq := e.cloneRequestWithFPD(req, code, bidderFPD)
+				publisherID := middleware.PublisherIDFromContext(ctx)
+				bidderReq := e.cloneRequestWithFPD(req, code, bidderFPD, publisherID)
 
 				result := e.callBidder(ctx, bidderReq, code, awi.Adapter, timeout)
 
@@ -2475,7 +2476,7 @@ func (e *Exchange) callBiddersWithFPD(ctx context.Context, req *openrtb.BidReque
 // and enforces USD currency for all bid requests.
 // PERF: Only clones fields that are modified (Cur, Imp, Site/App/User if FPD applies).
 // Deep copies Device, Regs, Source to prevent cross-bidder data races.
-func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode string, bidderFPD fpd.BidderFPD) *openrtb.BidRequest {
+func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode string, bidderFPD fpd.BidderFPD, publisherID string) *openrtb.BidRequest {
 	// Shallow copy of top-level struct
 	clone := *req
 
@@ -2665,7 +2666,7 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 	}
 
 	// Augment supply chain with platform and bidder nodes
-	e.augmentSChain(&clone, bidderCode)
+	e.augmentSChain(&clone, bidderCode, publisherID)
 
 	return &clone
 }
@@ -2743,7 +2744,7 @@ func stripPublisherExtRP(pubExt []byte) []byte {
 
 // augmentSChain augments the supply chain with platform and bidder nodes
 // per OpenRTB 2.5 section 3.2.2 (Supply Chain Object)
-func (e *Exchange) augmentSChain(req *openrtb.BidRequest, bidderCode string) {
+func (e *Exchange) augmentSChain(req *openrtb.BidRequest, bidderCode string, publisherID string) {
 	// Ensure Source exists
 	if req.Source == nil {
 		req.Source = &openrtb.Source{}
@@ -2798,14 +2799,15 @@ func (e *Exchange) augmentSChain(req *openrtb.BidRequest, bidderCode string) {
 	// Platform (TheNexusEngine) node
 	platformASI := "thenexusengine.com"
 
-	// Per-bidder seller IDs assigned by each SSP
-	bidderSellerIDs := map[string]string{
-		"kargo": "9131",
-		// Add other SSP-assigned seller IDs here as they are provisioned
+	// Per-publisher seller IDs as published in TheNexusEngine sellers.json.
+	// The SID identifies which publisher TNE is representing in this auction.
+	publisherSellerIDs := map[string]string{
+		"12345": "NXS001", // BizBudding
+		// beIN Sports and other publishers to be added as they are onboarded
 	}
-	platformSID, ok := bidderSellerIDs[bidderCode]
+	platformSID, ok := publisherSellerIDs[publisherID]
 	if !ok {
-		platformSID = "NXS001" // default TheNexusEngine seller ID
+		platformSID = "NXS001" // default until publisher is explicitly mapped
 	}
 
 	// Check if platform node already exists (avoid duplicates)

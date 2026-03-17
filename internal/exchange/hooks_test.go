@@ -172,7 +172,7 @@ func TestSChainAugmentation(t *testing.T) {
 			}
 
 			// Call augmentSChain
-			ex.augmentSChain(req, "testbidder")
+			ex.augmentSChain(req, "testbidder", "")
 
 			// Verify SChain exists
 			if req.Source == nil || req.Source.SChain == nil {
@@ -259,8 +259,8 @@ func TestSChainNoDuplicatePlatformNode(t *testing.T) {
 	initialNodeCount := len(req.Source.SChain.Nodes)
 
 	// Call augmentSChain multiple times
-	ex.augmentSChain(req, "bidder1")
-	ex.augmentSChain(req, "bidder2")
+	ex.augmentSChain(req, "bidder1", "")
+	ex.augmentSChain(req, "bidder2", "")
 
 	// Verify node count didn't increase (no duplicates)
 	if len(req.Source.SChain.Nodes) != initialNodeCount {

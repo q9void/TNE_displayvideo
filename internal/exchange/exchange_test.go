@@ -1954,7 +1954,7 @@ func TestSelectiveClone_OriginalNotMutated(t *testing.T) {
 	origDeviceUA := original.Device.UA
 
 	// Clone with FPD (no FPD data, so Site/App/User won't be cloned)
-	clone := ex.cloneRequestWithFPD(original, "bidder1", nil)
+	clone := ex.cloneRequestWithFPD(original, "bidder1", nil, "")
 
 	// Verify clone has modified values
 	if clone.Cur[0] != "USD" {
@@ -2024,7 +2024,7 @@ func TestSelectiveClone_WithFPD(t *testing.T) {
 
 	origSitePtr := original.Site
 
-	clone := ex.cloneRequestWithFPD(original, "bidder1", fpdData)
+	clone := ex.cloneRequestWithFPD(original, "bidder1", fpdData, "")
 
 	// Site should be cloned (different pointer) since FPD modifies it
 	if clone.Site == origSitePtr {
@@ -2078,7 +2078,7 @@ func BenchmarkSelectiveClone(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ex.cloneRequestWithFPD(req, "bidder1", nil)
+		ex.cloneRequestWithFPD(req, "bidder1", nil, "")
 	}
 }
 

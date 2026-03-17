@@ -35,44 +35,63 @@ func New(endpoint string) *Adapter {
 func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.ExtraRequestInfo) ([]*adapters.RequestData, []error) {
 	// Create a copy of the request to modify
 	requestCopy := *request
+	// Deep copy Imp slice so we can rewrite imp.ext without mutating the caller's request
+	requestCopy.Imp = make([]openrtb.Imp, len(request.Imp))
+	copy(requestCopy.Imp, request.Imp)
 	var errs []error
 
 	// NOTE: ID clearing is now handled by Privacy/Consent hook (no longer needed here)
 	// NOTE: SetUserID is now handled by Identity Gating hook (no longer needed here)
 
-	// Task #20: Validate imp.ext.kargo.placementId is present for each impression
-	for _, imp := range requestCopy.Imp {
-		if imp.Ext != nil {
-			var impExt struct {
-				Kargo json.RawMessage `json:"kargo"`
-			}
-			if err := json.Unmarshal(imp.Ext, &impExt); err != nil {
-				errs = append(errs, fmt.Errorf("failed to parse imp.ext for imp %s: %w", imp.ID, err))
-				continue
-			}
-
-			if len(impExt.Kargo) > 0 {
-				var kargoExt struct {
-					PlacementID string `json:"placementId"`
-				}
-				if err := json.Unmarshal(impExt.Kargo, &kargoExt); err != nil {
-					errs = append(errs, fmt.Errorf("failed to parse kargo params for imp %s: %w", imp.ID, err))
-					continue
-				}
-
-				// Validate required parameter
-				if kargoExt.PlacementID == "" {
-					errs = append(errs, fmt.Errorf("imp %s missing required placementId", imp.ID))
-					continue
-				}
-			} else {
-				errs = append(errs, fmt.Errorf("imp %s missing required kargo extension", imp.ID))
-				continue
-			}
-		} else {
+	// Validate imp.ext.bidder.placementId and rewrite imp.ext to PBS bidder format.
+	// PBS translates imp.ext.kargo → imp.ext.bidder before forwarding to the bidder
+	// endpoint; we mirror that here so Kargo's endpoint receives imp.ext.bidder.placementId.
+	for i, imp := range requestCopy.Imp {
+		if imp.Ext == nil {
 			errs = append(errs, fmt.Errorf("imp %s missing required imp.ext", imp.ID))
 			continue
 		}
+
+		var impExt struct {
+			Kargo  json.RawMessage `json:"kargo"`
+			Bidder json.RawMessage `json:"bidder"`
+		}
+		if err := json.Unmarshal(imp.Ext, &impExt); err != nil {
+			errs = append(errs, fmt.Errorf("failed to parse imp.ext for imp %s: %w", imp.ID, err))
+			continue
+		}
+
+		// Prefer imp.ext.bidder; fall back to imp.ext.kargo (PBS translates kargo → bidder)
+		bidderParams := impExt.Bidder
+		if len(bidderParams) == 0 {
+			bidderParams = impExt.Kargo
+		}
+		if len(bidderParams) == 0 {
+			errs = append(errs, fmt.Errorf("imp %s missing required kargo/bidder extension", imp.ID))
+			continue
+		}
+
+		var kargoExt struct {
+			PlacementID string `json:"placementId"`
+		}
+		if err := json.Unmarshal(bidderParams, &kargoExt); err != nil {
+			errs = append(errs, fmt.Errorf("failed to parse kargo params for imp %s: %w", imp.ID, err))
+			continue
+		}
+		if kargoExt.PlacementID == "" {
+			errs = append(errs, fmt.Errorf("imp %s missing required placementId", imp.ID))
+			continue
+		}
+
+		// Rewrite imp.ext so Kargo's endpoint receives imp.ext.bidder.placementId
+		rewritten, err := json.Marshal(map[string]interface{}{
+			"bidder": map[string]string{"placementId": kargoExt.PlacementID},
+		})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to rewrite imp.ext for imp %s: %w", imp.ID, err))
+			continue
+		}
+		requestCopy.Imp[i].Ext = rewritten
 	}
 
 	// If all impressions failed validation, return errors
@@ -263,8 +282,7 @@ func Info() adapters.BidderInfo {
 	}
 }
 
-func init() {
-	if err := adapters.RegisterAdapter("kargo", New(""), Info()); err != nil {
-		logger.Log.Error().Err(err).Str("adapter", "kargo").Msg("failed to register adapter")
-	}
-}
+// NOTE: The direct Kargo adapter is intentionally NOT registered.
+// Kargo is routed via PBS (Prebid Server), which handles the imp.ext.kargo →
+// imp.ext.bidder translation and endpoint dispatch. Having 'kargo' in the
+// imp.ext PBS bidders config is sufficient.
