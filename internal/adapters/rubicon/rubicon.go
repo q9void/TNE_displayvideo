@@ -301,6 +301,27 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 			reqCopy.App = &appCopy
 		}
 
+		// Rubicon expects schain in source.ext.schain (legacy location) rather than
+		// the OpenRTB 2.5+ top-level source.schain field.
+		if reqCopy.Source != nil && reqCopy.Source.SChain != nil {
+			sourceCopy := *reqCopy.Source
+			var sourceExt map[string]json.RawMessage
+			if len(sourceCopy.Ext) > 0 {
+				json.Unmarshal(sourceCopy.Ext, &sourceExt) //nolint:errcheck
+			}
+			if sourceExt == nil {
+				sourceExt = make(map[string]json.RawMessage)
+			}
+			if schainBytes, merr := json.Marshal(sourceCopy.SChain); merr == nil {
+				sourceExt["schain"] = schainBytes
+			}
+			if extBytes, merr := json.Marshal(sourceExt); merr == nil {
+				sourceCopy.Ext = extBytes
+			}
+			sourceCopy.SChain = nil
+			reqCopy.Source = &sourceCopy
+		}
+
 		// NOTE: SetUserID is now handled by Identity Gating hook (no longer needed here)
 
 		requestBody, err := json.Marshal(reqCopy)

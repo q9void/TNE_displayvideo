@@ -272,9 +272,6 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		request.Regs = &regsCopy
 	}
 
-	// PubMatic does not want a source object
-	request.Source = nil
-
 	// Marshal final request
 	requestJSON, err := json.Marshal(request)
 	if err != nil {
