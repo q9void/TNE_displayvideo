@@ -2560,7 +2560,7 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 
 			// Ensure every imp has a floor — SSPs expect bidfloor+bidfloorcur together.
 			if clone.Imp[i].BidFloor == 0 {
-				clone.Imp[i].BidFloor = 0.01
+				clone.Imp[i].BidFloor = 0.10
 			}
 			if clone.Imp[i].BidFloorCur == "" {
 				clone.Imp[i].BidFloorCur = e.config.DefaultCurrency
