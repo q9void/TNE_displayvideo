@@ -561,8 +561,7 @@ func parseImpressionObject(imp *openrtb.Imp, extractWrapperExtFromImp, extractPu
 		}
 	}
 
-	// Keep pubmatic params in imp.ext — PubMatic's translator requires publisherId and adSlot here
-	// in addition to tagid and site.publisher.id.
+	// Rewrite imp.ext to PBS bidder format — PubMatic's translator expects imp.ext.bidder.{params}
 	if strings.TrimSpace(pubmaticExt.PublisherId) != "" {
 		pmImpExt := map[string]interface{}{
 			"publisherId": strings.TrimSpace(pubmaticExt.PublisherId),
@@ -574,7 +573,7 @@ func parseImpressionObject(imp *openrtb.Imp, extractWrapperExtFromImp, extractPu
 			}
 			pmImpExt["adSlot"] = adSlot
 		}
-		finalExtMap["pubmatic"] = pmImpExt
+		finalExtMap["bidder"] = pmImpExt
 	}
 
 	// Set final extension

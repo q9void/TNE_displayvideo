@@ -90,6 +90,16 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		impCopy := imp
 		impCopy.TagID = tripleliftExt.InventoryCode
 
+		// Rewrite imp.ext to PBS bidder format — TripleLift's endpoint expects imp.ext.bidder.inventoryCode
+		rewritten, err := json.Marshal(map[string]interface{}{
+			"bidder": map[string]string{"inventoryCode": tripleliftExt.InventoryCode},
+		})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to rewrite imp.ext for imp %s: %w", imp.ID, err))
+			continue
+		}
+		impCopy.Ext = rewritten
+
 		// Set bid floor if provided
 		// Task #40: Don't force BidFloorCur = USD - only set if not already set
 		if tripleliftExt.Floor > 0 {
