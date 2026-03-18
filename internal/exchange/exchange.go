@@ -792,18 +792,9 @@ func (e *Exchange) validateBid(bid *openrtb.Bid, bidderCode string, req *openrtb
 		}
 	}
 
-	// HIGH FIX #3: Validate bid dimensions for banner impressions
-	// OpenRTB 2.5: Banner bid dimensions must match one of the allowed formats
-	if imp.Banner != nil {
-		if err := validateBannerDimensions(bid, imp.Banner); err != nil {
-			return &BidValidationError{
-				BidID:      bid.ID,
-				ImpID:      bid.ImpID,
-				BidderCode: bidderCode,
-				Reason:     err.Error(),
-			}
-		}
-	}
+	// Banner dimension validation intentionally removed — SSPs (e.g. Kargo) return valid
+	// creatives with bid.w/h that differ from the requested formats. PBS does not enforce
+	// dimension matching; we trust the placement ID / ad slot to ensure correct rendering.
 
 	return nil
 }
