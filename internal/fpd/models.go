@@ -27,7 +27,7 @@ func DefaultConfig() *Config {
 		BidderConfigEnabled: false,
 		ContentEnabled:      true,
 		EIDsEnabled:         true,
-		EIDSources:          []string{"liveramp.com", "uidapi.com", "id5-sync.com", "criteo.com"},
+		EIDSources:          []string{"liveramp.com", "uidapi.com", "id5-sync.com", "criteo.com", "rubiconproject.com", "pubmatic.com", "lijit.com", "kargo.com", "adnxs.com", "thenexusengine.com"},
 	}
 }
 
