@@ -1129,7 +1129,13 @@ func (h *CatalystBidHandler) convertToOpenRTB(r *http.Request, maiBid *MAIBidReq
 		//   2. SDK-provided user.ext.eids (legacy path, same EIDs may arrive here)
 		//   3. Server-side bidder UIDs from database / cookie sync
 		hasPrebidEids := maiBid.User != nil && len(maiBid.User.Eids) > 0
-		if len(userIDs) > 0 || hasPrebidEids {
+		hasExtEids := maiBid.User != nil && maiBid.User.Ext != nil
+		if hasExtEids {
+			if _, ok := maiBid.User.Ext["eids"]; !ok {
+				hasExtEids = false
+			}
+		}
+		if len(userIDs) > 0 || hasPrebidEids || hasExtEids {
 			seenSources := make(map[string]struct{})
 			eids := make([]map[string]interface{}, 0)
 
