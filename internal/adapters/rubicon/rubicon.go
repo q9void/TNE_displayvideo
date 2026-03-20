@@ -172,9 +172,25 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 			rpExt.Track = rubiconTrack{Mint: "", MintVersion: ""}
 		}
 
-		// Preserve existing target if it was set
+		// Build PBS identity target — Magnite requires these to identify and route demand to this PBS instance
+		pbsTarget := map[string]interface{}{
+			"pbs_login":   a.xapiUser,
+			"pbs_version": "pbs-go/tne-1.0",
+			"pbs_url":     "https://ads.thenexusengine.com",
+		}
+		// Merge any existing target fields without overriding PBS keys
 		if len(existingTarget) > 0 {
-			rpExt.Target = existingTarget
+			var existingTargetMap map[string]interface{}
+			if merr := json.Unmarshal(existingTarget, &existingTargetMap); merr == nil {
+				for k, v := range existingTargetMap {
+					if _, alreadySet := pbsTarget[k]; !alreadySet {
+						pbsTarget[k] = v
+					}
+				}
+			}
+		}
+		if targetBytes, merr := json.Marshal(pbsTarget); merr == nil {
+			rpExt.Target = targetBytes
 		}
 
 		impExtMap := map[string]interface{}{
@@ -190,6 +206,13 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		if err != nil {
 			errors = append(errors, fmt.Errorf("failed to marshal imp ext for imp %s: %w", imp.ID, err))
 			continue
+		}
+
+		// Rubicon requires mime type in banner.ext.rp for all banner impressions
+		if impCopy.Banner != nil {
+			impCopy.Banner.Ext, _ = json.Marshal(map[string]interface{}{
+				"rp": map[string]string{"mime": "text/html"},
+			})
 		}
 
 		reqCopy.Imp = []openrtb.Imp{impCopy}
@@ -322,7 +345,35 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 			reqCopy.Source = &sourceCopy
 		}
 
-		// NOTE: SetUserID is now handled by Identity Gating hook (no longer needed here)
+		// Set user fields required by Magnite: buyeruid from synced UID and user.ext.rp = {}
+		if reqCopy.User != nil {
+			userCopy := *reqCopy.User
+
+			// Set buyeruid from Rubicon-synced EID in user.eids (standard top-level location)
+			for _, eid := range userCopy.EIDs {
+				if eid.Source == "rubiconproject.com" && len(eid.UIDs) > 0 {
+					userCopy.BuyerUID = eid.UIDs[0].ID
+					break
+				}
+			}
+
+			// Magnite reference adapter always injects user.ext.rp = {}
+			var userExt map[string]json.RawMessage
+			if len(userCopy.Ext) > 0 {
+				json.Unmarshal(userCopy.Ext, &userExt) //nolint:errcheck
+			}
+			if userExt == nil {
+				userExt = make(map[string]json.RawMessage)
+			}
+			if _, hasRP := userExt["rp"]; !hasRP {
+				userExt["rp"] = json.RawMessage(`{}`)
+			}
+			if extBytes, merr := json.Marshal(userExt); merr == nil {
+				userCopy.Ext = extBytes
+			}
+
+			reqCopy.User = &userCopy
+		}
 
 		requestBody, err := json.Marshal(reqCopy)
 		if err != nil {
