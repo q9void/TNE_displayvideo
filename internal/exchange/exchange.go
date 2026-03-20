@@ -3618,7 +3618,7 @@ func (e *Exchange) buildBidExtension(vb ValidatedBid) *openrtb.BidExt {
 
 	// Catalyst GAM targeting keys (_catalyst suffix to avoid conflicts with client-side Prebid.js)
 	// These are set server-side so GAM line items can target Catalyst bids directly
-	targeting["hb_pb_catalyst"] = priceBucket
+	targeting["hb_pb"] = priceBucket
 	targeting["hb_bidder_catalyst"] = displayBidderCode
 	targeting["hb_partner"] = displayBidderCode
 	targeting["hb_source_catalyst"] = "s2s"
