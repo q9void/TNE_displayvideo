@@ -23,6 +23,7 @@ type rubiconParams struct {
 	AccountID        int  `json:"accountId"`
 	SiteID           int  `json:"siteId"`
 	ZoneID           int  `json:"zoneId"`
+	SizeID           int  `json:"sizeId"`
 	BidOnMultiformat bool `json:"bidonmultiformat"`
 }
 
@@ -208,10 +209,16 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 			continue
 		}
 
-		// Rubicon requires mime type in banner.ext.rp for all banner impressions
+		// Rubicon requires mime type and size_id in banner.ext.rp for all banner impressions
 		if impCopy.Banner != nil {
+			bannerRP := map[string]interface{}{
+				"mime": "text/html",
+			}
+			if rubiconParams.SizeID > 0 {
+				bannerRP["size_id"] = rubiconParams.SizeID
+			}
 			impCopy.Banner.Ext, _ = json.Marshal(map[string]interface{}{
-				"rp": map[string]string{"mime": "text/html"},
+				"rp": bannerRP,
 			})
 		}
 
@@ -490,6 +497,16 @@ func extractRubiconParams(impExt json.RawMessage) (*rubiconParams, error) {
 		}
 	} else {
 		return nil, fmt.Errorf("zoneId is required")
+	}
+
+	// Extract sizeId (optional, recommended for banner)
+	if sizeID, ok := rubiconData["sizeId"]; ok {
+		switch v := sizeID.(type) {
+		case float64:
+			params.SizeID = int(v)
+		case int:
+			params.SizeID = v
+		}
 	}
 
 	// Extract bidonmultiformat (optional)
