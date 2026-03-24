@@ -299,8 +299,36 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 		if maiBidReq.User != nil {
 			fpid = maiBidReq.User.FPID
 			consentGiven = maiBidReq.User.ConsentGiven
-			eidCount = len(maiBidReq.User.Eids)
 			hasSyncedIDs = len(maiBidReq.User.UserIds) > 0
+
+			// EIDs may be in user.eids (top-level) or user.ext.eids (Prebid legacy location)
+			eidCount = len(maiBidReq.User.Eids)
+			if eidCount == 0 {
+				if extEids, ok := maiBidReq.User.Ext["eids"]; ok {
+					if eidsSlice, ok := extEids.([]interface{}); ok {
+						eidCount = len(eidsSlice)
+					}
+				}
+			}
+			// Extract FPID from user.ext.eids if not set directly
+			if fpid == "" && maiBidReq.User.Ext != nil {
+				if extEids, ok := maiBidReq.User.Ext["eids"]; ok {
+					if eidsSlice, ok := extEids.([]interface{}); ok {
+						for _, e := range eidsSlice {
+							if eid, ok := e.(map[string]interface{}); ok {
+								if eid["source"] == "thenexusengine.com" {
+									if uids, ok := eid["uids"].([]interface{}); ok && len(uids) > 0 {
+										if uid, ok := uids[0].(map[string]interface{}); ok {
+											fpid, _ = uid["id"].(string)
+										}
+									}
+									break
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 		deviceType, ua := "", r.Header.Get("User-Agent")
 		if maiBidReq.Device != nil {
