@@ -90,7 +90,22 @@ def export_table(
                 record[key] = val.isoformat()
 
     bq_table_ref = f"{BQ_PROJECT}.{BQ_DATASET}.{table}"
-    job = bq_client.load_table_from_json(records, bq_table_ref)
+
+    # Use autodetect only for new tables; existing tables use their stored schema
+    # (autodetect re-infers types and conflicts with NULL-able float columns)
+    table_is_new = False
+    try:
+        bq_client.get_table(bq_table_ref)
+    except Exception:
+        table_is_new = True
+
+    job_config = bigquery.LoadJobConfig(
+        autodetect=table_is_new,
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+        schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
+    )
+    job = bq_client.load_table_from_json(records, bq_table_ref, job_config=job_config)
     job.result()  # wait for completion
     if job.errors:
         log.error("  %s: BigQuery load errors: %s", table, job.errors)
