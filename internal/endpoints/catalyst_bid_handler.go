@@ -353,8 +353,10 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 			Msg("SDK bid request received")
 	}
 
-	// Convert to OpenRTB
+	// Stage timers — track elapsed time at each pipeline stage
+	t0Convert := time.Now()
 	ortbReq, impToSlot, err := h.convertToOpenRTB(r, &maiBidReq)
+	convertMs := time.Since(t0Convert).Milliseconds()
 	if err != nil {
 		log.Error().
 			Err(err).
@@ -416,6 +418,7 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 	hookExecutor.RegisterRequestHook(hooks.NewRequestValidationHook())
 	hookExecutor.RegisterRequestHook(hooks.NewPrivacyConsentHook())
 
+	t0Hooks := time.Now()
 	if err := hookExecutor.ExecuteRequestHooks(r.Context(), ortbReq); err != nil {
 		log.Error().
 			Err(err).
@@ -426,6 +429,7 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	hooksMs := time.Since(t0Hooks).Milliseconds()
 	log.Debug().
 		Str("request_id", ortbReq.ID).
 		Str("account_id", maiBidReq.AccountID).
@@ -441,13 +445,26 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 		Timeout:    time.Duration(tmaxMs) * time.Millisecond,
 	}
 
+	t0Auction := time.Now()
 	auctionResp, err := h.exchange.RunAuction(ctx, auctionReq)
+	auctionMs := time.Since(t0Auction).Milliseconds()
+
+	// Detect overall auction timeout
+	if ctx.Err() != nil {
+		log.Warn().
+			Str("request_id", ortbReq.ID).
+			Str("account_id", maiBidReq.AccountID).
+			Int64("auction_ms", auctionMs).
+			Int("tmax_ms", tmaxMs).
+			Msg("Auction context timed out — returning available bids")
+	}
+
 	if err != nil {
 		log.Error().
 			Err(err).
 			Str("account_id", maiBidReq.AccountID).
 			Int("slots", len(maiBidReq.Slots)).
-			Int("timeout_ms", int(time.Since(startTime).Milliseconds())).
+			Int64("elapsed_ms", time.Since(startTime).Milliseconds()).
 			Str("error_type", fmt.Sprintf("%T", err)).
 			Msg("❌ Auction failed - returning empty bids")
 		// Return empty bids on error (MAI Publisher requirement)
@@ -483,12 +500,44 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 	// Write response
 	h.writeMAIResponse(w, maiResp)
 
-	log.Info().
+	// Collect timeout and outcome details for lifecycle log
+	timedOutBidders := []string{}
+	if auctionResp != nil {
+		for bidder, result := range auctionResp.BidderResults {
+			if result.TimedOut {
+				timedOutBidders = append(timedOutBidders, bidder)
+			}
+		}
+	}
+	outcome := "no_bids"
+	if len(maiResp.Bids) > 0 {
+		outcome = "bids_returned"
+	} else if ctx.Err() != nil || len(timedOutBidders) > 0 {
+		outcome = "timeout"
+	}
+
+	totalMs := time.Since(startTime).Milliseconds()
+	lifecycleLog := log.Info().
+		Str("request_id", ortbReq.ID).
 		Str("account_id", maiBidReq.AccountID).
+		Str("page_domain", func() string {
+			if maiBidReq.Page != nil {
+				return maiBidReq.Page.Domain
+			}
+			return ""
+		}()).
 		Int("slots", len(maiBidReq.Slots)).
 		Int("bids", len(maiResp.Bids)).
-		Int("response_time_ms", maiResp.ResponseTime).
-		Msg("✓ Catalyst bid request completed")
+		Str("outcome", outcome).
+		Int64("convert_ms", convertMs).
+		Int64("hooks_ms", hooksMs).
+		Int64("auction_ms", auctionMs).
+		Int64("total_ms", totalMs).
+		Int("tmax_ms", tmaxMs)
+	if len(timedOutBidders) > 0 {
+		lifecycleLog = lifecycleLog.Strs("timed_out_bidders", timedOutBidders)
+	}
+	lifecycleLog.Msg("Request lifecycle")
 }
 
 // validateMAIBidRequest validates the MAI bid request
