@@ -2107,6 +2107,7 @@ func (e *Exchange) buildAuctionObject(
 
 		impressions = append(impressions, analytics.Impression{
 			ID:         imp.ID,
+			TagID:      imp.TagID,
 			MediaTypes: mediaTypes,
 			Sizes:      sizes,
 			Floor:      imp.BidFloor,

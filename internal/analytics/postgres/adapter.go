@@ -4,6 +4,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/thenexusengine/tne_springwire/internal/analytics"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
@@ -83,6 +84,11 @@ func insertAuctionEvent(tx *sql.Tx, a *analytics.AuctionObject) error {
 		deviceType = a.Device.Type
 	}
 
+	var adUnit string
+	if len(a.Impressions) > 0 {
+		adUnit = a.Impressions[0].TagID
+	}
+
 	_, err := tx.Exec(`
 		INSERT INTO auction_events (
 			auction_id, request_id, publisher_id, timestamp,
@@ -90,8 +96,8 @@ func insertAuctionEvent(tx *sql.Tx, a *analytics.AuctionObject) error {
 			total_bids, winning_bids, duration_ms, status,
 			bid_multiplier, total_revenue, total_payout,
 			device_country, device_type, impression_count,
-			consent_ok, validation_errors
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+			consent_ok, validation_errors, ad_unit
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
 		a.AuctionID,
 		a.RequestID,
 		a.PublisherID,
@@ -111,6 +117,7 @@ func insertAuctionEvent(tx *sql.Tx, a *analytics.AuctionObject) error {
 		len(a.Impressions),
 		a.ConsentOK,
 		len(a.ValidationErrors),
+		adUnit,
 	)
 	return err
 }
@@ -123,8 +130,12 @@ func insertBidderEvents(tx *sql.Tx, a *analytics.AuctionObject) error {
 	}
 
 	mediaType := "banner"
-	if len(a.Impressions) > 0 && len(a.Impressions[0].MediaTypes) > 0 {
-		mediaType = a.Impressions[0].MediaTypes[0]
+	var adUnit string
+	if len(a.Impressions) > 0 {
+		if len(a.Impressions[0].MediaTypes) > 0 {
+			mediaType = a.Impressions[0].MediaTypes[0]
+		}
+		adUnit = a.Impressions[0].TagID
 	}
 
 	var floorPrice *float64
@@ -156,8 +167,9 @@ func insertBidderEvents(tx *sql.Tx, a *analytics.AuctionObject) error {
 				latency_ms, had_bid, bid_count,
 				first_bid_cpm, floor_price, below_floor,
 				timed_out, had_error, no_bid_reason,
-				country, device_type, media_type
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+				country, device_type, media_type,
+				ad_unit, sizes
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 			a.AuctionID,
 			bidder,
 			result.Latency.Milliseconds(),
@@ -172,10 +184,19 @@ func insertBidderEvents(tx *sql.Tx, a *analytics.AuctionObject) error {
 			deviceCountry,
 			deviceType,
 			mediaType,
+			adUnit,
+			strings.Join(firstImpSizes(a), ","),
 		)
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func firstImpSizes(a *analytics.AuctionObject) []string {
+	if len(a.Impressions) > 0 {
+		return a.Impressions[0].Sizes
 	}
 	return nil
 }

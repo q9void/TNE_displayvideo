@@ -125,6 +125,7 @@ type ValidationError struct {
 // Impression contains impression-level request data
 type Impression struct {
 	ID         string
+	TagID      string   // Ad unit path / tag identifier (imp.tagid in OpenRTB)
 	MediaTypes []string // "banner", "video", "native", "audio"
 	Sizes      []string // "300x250", "728x90", etc.
 	Floor      float64
