@@ -1979,10 +1979,12 @@ func (e *Exchange) buildAuctionObject(
 		publisherID = req.BidRequest.App.Publisher.ID
 	}
 
-	// Extract publisher domain
+	// Extract publisher domain and page URL
 	publisherDomain := ""
+	pageURL := ""
 	if req.BidRequest.Site != nil {
 		publisherDomain = req.BidRequest.Site.Domain
+		pageURL = req.BidRequest.Site.Page
 	} else if req.BidRequest.App != nil {
 		publisherDomain = req.BidRequest.App.Bundle
 	}
@@ -2227,6 +2229,7 @@ func (e *Exchange) buildAuctionObject(
 		RequestID:        req.BidRequest.ID,
 		PublisherID:      publisherID,
 		PublisherDomain:  publisherDomain,
+		PageURL:          pageURL,
 		Timestamp:        startTime,
 		Impressions:      impressions,
 		Device:           deviceInfo,

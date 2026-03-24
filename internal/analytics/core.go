@@ -22,6 +22,7 @@ type AuctionObject struct {
 	RequestID       string
 	PublisherID     string
 	PublisherDomain string
+	PageURL         string
 	Timestamp       time.Time
 
 	// Request details

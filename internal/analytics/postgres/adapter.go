@@ -71,6 +71,12 @@ func (a *Adapter) persist(auction *analytics.AuctionObject) {
 		return
 	}
 
+	if err = insertRequestEvent(tx, auction); err != nil {
+		logger.Log.Error().Err(err).Str("auction_id", auction.AuctionID).
+			Msg("postgres analytics: failed to insert request_events")
+		return
+	}
+
 	if err = insertIdentityEvent(tx, auction); err != nil {
 		logger.Log.Error().Err(err).Str("auction_id", auction.AuctionID).
 			Msg("postgres analytics: failed to insert identity_events")
@@ -265,6 +271,83 @@ func insertIdentityEvent(tx *sql.Tx, a *analytics.AuctionObject) error {
 		sovrnUID,
 		appnexusUID,
 		buyerUID,
+	)
+	return err
+}
+
+func insertRequestEvent(tx *sql.Tx, a *analytics.AuctionObject) error {
+	// Derive timed-out bidder list and outcome from bidder results
+	timedOutBidders := []string{}
+	for bidder, result := range a.BidderResults {
+		if result.TimedOut {
+			timedOutBidders = append(timedOutBidders, bidder)
+		}
+	}
+
+	outcome := "no_bids"
+	if len(a.WinningBids) > 0 {
+		outcome = "bids_returned"
+	} else if len(timedOutBidders) > 0 {
+		outcome = "timeout"
+	} else if a.Status == "error" {
+		outcome = "error"
+	}
+
+	var timedOutStr *string
+	if len(timedOutBidders) > 0 {
+		s := strings.Join(timedOutBidders, ",")
+		timedOutStr = &s
+	}
+
+	var fpid *string
+	var eidCount int
+	if a.User != nil {
+		if a.User.FPID != "" {
+			fpid = &a.User.FPID
+		}
+		eidCount = a.User.TotalEIDs
+	}
+
+	var deviceType, deviceCountry string
+	if a.Device != nil {
+		deviceType = a.Device.Type
+		deviceCountry = a.Device.Country
+	}
+
+	var firstAdUnit string
+	if len(a.Impressions) > 0 {
+		firstAdUnit = a.Impressions[0].TagID
+	}
+
+	_, err := tx.Exec(`
+		INSERT INTO request_events (
+			auction_id, publisher_id,
+			page_url, page_domain, first_ad_unit,
+			slot_count, device_type, device_country,
+			fpid, eid_count, consent_ok,
+			tmax_ms, auction_ms,
+			total_bids, bids_returned,
+			timed_out_bidders, outcome,
+			timestamp
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+		a.AuctionID,
+		a.PublisherID,
+		a.PageURL,
+		a.PublisherDomain,
+		firstAdUnit,
+		len(a.Impressions),
+		deviceType,
+		deviceCountry,
+		fpid,
+		eidCount,
+		a.ConsentOK,
+		a.TMax,
+		a.AuctionDuration.Milliseconds(),
+		a.TotalBids,
+		len(a.WinningBids),
+		timedOutStr,
+		outcome,
+		a.Timestamp,
 	)
 	return err
 }

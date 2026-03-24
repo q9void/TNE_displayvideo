@@ -36,7 +36,7 @@ BQ_DATASET   = os.environ.get("BQ_DATASET", "catalyst_analytics")
 
 LAST_EXPORTED_FILE = Path(os.environ.get("LAST_EXPORTED_FILE", "/opt/tne/last_exported_at.txt"))
 
-TABLES = ["auction_events", "bidder_events", "win_events", "identity_events"]
+TABLES = ["auction_events", "bidder_events", "win_events", "identity_events", "request_events"]
 
 logging.basicConfig(
     level=logging.INFO,
