@@ -71,6 +71,12 @@ func (a *Adapter) persist(auction *analytics.AuctionObject) {
 		return
 	}
 
+	if err = insertIdentityEvent(tx, auction); err != nil {
+		logger.Log.Error().Err(err).Str("auction_id", auction.AuctionID).
+			Msg("postgres analytics: failed to insert identity_events")
+		return
+	}
+
 	if err = tx.Commit(); err != nil {
 		logger.Log.Error().Err(err).Str("auction_id", auction.AuctionID).
 			Msg("postgres analytics: failed to commit transaction")
@@ -199,6 +205,68 @@ func firstImpSizes(a *analytics.AuctionObject) []string {
 		return a.Impressions[0].Sizes
 	}
 	return nil
+}
+
+func insertIdentityEvent(tx *sql.Tx, a *analytics.AuctionObject) error {
+	var (
+		totalEIDs   int
+		fpid        *string
+		id5UID      *string
+		rubiconUID  *string
+		kargoUID    *string
+		pubmaticUID *string
+		sovrnUID    *string
+		appnexusUID *string
+		buyerUID    *string
+	)
+
+	if a.User != nil {
+		totalEIDs = a.User.TotalEIDs
+		if a.User.FPID != "" {
+			fpid = &a.User.FPID
+		}
+		if a.User.ID5UID != "" {
+			id5UID = &a.User.ID5UID
+		}
+		if a.User.RubiconUID != "" {
+			rubiconUID = &a.User.RubiconUID
+		}
+		if a.User.KargoUID != "" {
+			kargoUID = &a.User.KargoUID
+		}
+		if a.User.PubmaticUID != "" {
+			pubmaticUID = &a.User.PubmaticUID
+		}
+		if a.User.SovrnUID != "" {
+			sovrnUID = &a.User.SovrnUID
+		}
+		if a.User.AppNexusUID != "" {
+			appnexusUID = &a.User.AppNexusUID
+		}
+		if a.User.BuyerUID != "" {
+			buyerUID = &a.User.BuyerUID
+		}
+	}
+
+	_, err := tx.Exec(`
+		INSERT INTO identity_events (
+			auction_id, total_eids,
+			fpid, id5_uid, rubicon_uid,
+			kargo_uid, pubmatic_uid, sovrn_uid,
+			appnexus_uid, buyer_uid
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		a.AuctionID,
+		totalEIDs,
+		fpid,
+		id5UID,
+		rubiconUID,
+		kargoUID,
+		pubmaticUID,
+		sovrnUID,
+		appnexusUID,
+		buyerUID,
+	)
+	return err
 }
 
 func insertWinEvents(tx *sql.Tx, a *analytics.AuctionObject) error {

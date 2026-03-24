@@ -95,6 +95,28 @@ CREATE INDEX IF NOT EXISTS idx_win_events_auction_id ON win_events(auction_id);
 CREATE INDEX IF NOT EXISTS idx_win_events_bidder_code ON win_events(bidder_code);
 CREATE INDEX IF NOT EXISTS idx_win_events_created_at ON win_events(created_at);
 
+-- Identity / EID events (one row per auction, one column per ID source)
+CREATE TABLE IF NOT EXISTS identity_events (
+    id BIGSERIAL PRIMARY KEY,
+    auction_id VARCHAR(255) NOT NULL,
+    total_eids INTEGER DEFAULT 0,
+
+    -- Per-source UIDs (NULL = not present in request)
+    fpid        TEXT,  -- thenexusengine.com first-party ID
+    id5_uid     TEXT,  -- id5-sync.com
+    rubicon_uid TEXT,  -- rubiconproject.com
+    kargo_uid   TEXT,  -- kargo.com
+    pubmatic_uid TEXT, -- pubmatic.com
+    sovrn_uid   TEXT,  -- lijit.com
+    appnexus_uid TEXT, -- adnxs.com
+    buyer_uid   TEXT,  -- OpenRTB user.buyeruid
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_identity_events_auction_id ON identity_events(auction_id);
+CREATE INDEX IF NOT EXISTS idx_identity_events_created_at ON identity_events(created_at);
+
 -- Revenue aggregation view
 CREATE OR REPLACE VIEW revenue_by_bidder AS
 SELECT

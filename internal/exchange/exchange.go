@@ -2146,10 +2146,34 @@ func (e *Exchange) buildAuctionObject(
 	// Extract user info (privacy-safe)
 	var userInfo *analytics.UserInfo
 	if req.BidRequest.User != nil {
-		userInfo = &analytics.UserInfo{
-			BuyerUID: req.BidRequest.User.BuyerUID,
-			HasEIDs:  len(req.BidRequest.User.EIDs) > 0,
+		ui := &analytics.UserInfo{
+			BuyerUID:  req.BidRequest.User.BuyerUID,
+			HasEIDs:   len(req.BidRequest.User.EIDs) > 0,
+			TotalEIDs: len(req.BidRequest.User.EIDs),
 		}
+		for _, eid := range req.BidRequest.User.EIDs {
+			uid := ""
+			if len(eid.UIDs) > 0 {
+				uid = eid.UIDs[0].ID
+			}
+			switch eid.Source {
+			case "thenexusengine.com":
+				ui.FPID = uid
+			case "id5-sync.com":
+				ui.ID5UID = uid
+			case "rubiconproject.com":
+				ui.RubiconUID = uid
+			case "kargo.com":
+				ui.KargoUID = uid
+			case "pubmatic.com":
+				ui.PubmaticUID = uid
+			case "lijit.com":
+				ui.SovrnUID = uid
+			case "adnxs.com":
+				ui.AppNexusUID = uid
+			}
+		}
+		userInfo = ui
 	}
 
 	// Extract GDPR data

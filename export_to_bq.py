@@ -36,7 +36,7 @@ BQ_DATASET   = os.environ.get("BQ_DATASET", "catalyst_analytics")
 
 LAST_EXPORTED_FILE = Path(os.environ.get("LAST_EXPORTED_FILE", "/opt/tne/last_exported_at.txt"))
 
-TABLES = ["auction_events", "bidder_events", "win_events"]
+TABLES = ["auction_events", "bidder_events", "win_events", "identity_events"]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,22 +79,24 @@ def export_table(
         log.info("  %s: no new rows since %s", table, since.isoformat())
         return 0
 
-    columns = [desc[0] for desc in pg_cursor.description]
-    records = [dict(zip(columns, row)) for row in rows]
+    records = [dict(row) for row in rows]
 
-    # BigQuery cannot handle Python Decimal — convert to float
+    # BigQuery cannot handle Python Decimal or datetime without timezone — normalize
     for record in records:
         for key, val in record.items():
             if hasattr(val, "__float__") and not isinstance(val, (int, float, bool)):
                 record[key] = float(val)
+            elif hasattr(val, "isoformat"):
+                record[key] = val.isoformat()
 
     bq_table_ref = f"{BQ_PROJECT}.{BQ_DATASET}.{table}"
-    errors = bq_client.insert_rows_json(bq_table_ref, records)
-    if errors:
-        log.error("  %s: BigQuery insert errors: %s", table, errors)
-        raise RuntimeError(f"BigQuery insert failed for {table}: {errors}")
+    job = bq_client.load_table_from_json(records, bq_table_ref)
+    job.result()  # wait for completion
+    if job.errors:
+        log.error("  %s: BigQuery load errors: %s", table, job.errors)
+        raise RuntimeError(f"BigQuery load failed for {table}: {job.errors}")
 
-    log.info("  %s: inserted %d rows", table, len(records))
+    log.info("  %s: loaded %d rows", table, len(records))
     return len(records)
 
 

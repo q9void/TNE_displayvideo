@@ -144,6 +144,16 @@ type DeviceInfo struct {
 type UserInfo struct {
 	BuyerUID string // Anonymized user ID
 	HasEIDs  bool   // Has extended IDs
+	TotalEIDs int   // Total count of EID sources present
+
+	// Per-source EID UIDs (empty string = not present in request)
+	FPID        string // thenexusengine.com first-party ID
+	ID5UID      string // id5-sync.com
+	RubiconUID  string // rubiconproject.com
+	KargoUID    string // kargo.com
+	PubmaticUID string // pubmatic.com
+	SovrnUID    string // lijit.com (Sovrn)
+	AppNexusUID string // adnxs.com
 }
 
 // GDPRData contains GDPR consent information
