@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	_ "github.com/thenexusengine/tne_springwire/internal/adapters/triplelift"
 	"github.com/thenexusengine/tne_springwire/internal/analytics"
 	analyticsIDR "github.com/thenexusengine/tne_springwire/internal/analytics/idr"
+	analyticsPG "github.com/thenexusengine/tne_springwire/internal/analytics/postgres"
 	pbsconfig "github.com/thenexusengine/tne_springwire/internal/config"
 	"github.com/thenexusengine/tne_springwire/internal/endpoints"
 	"github.com/thenexusengine/tne_springwire/internal/exchange"
@@ -40,6 +42,7 @@ type Server struct {
 	metrics           *metrics.Metrics
 	exchange          *exchange.Exchange
 	rateLimiter       *middleware.RateLimiter
+	rawDB             *sql.DB
 	db                *storage.BidderStore
 	publisher         *storage.PublisherStore
 	idGraphStore      *storage.IDGraphStore
@@ -135,6 +138,7 @@ func (s *Server) initDatabase() error {
 		return err
 	}
 
+	s.rawDB = dbConn
 	s.db = storage.NewBidderStore(dbConn)
 	s.publisher = storage.NewPublisherStore(dbConn)
 	s.idGraphStore = storage.NewIDGraphStore(dbConn)
@@ -208,6 +212,13 @@ func (s *Server) initExchange() {
 			Str("adapter", "idr").
 			Str("idr_url", s.config.IDRUrl).
 			Msg("Analytics adapter enabled")
+	}
+
+	// Initialize Postgres analytics adapter if database is available
+	if s.rawDB != nil {
+		pgAdapter := analyticsPG.NewAdapter(s.rawDB)
+		analyticsModules = append(analyticsModules, pgAdapter)
+		log.Info().Str("adapter", "postgres").Msg("Analytics adapter enabled")
 	}
 
 	// Create multi-module broadcaster if any modules are enabled
