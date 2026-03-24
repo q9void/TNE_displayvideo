@@ -278,6 +278,53 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Log all SDK request fields used to build the bid request
+	{
+		slotSummary := make([]map[string]interface{}, 0, len(maiBidReq.Slots))
+		for _, s := range maiBidReq.Slots {
+			slotSummary = append(slotSummary, map[string]interface{}{
+				"div_id":       s.DivID,
+				"ad_unit_path": s.AdUnitPath,
+				"sizes":        s.Sizes,
+				"video":        s.Video,
+				"native":       s.Native,
+			})
+		}
+		pageURL, pageDomain := "", ""
+		if maiBidReq.Page != nil {
+			pageURL = maiBidReq.Page.URL
+			pageDomain = maiBidReq.Page.Domain
+		}
+		fpid, consentGiven, eidCount, hasSyncedIDs := "", false, 0, false
+		if maiBidReq.User != nil {
+			fpid = maiBidReq.User.FPID
+			consentGiven = maiBidReq.User.ConsentGiven
+			eidCount = len(maiBidReq.User.Eids)
+			hasSyncedIDs = len(maiBidReq.User.UserIds) > 0
+		}
+		deviceType, ua := "", r.Header.Get("User-Agent")
+		if maiBidReq.Device != nil {
+			deviceType = maiBidReq.Device.DeviceType
+			if maiBidReq.Device.UserAgent != "" {
+				ua = maiBidReq.Device.UserAgent
+			}
+		}
+		log.Info().
+			Str("account_id", maiBidReq.AccountID).
+			Int("slot_count", len(maiBidReq.Slots)).
+			Interface("slots", slotSummary).
+			Str("page_url", pageURL).
+			Str("page_domain", pageDomain).
+			Str("fpid", fpid).
+			Bool("consent_given", consentGiven).
+			Int("eid_count", eidCount).
+			Bool("has_synced_ids", hasSyncedIDs).
+			Str("device_type", deviceType).
+			Str("user_agent", ua).
+			Str("remote_addr", r.RemoteAddr).
+			Msg("SDK bid request received")
+	}
+
 	// Convert to OpenRTB
 	ortbReq, impToSlot, err := h.convertToOpenRTB(r, &maiBidReq)
 	if err != nil {
