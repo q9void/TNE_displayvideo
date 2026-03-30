@@ -16,7 +16,7 @@ import (
 	// _ "github.com/thenexusengine/tne_springwire/internal/adapters/demo" // Disabled - no demo bids in production
 	"github.com/thenexusengine/tne_springwire/internal/adapters/kargo"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/pubmatic"
-	_ "github.com/thenexusengine/tne_springwire/internal/adapters/rubicon"
+	"github.com/thenexusengine/tne_springwire/internal/adapters/rubicon"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/sovrn"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/triplelift"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/routing"
@@ -150,6 +150,7 @@ func (s *Server) initDatabase() error {
 	pubmatic.SetLoader(s.routingLoader)
 	triplelift.SetLoader(s.routingLoader)
 	appnexus.SetLoader(s.routingLoader)
+	rubicon.SetLoader(s.routingLoader)
 
 	s.idGraphStore = storage.NewIDGraphStore(dbConn)
 	s.userSyncStore = storage.NewUserSyncStore(dbConn)
