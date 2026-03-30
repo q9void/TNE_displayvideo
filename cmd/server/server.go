@@ -12,13 +12,14 @@ import (
 	"time"
 
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
-	_ "github.com/thenexusengine/tne_springwire/internal/adapters/appnexus"
+	"github.com/thenexusengine/tne_springwire/internal/adapters/appnexus"
 	// _ "github.com/thenexusengine/tne_springwire/internal/adapters/demo" // Disabled - no demo bids in production
-	_ "github.com/thenexusengine/tne_springwire/internal/adapters/kargo"
-	_ "github.com/thenexusengine/tne_springwire/internal/adapters/pubmatic"
+	"github.com/thenexusengine/tne_springwire/internal/adapters/kargo"
+	"github.com/thenexusengine/tne_springwire/internal/adapters/pubmatic"
 	_ "github.com/thenexusengine/tne_springwire/internal/adapters/rubicon"
-	_ "github.com/thenexusengine/tne_springwire/internal/adapters/sovrn"
-	_ "github.com/thenexusengine/tne_springwire/internal/adapters/triplelift"
+	"github.com/thenexusengine/tne_springwire/internal/adapters/sovrn"
+	"github.com/thenexusengine/tne_springwire/internal/adapters/triplelift"
+	"github.com/thenexusengine/tne_springwire/internal/adapters/routing"
 	"github.com/thenexusengine/tne_springwire/internal/analytics"
 	analyticsIDR "github.com/thenexusengine/tne_springwire/internal/analytics/idr"
 	analyticsPG "github.com/thenexusengine/tne_springwire/internal/analytics/postgres"
@@ -49,6 +50,7 @@ type Server struct {
 	userSyncStore     *storage.UserSyncStore
 	redisClient       *redis.Client
 	currencyConverter *currency.Converter
+	routingLoader     *routing.Loader
 }
 
 // NewServer creates a new PBS server instance
@@ -141,6 +143,14 @@ func (s *Server) initDatabase() error {
 	s.rawDB = dbConn
 	s.db = storage.NewBidderStore(dbConn)
 	s.publisher = storage.NewPublisherStore(dbConn)
+
+	s.routingLoader = routing.NewLoader(s.publisher)
+	kargo.SetLoader(s.routingLoader)
+	sovrn.SetLoader(s.routingLoader)
+	pubmatic.SetLoader(s.routingLoader)
+	triplelift.SetLoader(s.routingLoader)
+	appnexus.SetLoader(s.routingLoader)
+
 	s.idGraphStore = storage.NewIDGraphStore(dbConn)
 	s.userSyncStore = storage.NewUserSyncStore(dbConn)
 	log.Info().Msg("ID graph store initialized")
@@ -349,7 +359,10 @@ func (s *Server) initHandlers() {
 
 	// Catalyst MAI Publisher integration
 	// Load bidder mapping configuration
-	mappingPath := "config/bizbudding-all-bidders-mapping.json"
+	mappingPath := s.config.BidderMappingPath
+	if mappingPath == "" {
+		mappingPath = "config/bizbudding-all-bidders-mapping.json"
+	}
 	bidderMapping, err := endpoints.LoadBidderMapping(mappingPath)
 	if err != nil {
 		log.Fatal().Err(err).Str("path", mappingPath).Msg("Failed to load bidder mapping")
@@ -400,7 +413,7 @@ func (s *Server) initHandlers() {
 	metricsAPIHandler := endpoints.NewMetricsAPIHandler()
 	publisherAdminHandler := endpoints.NewPublisherAdminHandler(s.redisClient)
 	sspAdminHandler := endpoints.NewSSPAdminHandler(s.publisher, "/admin/ssp-ids")
-	catalystAdminHandler := endpoints.NewOnboardingAdminHandler(s.publisher, s.redisClient, "/catalyst/admin", "assets")
+	catalystAdminHandler := endpoints.NewOnboardingAdminHandler(s.publisher, s.redisClient, s.routingLoader, "/catalyst/admin", "assets")
 	mux.Handle("/admin/dashboard", dashboardHandler)
 	mux.Handle("/admin/metrics", metricsAPIHandler)
 	mux.Handle("/admin/publishers", publisherAdminHandler)

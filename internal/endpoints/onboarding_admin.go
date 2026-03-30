@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/thenexusengine/tne_springwire/internal/adapters/routing"
 	"github.com/thenexusengine/tne_springwire/internal/storage"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 	"github.com/thenexusengine/tne_springwire/pkg/redis"
@@ -29,20 +30,22 @@ const publishersRedisKey = "tne_catalyst:publishers"
 //	GET  /sellers-json      → return current sellers.json content
 //	PUT  /sellers-json      → overwrite sellers.json file
 type OnboardingAdminHandler struct {
-	store       *storage.PublisherStore
-	redisClient *redis.Client
-	basePath    string
-	assetsDir   string
+	store         *storage.PublisherStore
+	redisClient   *redis.Client
+	routingLoader *routing.Loader
+	basePath      string
+	assetsDir     string
 }
 
 // NewOnboardingAdminHandler creates a handler mounted at basePath.
 // assetsDir is the filesystem path to the assets directory (e.g. "./assets" or "/app/assets").
-func NewOnboardingAdminHandler(store *storage.PublisherStore, redisClient *redis.Client, basePath, assetsDir string) *OnboardingAdminHandler {
+func NewOnboardingAdminHandler(store *storage.PublisherStore, redisClient *redis.Client, routingLoader *routing.Loader, basePath, assetsDir string) *OnboardingAdminHandler {
 	return &OnboardingAdminHandler{
-		store:       store,
-		redisClient: redisClient,
-		basePath:    strings.TrimSuffix(basePath, "/"),
-		assetsDir:   assetsDir,
+		store:         store,
+		redisClient:   redisClient,
+		routingLoader: routingLoader,
+		basePath:      strings.TrimSuffix(basePath, "/"),
+		assetsDir:     assetsDir,
 	}
 }
 
@@ -653,6 +656,9 @@ func (h *OnboardingAdminHandler) upsertBidderFieldRule(w http.ResponseWriter, r 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	if h.routingLoader != nil {
+		h.routingLoader.Invalidate(saved.BidderCode)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(saved) //nolint:errcheck

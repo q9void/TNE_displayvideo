@@ -2,16 +2,61 @@
 package rubicon
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
+	"github.com/thenexusengine/tne_springwire/internal/adapters/routing"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
+	"github.com/thenexusengine/tne_springwire/internal/storage"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 )
+
+// defaultLoader is set by the server after startup via SetLoader.
+// nil = Composer disabled (Phase 1 behaviour preserved).
+var defaultLoader *routing.Loader
+
+// SetLoader injects the routing Loader. Call once from cmd/server/server.go after startup.
+func SetLoader(l *routing.Loader) { defaultLoader = l }
+
+// filterNonRPRules returns only rules that don't conflict with Rubicon's
+// native ext.rp nesting logic (those fields are handled by the Go adapter).
+func filterNonRPRules(rules []storage.BidderFieldRule) []storage.BidderFieldRule {
+	out := make([]storage.BidderFieldRule, 0, len(rules))
+	for _, r := range rules {
+		if !strings.HasPrefix(r.FieldPath, "imp.ext.rubicon.") {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// extractSlotParams reads imp[0].ext.rubicon (or imp[0].ext.bidder after PBS translation)
+// into a flat map for the Composer's slotParams argument.
+func extractSlotParams(imps []openrtb.Imp) map[string]interface{} {
+	if len(imps) == 0 || imps[0].Ext == nil {
+		return nil
+	}
+	var outer map[string]json.RawMessage
+	if err := json.Unmarshal(imps[0].Ext, &outer); err != nil {
+		return nil
+	}
+	raw, ok := outer["rubicon"]
+	if !ok {
+		raw, ok = outer["bidder"]
+		if !ok {
+			return nil
+		}
+	}
+	var params map[string]interface{}
+	json.Unmarshal(raw, &params) //nolint:errcheck
+	return params
+}
 
 const (
 	// Authenticated regional endpoint (US-East) — requires RUBICON_XAPI_USER/PASS
@@ -124,6 +169,15 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		// Create a copy of the request for this impression
 		reqCopy := *request
 		impCopy := imp
+
+		// Apply standard-field routing rules (non-rp fields only) before Rubicon-specific ext.rp nesting
+		if defaultLoader != nil {
+			rules := defaultLoader.Get(context.Background(), "rubicon")
+			safeRules := filterNonRPRules(rules)
+			composer := routing.NewComposer(safeRules)
+			composed, _ := composer.Apply("rubicon", &reqCopy, extractSlotParams(reqCopy.Imp), nil, nil)
+			reqCopy = *composed
+		}
 
 		// Transform impression extension to Rubicon's expected format
 		// Task #22: Preserve existing imp.ext.rp.target if it exists
