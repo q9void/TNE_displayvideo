@@ -4,6 +4,7 @@ package pubmatic
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
+	"github.com/thenexusengine/tne_springwire/internal/adapters/routing"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 )
@@ -22,6 +24,30 @@ const (
 	defaultEndpoint = "https://hbopenbid.pubmatic.com/translator?source=prebid-server"
 	bidderPubMatic  = "pubmatic"
 )
+
+var defaultLoader *routing.Loader
+
+func SetLoader(l *routing.Loader) { defaultLoader = l }
+
+func extractSlotParams(imps []openrtb.Imp) map[string]interface{} {
+	if len(imps) == 0 || imps[0].Ext == nil {
+		return nil
+	}
+	var outer map[string]json.RawMessage
+	if err := json.Unmarshal(imps[0].Ext, &outer); err != nil {
+		return nil
+	}
+	raw, ok := outer["pubmatic"]
+	if !ok {
+		raw, ok = outer["bidder"]
+		if !ok {
+			return nil
+		}
+	}
+	var params map[string]interface{}
+	json.Unmarshal(raw, &params) //nolint:errcheck
+	return params
+}
 
 // Adapter implements the PubMatic bidder
 type Adapter struct {
@@ -43,6 +69,14 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 	// Make a copy of the request to avoid modifying the original
 	reqCopy := *request
 	request = &reqCopy
+
+	if defaultLoader != nil {
+		rules := defaultLoader.Get(context.Background(), "pubmatic")
+		composer := routing.NewComposer(rules)
+		composed, _ := composer.Apply("pubmatic", request, extractSlotParams(request.Imp), nil, nil)
+		reqCopy = *composed
+		request = &reqCopy
+	}
 
 	pubID := ""
 	extractWrapperExtFromImp := true
