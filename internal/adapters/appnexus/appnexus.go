@@ -2,11 +2,13 @@
 package appnexus
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
+	"github.com/thenexusengine/tne_springwire/internal/adapters/routing"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 )
@@ -14,6 +16,30 @@ import (
 const (
 	defaultEndpoint = "https://ib.adnxs.com/openrtb2/prebid"
 )
+
+var defaultLoader *routing.Loader
+
+func SetLoader(l *routing.Loader) { defaultLoader = l }
+
+func extractSlotParams(imps []openrtb.Imp) map[string]interface{} {
+	if len(imps) == 0 || imps[0].Ext == nil {
+		return nil
+	}
+	var outer map[string]json.RawMessage
+	if err := json.Unmarshal(imps[0].Ext, &outer); err != nil {
+		return nil
+	}
+	raw, ok := outer["appnexus"]
+	if !ok {
+		raw, ok = outer["bidder"]
+		if !ok {
+			return nil
+		}
+	}
+	var params map[string]interface{}
+	json.Unmarshal(raw, &params) //nolint:errcheck
+	return params
+}
 
 // Adapter implements the AppNexus bidder
 type Adapter struct {
@@ -34,6 +60,13 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 
 	// Create a copy to avoid modifying original
 	requestCopy := *request
+
+	if defaultLoader != nil {
+		rules := defaultLoader.Get(context.Background(), "appnexus")
+		composer := routing.NewComposer(rules)
+		composed, _ := composer.Apply("appnexus", &requestCopy, extractSlotParams(requestCopy.Imp), nil, nil)
+		requestCopy = *composed
+	}
 
 	// Remove Catalyst internal IDs from Site (prevent ID leakage)
 	if requestCopy.Site != nil {
