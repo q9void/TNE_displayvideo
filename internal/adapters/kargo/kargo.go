@@ -4,12 +4,14 @@ package kargo
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
+	"github.com/thenexusengine/tne_springwire/internal/adapters/routing"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 )
@@ -17,6 +19,36 @@ import (
 const (
 	defaultEndpoint = "https://kraken.prod.kargo.com/api/v1/openrtb"
 )
+
+// defaultLoader is set by the server after startup via SetLoader.
+// nil = Composer disabled (Phase 1 behaviour preserved).
+var defaultLoader *routing.Loader
+
+// SetLoader injects the routing Loader. Call once from cmd/server/server.go after startup.
+func SetLoader(l *routing.Loader) { defaultLoader = l }
+
+// extractSlotParams reads imp[0].ext.kargo (or imp[0].ext.bidder after PBS translation)
+// into a flat map for the Composer's slotParams argument.
+func extractSlotParams(imps []openrtb.Imp) map[string]interface{} {
+	if len(imps) == 0 || imps[0].Ext == nil {
+		return nil
+	}
+	var outer map[string]json.RawMessage
+	if err := json.Unmarshal(imps[0].Ext, &outer); err != nil {
+		return nil
+	}
+	// PBS translates imp.ext.{bidder} → imp.ext.bidder; check both.
+	raw, ok := outer["kargo"]
+	if !ok {
+		raw, ok = outer["bidder"]
+		if !ok {
+			return nil
+		}
+	}
+	var params map[string]interface{}
+	json.Unmarshal(raw, &params) //nolint:errcheck
+	return params
+}
 
 // Adapter implements the Kargo bidder
 type Adapter struct {
@@ -38,6 +70,14 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 	// Deep copy Imp slice so we can rewrite imp.ext without mutating the caller's request
 	requestCopy.Imp = make([]openrtb.Imp, len(request.Imp))
 	copy(requestCopy.Imp, request.Imp)
+
+	if defaultLoader != nil {
+		rules := defaultLoader.Get(context.Background(), "kargo")
+		composer := routing.NewComposer(rules)
+		composed, _ := composer.Apply("kargo", &requestCopy, extractSlotParams(requestCopy.Imp), nil, nil)
+		requestCopy = *composed
+	}
+
 	var errs []error
 
 	// NOTE: ID clearing is now handled by Privacy/Consent hook (no longer needed here)
