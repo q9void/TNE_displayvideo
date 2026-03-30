@@ -192,7 +192,7 @@ func (s *PublisherStore) LookupBidderIDByCode(ctx context.Context, code string) 
 		return nil, nil // unknown bidder — allow rule creation anyway
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("LookupBidderIDByCode: %w", err)
 	}
 	return &id, nil
 }

@@ -1,7 +1,6 @@
 package storage_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/thenexusengine/tne_springwire/internal/storage"
@@ -47,6 +46,16 @@ func TestBidderFieldRule_Validate(t *testing.T) {
 			rule:    storage.BidderFieldRule{BidderCode: "kargo", FieldPath: "x", SourceType: "magic"},
 			wantErr: true,
 		},
+		{
+			name:    "empty field_path is invalid",
+			rule:    storage.BidderFieldRule{BidderCode: "kargo", SourceType: "standard"},
+			wantErr: true,
+		},
+		{
+			name:    "empty bidder_code is invalid",
+			rule:    storage.BidderFieldRule{FieldPath: "x", SourceType: "standard"},
+			wantErr: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -59,9 +68,3 @@ func TestBidderFieldRule_Validate(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
-
-// Integration test stub — skipped unless DB is available.
-func TestGetBidderFieldRules_Integration(t *testing.T) {
-	t.Skip("requires live DB — run manually or in CI with DB service")
-	_ = context.Background()
-}
