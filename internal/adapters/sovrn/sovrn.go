@@ -2,6 +2,7 @@
 package sovrn
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,11 +11,36 @@ import (
 	"strings"
 
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
+	"github.com/thenexusengine/tne_springwire/internal/adapters/routing"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 )
 
 const defaultEndpoint = "https://ap.lijit.com/rtb/bid"
+
+var defaultLoader *routing.Loader
+
+func SetLoader(l *routing.Loader) { defaultLoader = l }
+
+func extractSlotParams(imps []openrtb.Imp) map[string]interface{} {
+	if len(imps) == 0 || imps[0].Ext == nil {
+		return nil
+	}
+	var outer map[string]json.RawMessage
+	if err := json.Unmarshal(imps[0].Ext, &outer); err != nil {
+		return nil
+	}
+	raw, ok := outer["sovrn"]
+	if !ok {
+		raw, ok = outer["bidder"]
+		if !ok {
+			return nil
+		}
+	}
+	var params map[string]interface{}
+	json.Unmarshal(raw, &params) //nolint:errcheck
+	return params
+}
 
 // sovrnParams represents Sovrn-specific parameters
 // Task #47: Normalize tagid/tagId spelling - support both for backwards compatibility
@@ -38,6 +64,13 @@ func New(endpoint string) *Adapter {
 func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.ExtraRequestInfo) ([]*adapters.RequestData, []error) {
 	var errs []error
 	requestCopy := *request
+
+	if defaultLoader != nil {
+		rules := defaultLoader.Get(context.Background(), "sovrn")
+		composer := routing.NewComposer(rules)
+		composed, _ := composer.Apply("sovrn", &requestCopy, extractSlotParams(requestCopy.Imp), nil, nil)
+		requestCopy = *composed
+	}
 
 	// NOTE: ID clearing is now handled by Privacy/Consent hook (no longer needed here)
 	// NOTE: SetUserID is now handled by Identity Gating hook (no longer needed here)
