@@ -993,6 +993,105 @@ const onboardingHTML = `<!DOCTYPE html>
       </div>
 
       <!-- SELLERS.JSON -->
+      <!-- ── Bid Request Tab ──────────────────────────────────────────────── -->
+      <div v-show="section === 'bidrules'">
+        <div class="card p-5 mb-4">
+          <div class="flex flex-wrap items-end gap-3">
+            <div class="field mb-0">
+              <label>SSP / Bidder</label>
+              <select v-model="bfrBidder" class="field-input w-48">
+                <option v-for="c in bfrAllBidderCodes" :key="c" :value="c">{{ c }}</option>
+              </select>
+            </div>
+            <button @click="bfrAddRow" class="btn-primary">+ Add Rule</button>
+            <button v-if="bfrBidder !== '__default__'" @click="bfrPreview" class="btn-secondary">Preview JSON &#x2197;</button>
+            <span v-if="bfrErr" class="text-red-400 text-xs ml-auto">{{ bfrErr }}</span>
+          </div>
+        </div>
+
+        <!-- New-row form -->
+        <div v-if="bfrNewRow" class="card p-4 mb-4 border border-indigo-500/40">
+          <div class="text-xs font-semibold text-indigo-400 mb-3">New Rule &#x2014; {{ bfrBidder }}</div>
+          <div class="grid grid-cols-2 gap-3 mb-3 md:grid-cols-4">
+            <div class="field mb-0 col-span-2"><label>Field Path *</label>
+              <input v-model="bfrNewRow.field_path" class="field-input font-mono" placeholder="user.buyeruid"></div>
+            <div class="field mb-0"><label>Source Type *</label>
+              <select v-model="bfrNewRow.source_type" class="field-input">
+                <option>standard</option><option>sdk_param</option><option>http_context</option>
+                <option>account_param</option><option>slot_param</option><option>eid</option><option>constant</option>
+              </select></div>
+            <div class="field mb-0"><label>Source Ref</label>
+              <input v-model="bfrNewRow.source_ref" class="field-input font-mono" placeholder="kargo.com"></div>
+            <div class="field mb-0"><label>Transform</label>
+              <select v-model="bfrNewRow.transform" class="field-input">
+                <option>none</option><option>to_int</option><option>to_string</option>
+                <option>to_string_array</option><option>lowercase</option><option>sha256</option>
+                <option>url_encode</option><option>json_stringify</option><option>array_first</option>
+                <option>csv_to_array</option><option>wrap_ext_rp</option>
+              </select></div>
+            <div class="field mb-0 col-span-2"><label>Notes</label>
+              <input v-model="bfrNewRow.notes" class="field-input" placeholder="optional"></div>
+            <div class="field mb-0 flex items-center gap-2 pt-5">
+              <input type="checkbox" v-model="bfrNewRow.required" id="bfr-req">
+              <label for="bfr-req" class="text-xs cursor-pointer">Required</label>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button @click="bfrSave(bfrNewRow)" :disabled="bfrSaving" class="btn-success text-xs">
+              {{ bfrSaving ? 'Saving&#x2026;' : 'Save Rule' }}
+            </button>
+            <button @click="bfrNewRow=null" class="btn-secondary text-xs">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Rules by section -->
+        <div v-if="bfrSections.length === 0" class="text-gray-500 text-sm text-center py-12">
+          No rules found. Select a bidder or add a rule.
+        </div>
+        <div v-for="sec in bfrSections" :key="sec.label" class="card mb-3 overflow-hidden">
+          <div class="px-4 py-2 bg-white/5 border-b border-white/10 text-xs font-semibold text-gray-300">
+            {{ sec.label }}
+          </div>
+          <table class="w-full text-xs">
+            <thead class="border-b border-white/10">
+              <tr class="text-left text-gray-400 font-medium">
+                <th class="px-3 py-2">Field Path</th>
+                <th class="px-3 py-2">Source</th>
+                <th class="px-3 py-2">Ref / Value</th>
+                <th class="px-3 py-2">Transform</th>
+                <th class="px-3 py-2">Req</th>
+                <th class="px-3 py-2">Notes</th>
+                <th class="px-3 py-2 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="rule in sec.rules" :key="rule.id"
+                  :class="['border-t border-white/5', rule._isOverride ? 'bg-indigo-900/20' : 'hover:bg-white/5']">
+                <td class="px-3 py-2 font-mono text-gray-200 whitespace-nowrap">
+                  <span v-if="rule._isOverride" class="mr-1 px-1 py-0.5 rounded text-indigo-300 bg-indigo-600/30 text-xs">override</span>
+                  {{ rule.field_path }}
+                </td>
+                <td class="px-3 py-2 text-yellow-400 whitespace-nowrap">{{ rule.source_type }}</td>
+                <td class="px-3 py-2 font-mono text-gray-400">{{ rule.source_ref || '&#x2014;' }}</td>
+                <td class="px-3 py-2 text-gray-400">{{ rule.transform !== 'none' ? rule.transform : '&#x2014;' }}</td>
+                <td class="px-3 py-2">
+                  <span v-if="rule.required" class="text-red-400 font-bold">&#x2713;</span>
+                  <span v-else class="text-gray-600">&#x2014;</span>
+                </td>
+                <td class="px-3 py-2 text-gray-500 max-w-xs truncate" :title="rule.notes">{{ rule.notes || '' }}</td>
+                <td class="px-3 py-2 text-right whitespace-nowrap">
+                  <button v-if="rule.bidder_code !== '__default__'" @click="bfrDelete(rule)"
+                    class="text-xs px-2 py-1 rounded bg-red-900/40 hover:bg-red-700/60 text-red-300 transition-colors">
+                    Delete
+                  </button>
+                  <span v-else class="text-gray-600 text-xs">default</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- ── Tags Tab ─────────────────────────────────────────────────────── -->
       <div v-show="section === 'tags'">
         <div class="card p-5 mb-4">
@@ -1492,6 +1591,7 @@ Vue.createApp({
         { id:'defaults', label:'Bidder Defaults',  addLabel:null,          addModal:null         },
         { id:'bidders',  label:'Bidders',          addLabel:null,          addModal:null         },
         { id:'tags',     label:'Export Tags',      addLabel:null,          addModal:null         },
+        { id:'bidrules', label:'Bid Request',       addLabel:null,          addModal:null         },
         { id:'adstxt',   label:'ads.txt',          addLabel:null,          addModal:null         },
         { id:'sellers',  label:'sellers.json',     addLabel:null,          addModal:null         },
         { id:'video',    label:'Video Tags',        addLabel:null,          addModal:null         },
@@ -1525,6 +1625,11 @@ Vue.createApp({
       exportAccount: '',
       exportLoading: false,
       exportCopied:  null,
+      bidderFieldRules: "__BIDDER_FIELD_RULES__",
+      bfrBidder:     '__default__',
+      bfrNewRow:     null,
+      bfrSaving:     false,
+      bfrErr:        '',
       vastForm: {
         pub:'', placement:'pre-roll', w:640, h:480,
         mindur:5, maxdur:30, skip:false, skipafter:5,
@@ -1594,6 +1699,42 @@ Vue.createApp({
       var d = this.getDefaultByDBIDs(this.form._acctDBID, parseInt(this.form.bidder_db_id,10));
       if (!d) return null;
       return Object.keys(d.base_params||{}).join(', ');
+    },
+    bfrForBidder: function() {
+      var self = this;
+      var defaults = {};
+      this.bidderFieldRules.filter(function(r){ return r.bidder_code === '__default__'; })
+        .forEach(function(r){ defaults[r.field_path] = r; });
+      var bidderRules = {};
+      this.bidderFieldRules.filter(function(r){ return r.bidder_code === self.bfrBidder && r.bidder_code !== '__default__'; })
+        .forEach(function(r){ bidderRules[r.field_path] = r; });
+      // Merge: bidder-specific wins
+      var merged = Object.assign({}, defaults, bidderRules);
+      // Return array sorted by field_path, with override flag
+      return Object.values(merged).sort(function(a,b){ return a.field_path.localeCompare(b.field_path); })
+        .map(function(r){
+          return Object.assign({}, r, { _isOverride: !!bidderRules[r.field_path] && r.bidder_code !== '__default__' });
+        });
+    },
+    bfrSections: function() {
+      var sections = [
+        'BidRequest', 'Imp', 'Banner', 'Video', 'Audio', 'Native',
+        'Site', 'App', 'User', 'Device', 'Regs', 'Source'
+      ];
+      var self = this;
+      return sections.map(function(s) {
+        var prefix = s === 'BidRequest' ? '' : s.toLowerCase() + '.';
+        var rules = self.bfrForBidder.filter(function(r){
+          if (s === 'BidRequest') return !r.field_path.includes('.');
+          return r.field_path.startsWith(prefix);
+        });
+        return { label: s, rules: rules };
+      }).filter(function(s){ return s.rules.length > 0; });
+    },
+    bfrAllBidderCodes: function() {
+      var codes = ['__default__'];
+      this.bidders.forEach(function(b){ if (b.code) codes.push(b.code); });
+      return codes;
     },
   },
   methods: {
@@ -1993,6 +2134,43 @@ Vue.createApp({
       } finally {
         this.sellersSaving = false;
       }
+    },
+    bfrSave: async function(rule) {
+      this.bfrSaving = true; this.bfrErr = '';
+      try {
+        var res = await this.apiFetch(this.apiBase+'/bidder-field-rules', 'PUT', rule);
+        if (!res.ok) throw new Error(await res.text());
+        var saved = await res.json();
+        // Replace in local array
+        var idx = this.bidderFieldRules.findIndex(function(r){ return r.id === saved.id; });
+        if (idx >= 0) { this.bidderFieldRules.splice(idx, 1, saved); }
+        else { this.bidderFieldRules.push(saved); }
+        this.bfrNewRow = null;
+        this.showToast('Rule saved', false);
+      } catch(e) {
+        this.bfrErr = e.message;
+        this.showToast('Save failed', true);
+      } finally { this.bfrSaving = false; }
+    },
+    bfrDelete: async function(rule) {
+      if (!confirm('Delete rule for ' + rule.field_path + '?')) return;
+      try {
+        var res = await this.apiFetch(this.apiBase+'/bidder-field-rules/'+rule.id, 'DELETE');
+        if (!res.ok) throw new Error(await res.text());
+        this.bidderFieldRules = this.bidderFieldRules.filter(function(r){ return r.id !== rule.id; });
+        this.showToast('Rule deleted', false);
+      } catch(e) { this.showToast('Delete failed: '+e.message, true); }
+    },
+    bfrAddRow: function() {
+      this.bfrNewRow = {
+        bidder_code: this.bfrBidder, field_path: '', source_type: 'standard',
+        source_ref: null, transform: 'none', required: false, enabled: true, notes: null
+      };
+    },
+    bfrPreview: async function() {
+      if (this.bfrBidder === '__default__') return;
+      var url = this.apiBase+'/bid-request-preview?bidder='+encodeURIComponent(this.bfrBidder);
+      window.open(url, '_blank');
     },
     loadTags: async function() {
       this.exportLoading = true;
