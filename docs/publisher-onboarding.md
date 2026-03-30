@@ -59,7 +59,23 @@ Provide the publisher contact with:
 
 ---
 
-## 2. Publisher Authentication
+## 2. Client-Side Integration (Publisher Action Required)
+
+After provisioning, send the publisher the integration guide:
+
+**[docs/integrations/PUBLISHER_GPT_SETUP.md](integrations/PUBLISHER_GPT_SETUP.md)**
+
+Summary of what publishers must do:
+1. Load `catalyst-sdk.js` and call `catalyst.requestBids()` — no GPT code changes needed
+2. In GAM: create custom key-values (`hb_pb_catalyst`, `hb_adid_catalyst`, `hb_size_catalyst`, `hb_bidder_catalyst`)
+3. In GAM: create price-priority line items targeting `hb_pb_catalyst` at each CPM tier ($0.50 increments)
+4. Add the Catalyst render creative (`/ad/render?adid=%%PATTERN:hb_adid_catalyst%%`) to all line items
+
+Without the GAM line items, bids will flow and targeting will be set but no impression will win.
+
+---
+
+## 3. Publisher Authentication
 
 **Middleware:** `internal/middleware/publisher_auth.go`
 

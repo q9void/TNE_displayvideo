@@ -1,9 +1,13 @@
 package endpoints
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
+	"github.com/thenexusengine/tne_springwire/internal/storage"
 	"github.com/thenexusengine/tne_springwire/pkg/adtag"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 )
@@ -11,12 +15,14 @@ import (
 // AdTagGeneratorHandler handles ad tag generation UI
 type AdTagGeneratorHandler struct {
 	serverURL string
+	store     *storage.PublisherStore
 }
 
 // NewAdTagGeneratorHandler creates a new ad tag generator handler
-func NewAdTagGeneratorHandler(serverURL string) *AdTagGeneratorHandler {
+func NewAdTagGeneratorHandler(serverURL string, store *storage.PublisherStore) *AdTagGeneratorHandler {
 	return &AdTagGeneratorHandler{
 		serverURL: serverURL,
+		store:     store,
 	}
 }
 
@@ -415,4 +421,96 @@ func HandleCatalystSDK(w http.ResponseWriter, r *http.Request) {
 
 	// Serve catalyst-sdk.js from file
 	http.ServeFile(w, r, "assets/catalyst-sdk.js")
+}
+
+// BulkTagResult holds the generated tags for a single ad slot.
+type BulkTagResult struct {
+	AccountID   string `json:"account_id"`
+	AccountName string `json:"account_name"`
+	SlotPattern string `json:"slot_pattern"`
+	SlotName    string `json:"slot_name"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	AsyncTag    string `json:"async_tag"`
+	GAMScript   string `json:"gam_script"`
+	IframeURL   string `json:"iframe_url"`
+}
+
+// HandleBulkExportTags generates ad tags for all slots (optionally filtered by account).
+// GET /admin/adtag/export-bulk?account_id=NXS001&download=1
+func (h *AdTagGeneratorHandler) HandleBulkExportTags(w http.ResponseWriter, r *http.Request) {
+	if h.store == nil {
+		http.Error(w, "store not configured", http.StatusInternalServerError)
+		return
+	}
+
+	accountID := r.URL.Query().Get("account_id")
+	download := r.URL.Query().Get("download") == "1"
+
+	slots, err := h.store.GetAdSlotsForExport(context.Background(), accountID)
+	if err != nil {
+		logger.Log.Error().Err(err).Msg("Failed to query slots for export")
+		http.Error(w, "Failed to query slots", http.StatusInternalServerError)
+		return
+	}
+
+	gen := adtag.NewGenerator(h.serverURL)
+	results := make([]BulkTagResult, 0, len(slots))
+
+	for _, s := range slots {
+		cfg := &adtag.AdTagConfig{
+			ServerURL:   h.serverURL,
+			PublisherID: s.AccountID,
+			PlacementID: s.SlotPattern,
+			Width:       s.Width,
+			Height:      s.Height,
+		}
+
+		asyncTag, _ := gen.Generate(cfg, adtag.FormatAsync)
+		gamTag, _ := gen.Generate(cfg, adtag.FormatGAM)
+		iframeTag, _ := gen.Generate(cfg, adtag.FormatIframe)
+
+		r := BulkTagResult{
+			AccountID:   s.AccountID,
+			AccountName: s.AccountName,
+			SlotPattern: s.SlotPattern,
+			SlotName:    s.SlotName,
+			Width:       s.Width,
+			Height:      s.Height,
+		}
+		if asyncTag != nil {
+			r.AsyncTag = asyncTag.HTML
+		}
+		if gamTag != nil {
+			r.GAMScript = gamTag.GAMScript
+		}
+		if iframeTag != nil {
+			r.IframeURL = iframeTag.IframeURL
+		}
+		results = append(results, r)
+	}
+
+	if download {
+		// Plain-text download: one block per slot separated by comments
+		label := accountID
+		if label == "" {
+			label = "all"
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="tags-%s.txt"`, label))
+		var sb strings.Builder
+		for _, res := range results {
+			sb.WriteString(fmt.Sprintf("/* ===== %s / %s (%dx%d) =====\n   Async Tag\n ===== */\n", res.AccountID, res.SlotPattern, res.Width, res.Height))
+			sb.WriteString(res.AsyncTag)
+			sb.WriteString("\n\n")
+			sb.WriteString(fmt.Sprintf("/* ===== %s / %s - GAM Script ===== */\n", res.AccountID, res.SlotPattern))
+			sb.WriteString(res.GAMScript)
+			sb.WriteString("\n\n")
+		}
+		w.Write([]byte(sb.String())) //nolint:errcheck
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results) //nolint:errcheck
 }

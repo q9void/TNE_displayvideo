@@ -20,6 +20,7 @@
     serverUrl: 'https://ads.thenexusengine.com',
     timeout: 2800, // Client-side timeout (slightly higher than server 2500ms)
     debug: false,
+    autoRefreshGPT: false, // Set true for publishers without their own GPT coordination
     enableGeo: true, // Enable client-side geolocation (15-30% CPM lift)
     geoTimeout: 1000, // Geolocation timeout in ms (don't block bid request)
     userSync: {
@@ -38,6 +39,11 @@
   catalyst._userSyncComplete = false;
   catalyst._pendingBidRequests = [];  // Queued calls waiting for sync
   catalyst._syncedBidders = [];
+
+  // Per-slot bid cache: divId → {auctionId, bidder, cpm}
+  // Populated when targeting is set; consumed by render beacon listeners.
+  catalyst._slotBids = {};
+  catalyst._renderListenersSetUp = false;
 
   // Geolocation cache (15-30% CPM lift when available)
   catalyst._geoCache = {
@@ -284,6 +290,10 @@
       catalyst._config.debug = config.debug;
     }
 
+    if (config.autoRefreshGPT !== undefined) {
+      catalyst._config.autoRefreshGPT = config.autoRefreshGPT;
+    }
+
     // Allow override of user sync settings
     if (config.userSync !== undefined) {
       if (typeof config.userSync === 'boolean') {
@@ -299,6 +309,19 @@
 
     catalyst._initialized = true;
     catalyst.log('Catalyst SDK initialized with accountId:', config.accountId);
+
+    // Disable GPT initial load and take over refresh timing — only when the
+    // publisher has no existing GPT coordination of their own.
+    if (catalyst._config.autoRefreshGPT && window.googletag && window.googletag.cmd) {
+      window.googletag.cmd.push(function() {
+        try {
+          window.googletag.pubads().disableInitialLoad();
+          catalyst.log('GPT initial load disabled — Catalyst will trigger refresh after bids');
+        } catch (e) {
+          catalyst.log('Warning: could not disable GPT initial load:', e.message);
+        }
+      });
+    }
 
     // Trigger user sync IMMEDIATELY (no delay) and wait for completion before callback
     if (catalyst._config.userSync.enabled) {
@@ -528,11 +551,13 @@
     var timeoutId = setTimeout(function() {
       timedOut = true;
       catalyst.log('Bid request timed out after', timeoutMs + 'ms');
-
+      // Still refresh GPT so the page never hangs — only when we own the refresh
+      if (catalyst._config.autoRefreshGPT) {
+        catalyst._refreshGPTSlots(config.slots);
+      }
       if (typeof callback === 'function') {
         callback([]);
       }
-
       delete catalyst._bidRequests[requestId];
     }, timeoutMs);
 
@@ -568,6 +593,21 @@
 
       var bids = response.bids || [];
       catalyst.log('Received', bids.length, 'bids in', elapsedMs + 'ms');
+
+      // Attach auction-level ID to each bid so it's available at render time
+      var auctionId = response.auctionId || '';
+      for (var b = 0; b < bids.length; b++) {
+        bids[b].auctionId = auctionId;
+      }
+
+      // Auto-set GPT targeting and trigger refresh — only for publishers
+      // that opted in via autoRefreshGPT: true (no existing coordination).
+      if (catalyst._config.autoRefreshGPT) {
+        if (bids.length > 0) {
+          catalyst.setTargeting(bids);
+        }
+        catalyst._refreshGPTSlots(config.slots);
+      }
 
       if (typeof callback === 'function') {
         callback(bids);
@@ -1602,6 +1642,16 @@
       return;
     }
 
+    // Cache bid data for render beacon
+    catalyst._slotBids[bid.divId] = {
+      auctionId: bid.auctionId || '',
+      bidder: (bid.meta && bid.meta.networkName) ? bid.meta.networkName : '',
+      cpm: bid.cpm || 0
+    };
+
+    // Register GPT render/viewability listeners once
+    catalyst._setupRenderListeners();
+
     try {
       var pubads = window.googletag.pubads();
 
@@ -1686,6 +1736,116 @@
       }
     } catch (e) {
       catalyst.log('Error setting slot targeting:', e);
+    }
+  };
+
+  /**
+   * Refresh GPT slots corresponding to the given Catalyst slot configs.
+   * Called automatically after bids are set (or after timeout) so publishers
+   * don't need to call googletag.pubads().refresh() themselves.
+   * @param {Array} slots - Array of slot config objects with divId property
+   * @private
+   */
+  catalyst._refreshGPTSlots = function(slots) {
+    if (!window.googletag || !window.googletag.cmd) {
+      return;
+    }
+    var divIds = [];
+    for (var i = 0; i < (slots || []).length; i++) {
+      if (slots[i].divId) { divIds.push(slots[i].divId); }
+    }
+    window.googletag.cmd.push(function() {
+      try {
+        var pubads = window.googletag.pubads();
+        var allSlots = pubads.getSlots();
+        var targetSlots = [];
+        for (var j = 0; j < allSlots.length; j++) {
+          var elemId = allSlots[j].getSlotElementId();
+          if (divIds.indexOf(elemId) !== -1 ||
+              divIds.indexOf(elemId.replace(/^mai-ad-/, '')) !== -1) {
+            targetSlots.push(allSlots[j]);
+          }
+        }
+        if (targetSlots.length > 0) {
+          pubads.refresh(targetSlots);
+          catalyst.log('GPT refresh triggered for', targetSlots.length, 'slot(s)');
+        } else if (divIds.length === 0) {
+          pubads.refresh();
+          catalyst.log('GPT refresh triggered for all slots');
+        } else {
+          catalyst.log('Warning: no GPT slots found matching divIds:', divIds.join(', '));
+        }
+      } catch (e) {
+        catalyst.log('Error refreshing GPT slots:', e);
+      }
+    });
+  };
+
+  /**
+   * Set up GPT slotRenderEnded and impressionViewable listeners (once per page).
+   * Safe to call multiple times — idempotent via _renderListenersSetUp flag.
+   * @private
+   */
+  catalyst._setupRenderListeners = function() {
+    if (catalyst._renderListenersSetUp) {
+      return;
+    }
+    if (!window.googletag || !window.googletag.cmd) {
+      return;
+    }
+    catalyst._renderListenersSetUp = true;
+
+    window.googletag.cmd.push(function() {
+      window.googletag.pubads().addEventListener('slotRenderEnded', function(event) {
+        if (!event.isEmpty) {
+          catalyst._fireRenderBeacon('rendered', event.slot);
+        }
+      });
+
+      window.googletag.pubads().addEventListener('impressionViewable', function(event) {
+        catalyst._fireRenderBeacon('viewable', event.slot);
+      });
+
+      catalyst.log('Catalyst render beacon listeners registered');
+    });
+  };
+
+  /**
+   * Fire a render/viewability beacon to /v1/render.
+   * @param {string} eventType - 'rendered' or 'viewable'
+   * @param {googletag.Slot} slot - GPT slot that fired the event
+   * @private
+   */
+  catalyst._fireRenderBeacon = function(eventType, slot) {
+    try {
+      var divId = slot.getSlotElementId();
+      // Also check without 'mai-ad-' prefix in case GPT uses a different ID
+      var bidData = catalyst._slotBids[divId] ||
+                    catalyst._slotBids[divId.replace(/^mai-ad-/, '')] ||
+                    null;
+
+      if (!bidData || !bidData.auctionId) {
+        // No Catalyst bid for this slot — skip beacon
+        return;
+      }
+
+      var payload = JSON.stringify({
+        auction_id: bidData.auctionId,
+        div_id:     divId,
+        bidder:     bidData.bidder,
+        cpm:        bidData.cpm,
+        event:      eventType
+      });
+
+      var url = catalyst._config.serverUrl + '/v1/render';
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', url, true);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.send(payload);
+
+      catalyst.log('Render beacon fired:', eventType, divId, bidData.bidder, bidData.cpm);
+    } catch (e) {
+      catalyst.log('Error firing render beacon:', e);
     }
   };
 

@@ -16,6 +16,8 @@ services:
       - LOG_LEVEL=debug
       - PBS_TIMEOUT=2500ms
       - TZ=America/New_York
+      - ADMIN_USER=admin
+      - ADMIN_PASSWORD=admin_password
       - CORS_ORIGINS=*
       - CORS_ALLOW_CREDENTIALS=true
       - TRUST_X_FORWARDED_FOR=true

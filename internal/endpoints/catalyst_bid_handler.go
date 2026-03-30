@@ -176,6 +176,7 @@ type MAIGeo struct {
 
 // MAIBidResponse represents the MAI Publisher bid response format
 type MAIBidResponse struct {
+	AuctionID    string   `json:"auctionId"`
 	Bids         []MAIBid `json:"bids"`
 	ResponseTime int      `json:"responseTime"` // In milliseconds
 }
@@ -1556,6 +1557,8 @@ func (h *CatalystBidHandler) convertToMAIResponse(auctionResp *exchange.AuctionR
 	if auctionResp == nil || auctionResp.BidResponse == nil {
 		return maiResp
 	}
+
+	maiResp.AuctionID = auctionResp.BidResponse.ID
 
 	// Extract all bids from all seats
 	for _, seatBid := range auctionResp.BidResponse.SeatBid {

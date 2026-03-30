@@ -135,7 +135,7 @@ func (s *Security) Middleware(next http.Handler) http.Handler {
 		if csp != "" {
 			// Dashboard needs inline scripts and styles
 			if isDashboardPath(r.URL.Path) {
-				h.Set("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'")
+				h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; connect-src 'self' https://cdn.tailwindcss.com; font-src 'self'")
 			} else {
 				h.Set("Content-Security-Policy", csp)
 			}
@@ -178,7 +178,9 @@ func isStaticPath(path string) bool {
 
 // isDashboardPath checks if path is the dashboard (needs relaxed CSP for inline scripts/styles)
 func isDashboardPath(path string) bool {
-	return path == "/admin/dashboard"
+	return path == "/admin/dashboard" ||
+		path == "/catalyst/admin" ||
+		strings.HasPrefix(path, "/catalyst/admin/")
 }
 
 // SetEnabled enables or disables security headers

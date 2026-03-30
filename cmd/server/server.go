@@ -280,7 +280,7 @@ func (s *Server) initHandlers() {
 
 	// Ad tag handlers (direct publisher integration)
 	adTagHandler := endpoints.NewAdTagHandler(s.exchange)
-	adTagGenerator := endpoints.NewAdTagGeneratorHandler(s.config.HostURL)
+	adTagGenerator := endpoints.NewAdTagGeneratorHandler(s.config.HostURL, s.publisher)
 
 	log.Info().Msg("Ad tag handlers initialized")
 
@@ -363,9 +363,12 @@ func (s *Server) initHandlers() {
 	catalystBidHandler := endpoints.NewCatalystBidHandler(s.exchange, bidderMapping, s.publisher, s.userSyncStore, syncAwaiter)
 	mux.Handle("/v1/bid", privacyMiddleware(http.HandlerFunc(catalystBidHandler.HandleBidRequest)))
 
+	renderHandler := endpoints.NewRenderHandler(s.rawDB)
+	mux.HandleFunc("/v1/render", renderHandler.HandleRenderEvent)
+
 	log.Info().
 		Bool("hierarchical_config", s.publisher != nil).
-		Msg("Catalyst MAI Publisher endpoint registered: /v1/bid")
+		Msg("Catalyst MAI Publisher endpoint registered: /v1/bid, /v1/render")
 
 	// Static assets
 	mux.HandleFunc("/assets/tne-ads.js", endpoints.HandleAssets)
@@ -392,15 +395,27 @@ func (s *Server) initHandlers() {
 	mux.HandleFunc("/admin/currency", s.currencyStatsHandler)
 	mux.HandleFunc("/admin/adtag/generator", adTagGenerator.HandleGeneratorUI)
 	mux.HandleFunc("/admin/adtag/generate", adTagGenerator.HandleGenerateTag)
+	mux.HandleFunc("/admin/adtag/export-bulk", adTagGenerator.HandleBulkExportTags)
 	dashboardHandler := endpoints.NewDashboardHandler()
 	metricsAPIHandler := endpoints.NewMetricsAPIHandler()
 	publisherAdminHandler := endpoints.NewPublisherAdminHandler(s.redisClient)
+	sspAdminHandler := endpoints.NewSSPAdminHandler(s.publisher, "/admin/ssp-ids")
+	catalystAdminHandler := endpoints.NewOnboardingAdminHandler(s.publisher, s.redisClient, "/catalyst/admin", "assets")
 	mux.Handle("/admin/dashboard", dashboardHandler)
 	mux.Handle("/admin/metrics", metricsAPIHandler)
 	mux.Handle("/admin/publishers", publisherAdminHandler)
 	mux.Handle("/admin/publishers/", publisherAdminHandler)
+	mux.Handle("/admin/ssp-ids", sspAdminHandler)
+	mux.Handle("/admin/ssp-ids/", sspAdminHandler)
+	mux.Handle("/catalyst/admin", catalystAdminHandler)
+	mux.Handle("/catalyst/admin/", catalystAdminHandler)
+	mux.HandleFunc("/ads.txt", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "assets/ads.txt")
+	})
 
 	log.Info().Msg("Admin tag generator registered: /admin/adtag/generator")
+	log.Info().Msg("Onboarding admin registered: /catalyst/admin")
+	log.Info().Msg("SSP ID manager registered: /admin/ssp-ids")
 
 	// Version endpoint (similar to Prebid Server)
 	mux.HandleFunc("/version", versionHandler)

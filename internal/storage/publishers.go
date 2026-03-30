@@ -508,12 +508,82 @@ func (s *PublisherStore) GetSlotBidderConfigs(ctx context.Context, accountID, do
 		result[bidderCode] = params
 	}
 
-	// Check for iteration errors
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating bidder configs: %w", err)
 	}
 
+	// Merge account-level defaults (tier 1) under slot params (tier 2 wins on conflict).
+	// Failures here are non-fatal — we still return the slot-only params.
+	if defaults, err := s.getAccountBidderDefaultsMap(ctx, accountID); err == nil {
+		for code, def := range defaults {
+			if slot, ok := result[code]; ok {
+				result[code] = mergeBidderParams(def, slot)
+			}
+		}
+	}
+
 	return result, nil
+}
+
+// SlotBidderConfigRow is a flat view of slot_bidder_configs with joined account/domain/bidder info.
+type SlotBidderConfigRow struct {
+	ID           int             `json:"id"`
+	AccountID    string          `json:"account_id"`
+	Domain       string          `json:"domain"`
+	AdSlotID     int             `json:"ad_slot_id"`
+	SlotPattern  string          `json:"slot_pattern"`
+	BidderID     int             `json:"bidder_id"`
+	BidderCode   string          `json:"bidder_code"`
+	DeviceType   string          `json:"device_type"`
+	BidderParams json.RawMessage `json:"bidder_params"`
+	Status       string          `json:"status"`
+}
+
+// GetAllSlotBidderConfigs returns all slot_bidder_configs rows with joined account/domain/bidder info.
+func (s *PublisherStore) GetAllSlotBidderConfigs(ctx context.Context) ([]SlotBidderConfigRow, error) {
+	query := `
+		SELECT sbc.id, a.account_id, p.domain, sbc.ad_slot_id, s.slot_pattern,
+		       sbc.bidder_id, b.code AS bidder_code, sbc.device_type, sbc.bidder_params, sbc.status
+		FROM slot_bidder_configs sbc
+		JOIN ad_slots s       ON sbc.ad_slot_id = s.id
+		JOIN publishers_new p ON s.publisher_id = p.id
+		JOIN accounts a       ON p.account_id   = a.id
+		JOIN bidders_new b    ON sbc.bidder_id   = b.id
+		ORDER BY a.account_id, p.domain, s.slot_pattern, b.code, sbc.device_type
+	`
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all slot bidder configs: %w", err)
+	}
+	defer rows.Close()
+
+	var result []SlotBidderConfigRow
+	for rows.Next() {
+		var row SlotBidderConfigRow
+		if err := rows.Scan(&row.ID, &row.AccountID, &row.Domain, &row.AdSlotID, &row.SlotPattern,
+			&row.BidderID, &row.BidderCode, &row.DeviceType, &row.BidderParams, &row.Status); err != nil {
+			return nil, fmt.Errorf("failed to scan slot bidder config row: %w", err)
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating slot bidder configs: %w", err)
+	}
+	return result, nil
+}
+
+// UpdateSlotBidderParams updates the bidder_params JSON for a specific slot_bidder_configs row.
+func (s *PublisherStore) UpdateSlotBidderParams(ctx context.Context, id int, params json.RawMessage) error {
+
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE slot_bidder_configs SET bidder_params = $2, updated_at = NOW() WHERE id = $1`,
+		id, params,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update slot bidder params: %w", err)
+	}
+	return nil
 }
 
 // GetByAccountID retrieves publisher information by account ID
@@ -546,4 +616,383 @@ func (s *PublisherStore) GetByAccountID(ctx context.Context, accountID string) (
 	}
 
 	return &pub, nil
+}
+
+// ============================================================================
+// Onboarding admin — structs and CRUD helpers
+// ============================================================================
+
+// AccountRow is a flat view of an account row for admin display.
+type AccountRow struct {
+	ID         int            `json:"id"`
+	AccountID  string         `json:"account_id"`
+	Name       string         `json:"name"`
+	Status     string         `json:"status"`
+	Publishers []PublisherRow `json:"publishers"`
+}
+
+// PublisherRow is a flat view of a publishers_new row for admin display.
+type PublisherRow struct {
+	ID     int    `json:"id"`
+	Domain string `json:"domain"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
+// AdSlotRow is a flat view of an ad_slots row with account/domain context.
+type AdSlotRow struct {
+	ID          int    `json:"id"`
+	AccountID   string `json:"account_id"`
+	PublisherID int    `json:"publisher_id"`
+	Domain      string `json:"domain"`
+	SlotPattern string `json:"slot_pattern"`
+	SlotName    string `json:"slot_name"`
+	IsAdhesion  bool   `json:"is_adhesion"`
+	Status      string `json:"status"`
+}
+
+// BidderRow is a flat view of a bidders_new row for admin display.
+type BidderRow struct {
+	ID          int             `json:"id"`
+	Code        string          `json:"code"`
+	Name        string          `json:"name"`
+	ParamSchema json.RawMessage `json:"param_schema"`
+}
+
+// GetAllAccountsWithPublishers returns all accounts with their nested publishers.
+func (s *PublisherStore) GetAllAccountsWithPublishers(ctx context.Context) ([]AccountRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT a.id, a.account_id, COALESCE(a.name,''), a.status,
+		       COALESCE(p.id,0), COALESCE(p.domain,''), COALESCE(p.name,''), COALESCE(p.status,'')
+		FROM accounts a
+		LEFT JOIN publishers_new p ON p.account_id = a.id
+		ORDER BY a.account_id, p.domain
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query accounts: %w", err)
+	}
+	defer rows.Close()
+
+	var result []AccountRow
+	accountIdx := map[int]int{}
+	for rows.Next() {
+		var aID int
+		var aAccID, aName, aStatus string
+		var pID int
+		var pDomain, pName, pStatus string
+		if err := rows.Scan(&aID, &aAccID, &aName, &aStatus, &pID, &pDomain, &pName, &pStatus); err != nil {
+			return nil, fmt.Errorf("failed to scan account row: %w", err)
+		}
+		idx, exists := accountIdx[aID]
+		if !exists {
+			result = append(result, AccountRow{ID: aID, AccountID: aAccID, Name: aName, Status: aStatus})
+			idx = len(result) - 1
+			accountIdx[aID] = idx
+		}
+		if pID > 0 {
+			result[idx].Publishers = append(result[idx].Publishers, PublisherRow{
+				ID: pID, Domain: pDomain, Name: pName, Status: pStatus,
+			})
+		}
+	}
+	return result, rows.Err()
+}
+
+// GetAllAdSlots returns all ad slots with publisher/account context.
+func (s *PublisherStore) GetAllAdSlots(ctx context.Context) ([]AdSlotRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT s.id, a.account_id, p.id, p.domain, s.slot_pattern,
+		       COALESCE(s.slot_name,''), s.is_adhesion, s.status
+		FROM ad_slots s
+		JOIN publishers_new p ON s.publisher_id = p.id
+		JOIN accounts a       ON p.account_id = a.id
+		ORDER BY a.account_id, p.domain, s.slot_pattern
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query ad slots: %w", err)
+	}
+	defer rows.Close()
+
+	var result []AdSlotRow
+	for rows.Next() {
+		var r AdSlotRow
+		if err := rows.Scan(&r.ID, &r.AccountID, &r.PublisherID, &r.Domain,
+			&r.SlotPattern, &r.SlotName, &r.IsAdhesion, &r.Status); err != nil {
+			return nil, fmt.Errorf("failed to scan ad slot row: %w", err)
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// GetAllBidders returns all active bidders with their param schemas.
+func (s *PublisherStore) GetAllBidders(ctx context.Context) ([]BidderRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, code, COALESCE(name,''), COALESCE(param_schema,'null'::jsonb)
+		FROM bidders_new
+		WHERE status = 'active'
+		ORDER BY code
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query bidders: %w", err)
+	}
+	defer rows.Close()
+
+	var result []BidderRow
+	for rows.Next() {
+		var r BidderRow
+		if err := rows.Scan(&r.ID, &r.Code, &r.Name, &r.ParamSchema); err != nil {
+			return nil, fmt.Errorf("failed to scan bidder row: %w", err)
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// CreateAccountIfNotExists creates or upserts an account row and returns its DB id.
+func (s *PublisherStore) CreateAccountIfNotExists(ctx context.Context, accountID, name string) (int, error) {
+	var id int
+	err := s.db.QueryRowContext(ctx, `
+		INSERT INTO accounts (account_id, name)
+		VALUES ($1, $2)
+		ON CONFLICT (account_id) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()
+		RETURNING id
+	`, accountID, name).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("failed to upsert account: %w", err)
+	}
+	return id, nil
+}
+
+// CreatePublisher inserts a publishers_new row. Returns (id, nil) on success
+// or (0, nil) if the row already exists (idempotent).
+func (s *PublisherStore) CreatePublisher(ctx context.Context, accountDBID int, domain, name string) (int, error) {
+	var id int
+	err := s.db.QueryRowContext(ctx, `
+		INSERT INTO publishers_new (account_id, domain, name)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (account_id, domain) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()
+		RETURNING id
+	`, accountDBID, domain, name).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("failed to upsert publisher: %w", err)
+	}
+	return id, nil
+}
+
+// CreateAdSlot inserts an ad_slots row. Returns the new row's id.
+func (s *PublisherStore) CreateAdSlot(ctx context.Context, publisherDBID int, slotPattern, slotName string) (int, error) {
+	var id int
+	err := s.db.QueryRowContext(ctx, `
+		INSERT INTO ad_slots (publisher_id, slot_pattern, slot_name)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (publisher_id, slot_pattern) DO UPDATE SET slot_name = EXCLUDED.slot_name, updated_at = NOW()
+		RETURNING id
+	`, publisherDBID, slotPattern, slotName).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("failed to upsert ad slot: %w", err)
+	}
+	return id, nil
+}
+
+// CreateSlotBidderConfig inserts a slot_bidder_configs row (idempotent on conflict).
+func (s *PublisherStore) CreateSlotBidderConfig(ctx context.Context, adSlotID, bidderDBID int, deviceType string, params json.RawMessage) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO slot_bidder_configs (ad_slot_id, bidder_id, device_type, bidder_params)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (ad_slot_id, bidder_id, device_type) DO NOTHING
+	`, adSlotID, bidderDBID, deviceType, params)
+	if err != nil {
+		return fmt.Errorf("failed to insert slot bidder config: %w", err)
+	}
+	return nil
+}
+
+// UpdatePublisher updates a publisher's domain, name, and status by ID.
+func (s *PublisherStore) UpdatePublisher(ctx context.Context, id int, domain, name, status string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE publishers_new SET domain=$2, name=$3, status=$4, updated_at=NOW() WHERE id=$1
+	`, id, domain, name, status)
+	if err != nil {
+		return fmt.Errorf("failed to update publisher %d: %w", id, err)
+	}
+	return nil
+}
+
+// UpdateAdSlot updates an ad slot's pattern, name, and status by ID.
+func (s *PublisherStore) UpdateAdSlot(ctx context.Context, id int, slotPattern, slotName, status string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE ad_slots SET slot_pattern=$2, slot_name=$3, status=$4, updated_at=NOW() WHERE id=$1
+	`, id, slotPattern, slotName, status)
+	if err != nil {
+		return fmt.Errorf("failed to update ad slot %d: %w", id, err)
+	}
+	return nil
+}
+
+// UpdateSlotBidderConfigFull replaces all editable fields of a slot_bidder_configs row.
+func (s *PublisherStore) UpdateSlotBidderConfigFull(ctx context.Context, id, adSlotID, bidderDBID int, deviceType string, params json.RawMessage) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE slot_bidder_configs SET ad_slot_id=$2, bidder_id=$3, device_type=$4, bidder_params=$5 WHERE id=$1
+	`, id, adSlotID, bidderDBID, deviceType, params)
+	if err != nil {
+		return fmt.Errorf("failed to update slot bidder config %d: %w", id, err)
+	}
+	return nil
+}
+
+// UpdateBidderName updates the display name of a bidder by ID.
+func (s *PublisherStore) UpdateBidderName(ctx context.Context, id int, name string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE bidders_new SET name=$2 WHERE id=$1`, id, name)
+	if err != nil {
+		return fmt.Errorf("failed to update bidder %d: %w", id, err)
+	}
+	return nil
+}
+
+// ─── Account Bidder Defaults ──────────────────────────────────────────────────
+
+// AccountBidderDefault holds account-level SSP params shared across all slots.
+type AccountBidderDefault struct {
+	AccountDBID int             `json:"account_db_id"`
+	AccountID   string          `json:"account_id"`
+	BidderID    int             `json:"bidder_id"`
+	BidderCode  string          `json:"bidder_code"`
+	BaseParams  json.RawMessage `json:"base_params"`
+}
+
+// GetAllAccountBidderDefaults returns all rows from account_bidder_defaults with joined account/bidder info.
+func (s *PublisherStore) GetAllAccountBidderDefaults(ctx context.Context) ([]AccountBidderDefault, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT abd.account_id, a.account_id, abd.bidder_id, b.code, abd.base_params
+		FROM account_bidder_defaults abd
+		JOIN accounts a     ON abd.account_id = a.id
+		JOIN bidders_new b  ON abd.bidder_id  = b.id
+		ORDER BY a.account_id, b.code
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query account bidder defaults: %w", err)
+	}
+	defer rows.Close()
+	var result []AccountBidderDefault
+	for rows.Next() {
+		var r AccountBidderDefault
+		if err := rows.Scan(&r.AccountDBID, &r.AccountID, &r.BidderID, &r.BidderCode, &r.BaseParams); err != nil {
+			return nil, fmt.Errorf("failed to scan account bidder default: %w", err)
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// UpsertAccountBidderDefault creates or replaces the base params for a given account+bidder pair.
+func (s *PublisherStore) UpsertAccountBidderDefault(ctx context.Context, accountDBID, bidderDBID int, params json.RawMessage) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO account_bidder_defaults (account_id, bidder_id, base_params, updated_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (account_id, bidder_id) DO UPDATE
+		    SET base_params = EXCLUDED.base_params, updated_at = NOW()
+	`, accountDBID, bidderDBID, params)
+	if err != nil {
+		return fmt.Errorf("failed to upsert account bidder default: %w", err)
+	}
+	return nil
+}
+
+// getAccountBidderDefaultsMap returns a map[bidderCode]map[string]interface{} for the given accountID string.
+// Used internally to merge into slot configs at auction time.
+func (s *PublisherStore) getAccountBidderDefaultsMap(ctx context.Context, accountID string) (map[string]map[string]interface{}, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT b.code, abd.base_params
+		FROM account_bidder_defaults abd
+		JOIN accounts a    ON abd.account_id = a.id
+		JOIN bidders_new b ON abd.bidder_id  = b.id
+		WHERE a.account_id = $1
+	`, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query account bidder defaults for %s: %w", accountID, err)
+	}
+	defer rows.Close()
+	result := map[string]map[string]interface{}{}
+	for rows.Next() {
+		var code string
+		var raw json.RawMessage
+		if err := rows.Scan(&code, &raw); err != nil {
+			return nil, err
+		}
+		var m map[string]interface{}
+		if err := json.Unmarshal(raw, &m); err == nil {
+			result[code] = m
+		}
+	}
+	return result, rows.Err()
+}
+
+// mergeBidderParams merges base (account-level) params with slot-level overrides.
+// Slot-level values win on conflict. Both inputs may be nil.
+func mergeBidderParams(base, slot map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(base)+len(slot))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range slot {
+		out[k] = v
+	}
+	return out
+}
+
+// AdSlotExportRow holds the data needed to generate an ad tag for a slot.
+type AdSlotExportRow struct {
+	AccountID   string `json:"account_id"`
+	AccountName string `json:"account_name"`
+	SlotPattern string `json:"slot_pattern"`
+	SlotName    string `json:"slot_name"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+}
+
+// GetAdSlotsForExport returns all ad slots (optionally filtered by account) with
+// the first banner size from their media type profile (defaults to 300×250).
+func (s *PublisherStore) GetAdSlotsForExport(ctx context.Context, accountID string) ([]AdSlotExportRow, error) {
+	ctx, cancel := withTimeout(ctx, DefaultDBTimeout)
+	defer cancel()
+
+	query := `
+		SELECT
+			a.account_id,
+			a.name,
+			sl.slot_pattern,
+			sl.slot_name,
+			COALESCE(
+				NULLIF((mtp.media_types->'banner'->'sizes'->0->>0)::text, '')::integer,
+				300
+			) AS width,
+			COALESCE(
+				NULLIF((mtp.media_types->'banner'->'sizes'->0->>1)::text, '')::integer,
+				250
+			) AS height
+		FROM ad_slots sl
+		JOIN publishers_new p ON p.id = sl.publisher_id
+		JOIN accounts a ON a.id = p.account_id
+		LEFT JOIN media_type_profiles mtp ON mtp.id = sl.media_type_profile_id
+		WHERE ($1 = '' OR a.account_id = $1)
+		  AND sl.status = 'active'
+		ORDER BY a.account_id, sl.slot_pattern
+	`
+
+	rows, err := s.db.QueryContext(ctx, query, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query ad slots for export: %w", err)
+	}
+	defer rows.Close()
+
+	var result []AdSlotExportRow
+	for rows.Next() {
+		var r AdSlotExportRow
+		if err := rows.Scan(&r.AccountID, &r.AccountName, &r.SlotPattern, &r.SlotName, &r.Width, &r.Height); err != nil {
+			return nil, fmt.Errorf("failed to scan ad slot export row: %w", err)
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
 }

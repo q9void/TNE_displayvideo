@@ -8,68 +8,98 @@ import (
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
 )
 
-// AdminAuth middleware protects admin endpoints with API key authentication
+// AdminAuth middleware protects admin endpoints with API key or HTTP Basic Auth.
+// Accepts either:
+//   - Bearer token matching ADMIN_API_KEY
+//   - HTTP Basic Auth with ADMIN_USER / ADMIN_PASSWORD credentials
 func AdminAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth for non-admin paths
-		if !strings.HasPrefix(r.URL.Path, "/admin/") {
+		isAdmin := strings.HasPrefix(r.URL.Path, "/admin/") ||
+			strings.HasPrefix(r.URL.Path, "/catalyst/admin")
+		if !isAdmin {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// Get admin API key from environment
 		adminAPIKey := os.Getenv("ADMIN_API_KEY")
+		adminUser := os.Getenv("ADMIN_USER")
+		adminPassword := os.Getenv("ADMIN_PASSWORD")
 		authRequired := os.Getenv("ADMIN_AUTH_REQUIRED") != "false" // Default: true
 
-		if adminAPIKey == "" {
+		anyCredConfigured := adminAPIKey != "" || (adminUser != "" && adminPassword != "")
+
+		if !anyCredConfigured {
 			if authRequired {
-				// FAIL CLOSED - reject when key not configured
 				logger.Log.Error().
 					Str("path", r.URL.Path).
 					Str("remote_addr", r.RemoteAddr).
-					Msg("Admin endpoint access denied - ADMIN_API_KEY not set")
-				http.Error(w, "Admin endpoints disabled - ADMIN_API_KEY not set", http.StatusForbidden)
+					Msg("Admin endpoint access denied - no admin credentials configured")
+				http.Error(w, "Admin endpoints disabled - no admin credentials configured", http.StatusForbidden)
 				return
 			}
 			// Dev mode - log warning and allow
 			logger.Log.Warn().
 				Str("path", r.URL.Path).
 				Str("remote_addr", r.RemoteAddr).
-				Msg("ADMIN_API_KEY not set - endpoints unprotected (dev mode)")
+				Msg("No admin credentials set - endpoints unprotected (dev mode)")
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// Check Authorization header
 		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			logger.Log.Warn().
-				Str("path", r.URL.Path).
-				Str("remote_addr", r.RemoteAddr).
-				Msg("Admin endpoint access denied - no Authorization header")
-			http.Error(w, "Unauthorized - Admin API key required", http.StatusUnauthorized)
+
+		// Try HTTP Basic Auth (browser-friendly, for HTML admin pages)
+		if adminUser != "" && adminPassword != "" && strings.HasPrefix(authHeader, "Basic ") {
+			user, pass, ok := r.BasicAuth()
+			if ok && user == adminUser && pass == adminPassword {
+				logger.Log.Info().
+					Str("path", r.URL.Path).
+					Str("remote_addr", r.RemoteAddr).
+					Msg("Admin endpoint access granted via basic auth")
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Invalid basic auth credentials — challenge again
+			w.Header().Set("WWW-Authenticate", `Basic realm="TNE Admin"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		// Support both "Bearer TOKEN" and "TOKEN" formats
-		token := strings.TrimPrefix(authHeader, "Bearer ")
-		token = strings.TrimSpace(token)
-
-		if token != adminAPIKey {
+		// Try Bearer token / API key
+		if adminAPIKey != "" {
+			if authHeader == "" {
+				// If basic auth is configured, send WWW-Authenticate to trigger browser prompt
+				if adminUser != "" && adminPassword != "" {
+					w.Header().Set("WWW-Authenticate", `Basic realm="TNE Admin"`)
+				}
+				logger.Log.Warn().
+					Str("path", r.URL.Path).
+					Str("remote_addr", r.RemoteAddr).
+					Msg("Admin endpoint access denied - no Authorization header")
+				http.Error(w, "Unauthorized - Admin credentials required", http.StatusUnauthorized)
+				return
+			}
+			token := strings.TrimPrefix(authHeader, "Bearer ")
+			token = strings.TrimSpace(token)
+			if token == adminAPIKey {
+				logger.Log.Info().
+					Str("path", r.URL.Path).
+					Str("remote_addr", r.RemoteAddr).
+					Msg("Admin endpoint access granted via API key")
+				next.ServeHTTP(w, r)
+				return
+			}
 			logger.Log.Warn().
 				Str("path", r.URL.Path).
 				Str("remote_addr", r.RemoteAddr).
-				Msg("Admin endpoint access denied - invalid API key")
-			http.Error(w, "Unauthorized - Invalid admin API key", http.StatusUnauthorized)
+				Msg("Admin endpoint access denied - invalid credentials")
+			http.Error(w, "Unauthorized - Invalid admin credentials", http.StatusUnauthorized)
 			return
 		}
 
-		// Authentication successful
-		logger.Log.Info().
-			Str("path", r.URL.Path).
-			Str("remote_addr", r.RemoteAddr).
-			Msg("Admin endpoint access granted")
-
-		next.ServeHTTP(w, r)
+		// Only basic auth configured but no Basic auth header present — trigger browser prompt
+		w.Header().Set("WWW-Authenticate", `Basic realm="TNE Admin"`)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 	})
 }
