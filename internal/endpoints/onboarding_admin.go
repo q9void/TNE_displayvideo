@@ -132,6 +132,27 @@ func (h *OnboardingAdminHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		} else {
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		}
+	case sub == "/bidder-field-rules":
+		switch r.Method {
+		case http.MethodGet:
+			h.getBidderFieldRules(w, r)
+		case http.MethodPut:
+			h.upsertBidderFieldRule(w, r)
+		default:
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		}
+	case strings.HasPrefix(sub, "/bidder-field-rules/"):
+		if r.Method == http.MethodDelete {
+			h.deleteBidderFieldRule(w, r, strings.TrimPrefix(sub, "/bidder-field-rules/"))
+		} else {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		}
+	case sub == "/bid-request-preview":
+		if r.Method == http.MethodGet {
+			h.bidRequestPreview(w, r)
+		} else {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		}
 	default:
 		http.NotFound(w, r)
 	}
@@ -197,6 +218,16 @@ func (h *OnboardingAdminHandler) serveUI(w http.ResponseWriter, r *http.Request)
 	biddersJSON, _ := json.Marshal(bidders)
 	accountDefaultsJSON, _ := json.Marshal(accountDefaults)
 
+	fieldRules, err := h.store.GetAllBidderFieldRules(ctx)
+	if err != nil {
+		logger.Log.Warn().Err(err).Msg("onboarding admin: failed to load bidder field rules")
+		fieldRules = []storage.BidderFieldRule{}
+	}
+	if fieldRules == nil {
+		fieldRules = []storage.BidderFieldRule{}
+	}
+	fieldRulesJSON, _ := json.Marshal(fieldRules)
+
 	adsTxtContent := h.readAsset("ads.txt")
 	sellersJSONContent := h.readAsset("sellers.json")
 	adsTxtEsc, _ := json.Marshal(adsTxtContent)
@@ -215,6 +246,7 @@ func (h *OnboardingAdminHandler) serveUI(w http.ResponseWriter, r *http.Request)
 	page = strings.ReplaceAll(page, `"__SSP_CONFIGS__"`, string(configsJSON))
 	page = strings.ReplaceAll(page, `"__BIDDERS__"`, string(biddersJSON))
 	page = strings.ReplaceAll(page, `"__ACCOUNT_DEFAULTS__"`, string(accountDefaultsJSON))
+	page = strings.ReplaceAll(page, `"__BIDDER_FIELD_RULES__"`, string(fieldRulesJSON))
 	page = strings.ReplaceAll(page, `"__ADS_TXT__"`, string(adsTxtEsc))
 	page = strings.ReplaceAll(page, `"__SELLERS_JSON__"`, string(sellersJSONEsc))
 	page = strings.ReplaceAll(page, "__AUTH_HEADER__", authHeader)
@@ -576,6 +608,90 @@ func (h *OnboardingAdminHandler) readAsset(name string) string {
 		return ""
 	}
 	return string(data)
+}
+
+// ─── Bidder Field Rules ───────────────────────────────────────────────────────
+
+func (h *OnboardingAdminHandler) getBidderFieldRules(w http.ResponseWriter, r *http.Request) {
+	bidderCode := r.URL.Query().Get("bidder_code")
+	ctx := r.Context()
+	var (
+		rules []storage.BidderFieldRule
+		err   error
+	)
+	if bidderCode != "" {
+		rules, err = h.store.GetBidderFieldRules(ctx, bidderCode)
+	} else {
+		rules, err = h.store.GetAllBidderFieldRules(ctx)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if rules == nil {
+		rules = []storage.BidderFieldRule{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(rules) //nolint:errcheck
+}
+
+func (h *OnboardingAdminHandler) upsertBidderFieldRule(w http.ResponseWriter, r *http.Request) {
+	var rule storage.BidderFieldRule
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	// Resolve bidder_id from code so callers don't need to know the DB id.
+	bidderID, err := h.store.LookupBidderIDByCode(ctx, rule.BidderCode)
+	if err != nil {
+		logger.Log.Warn().Err(err).Str("code", rule.BidderCode).Msg("upsertBidderFieldRule: bidder lookup failed")
+	}
+	rule.BidderID = bidderID
+
+	saved, err := h.store.UpsertBidderFieldRule(ctx, rule)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(saved) //nolint:errcheck
+}
+
+func (h *OnboardingAdminHandler) deleteBidderFieldRule(w http.ResponseWriter, r *http.Request, idStr string) {
+	var id int
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		http.Error(w, "invalid rule id", http.StatusBadRequest)
+		return
+	}
+	if err := h.store.DeleteBidderFieldRule(r.Context(), id); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *OnboardingAdminHandler) bidRequestPreview(w http.ResponseWriter, r *http.Request) {
+	// Phase 1 stub: return the rules for the requested bidder as pretty JSON.
+	// Phase 2 will assemble a real OpenRTB request.
+	bidderCode := r.URL.Query().Get("bidder")
+	if bidderCode == "" {
+		http.Error(w, "bidder param required", http.StatusBadRequest)
+		return
+	}
+	rules, err := h.store.GetBidderFieldRules(r.Context(), bidderCode)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	enc.Encode(map[string]interface{}{
+		"bidder": bidderCode,
+		"note":   "Phase 1 stub — shows active rules. Phase 2 will return assembled OpenRTB JSON.",
+		"rules":  rules,
+	}) //nolint:errcheck
 }
 
 // ─── HTML ─────────────────────────────────────────────────────────────────────
@@ -953,6 +1069,141 @@ const onboardingHTML = `<!DOCTYPE html>
         </div>
       </div>
 
+      <div v-show="section === 'video'" class="max-w-4xl">
+        <div class="card p-5 flex flex-col gap-5">
+          <div class="text-sm font-semibold text-white">Video Tag Generator</div>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="field col-span-2">
+              <label>Publisher *</label>
+              <select v-model="vastForm.pub" class="field-input">
+                <option value="">— select publisher —</option>
+                <option v-for="a in accounts" :key="a.account_id" :value="a.account_id">{{ a.account_id }} — {{ a.name }}</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Placement name</label>
+              <input v-model="vastForm.placement" class="field-input" placeholder="pre-roll">
+            </div>
+            <div class="field">
+              <label>Dimensions (w × h)</label>
+              <div class="flex gap-2 items-center">
+                <input v-model.number="vastForm.w" type="number" class="field-input" placeholder="640">
+                <span class="text-gray-400">×</span>
+                <input v-model.number="vastForm.h" type="number" class="field-input" placeholder="480">
+              </div>
+            </div>
+            <div class="field">
+              <label>Min duration (s)</label>
+              <input v-model.number="vastForm.mindur" type="number" class="field-input" placeholder="5">
+            </div>
+            <div class="field">
+              <label>Max duration (s)</label>
+              <input v-model.number="vastForm.maxdur" type="number" class="field-input" placeholder="30">
+            </div>
+            <div class="field">
+              <label>Skippable</label>
+              <label class="flex items-center gap-2 mt-1 cursor-pointer">
+                <input type="checkbox" v-model="vastForm.skip" class="w-4 h-4">
+                <span class="text-gray-300 text-sm">Allow skip</span>
+              </label>
+            </div>
+            <div class="field" v-if="vastForm.skip">
+              <label>Skip after (s)</label>
+              <input v-model.number="vastForm.skipafter" type="number" class="field-input" placeholder="5">
+            </div>
+            <div class="field">
+              <label>Bid floor ($)</label>
+              <input v-model="vastForm.bidfloor" class="field-input" placeholder="0.00">
+            </div>
+            <div class="field">
+              <label>Domain</label>
+              <input v-model="vastForm.domain" class="field-input" placeholder="publisher.com">
+            </div>
+            <div class="field col-span-2">
+              <label>Page URL <span class="text-gray-500 font-normal">(optional)</span></label>
+              <input v-model="vastForm.page" class="field-input" placeholder="https://publisher.com/article">
+            </div>
+            <div class="field">
+              <label>Placement type</label>
+              <select v-model.number="vastForm.placement_type" class="field-input">
+                <option :value="1">In-stream (1)</option>
+                <option :value="3">Out-stream (3)</option>
+                <option :value="5">Rewarded (5)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Playback method</label>
+              <select v-model.number="vastForm.playbackmethod" class="field-input">
+                <option :value="2">Auto-play, muted (2)</option>
+                <option :value="1">Auto-play, sound on (1)</option>
+                <option :value="3">Click-to-play (3)</option>
+                <option :value="6">Viewable, auto-play muted (6)</option>
+              </select>
+            </div>
+            <div class="field col-span-2">
+              <label>VAST protocols</label>
+              <div class="flex flex-wrap gap-4 mt-1">
+                <label v-for="p in [{v:2,l:'VAST 2.0'},{v:3,l:'VAST 3.0'},{v:7,l:'VAST 4.0'},{v:8,l:'VAST 4.1'}]" :key="p.v"
+                  class="flex items-center gap-1.5 cursor-pointer text-gray-300 text-sm">
+                  <input type="checkbox" :value="p.v" v-model="vastForm.protocols" class="w-4 h-4">
+                  {{ p.l }}
+                </label>
+              </div>
+            </div>
+            <div class="field col-span-2">
+              <button type="button" @click="vastForm.showCtv = !vastForm.showCtv"
+                class="text-xs text-indigo-400 hover:text-indigo-300">
+                {{ vastForm.showCtv ? '▾' : '▸' }} CTV / App params
+              </button>
+            </div>
+            <template v-if="vastForm.showCtv">
+              <div class="field">
+                <label>App bundle</label>
+                <input v-model="vastForm.app_bundle" class="field-input" placeholder="com.publisher.app">
+              </div>
+              <div class="field">
+                <label>App name</label>
+                <input v-model="vastForm.app_name" class="field-input" placeholder="Publisher App">
+              </div>
+            </template>
+          </div>
+          <div>
+            <button @click="generateVastTag" :disabled="!vastForm.pub" class="btn-primary">Generate Tag</button>
+          </div>
+          <div v-if="vastOutput" class="flex flex-col gap-4">
+            <div class="flex flex-col gap-1">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-gray-300">VAST URL</span>
+                <button @click="copyVastText(vastOutput.vastUrl, 'vast')" class="text-xs text-indigo-400 hover:text-indigo-300">
+                  {{ vastCopied === 'vast' ? 'Copied!' : 'Copy' }}
+                </button>
+              </div>
+              <code class="bg-gray-950 border border-white/10 rounded p-2 text-xs text-gray-200 font-mono break-all select-all">{{ vastOutput.vastUrl }}</code>
+            </div>
+            <div class="flex flex-col gap-1">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-gray-300">VMAP URL <span class="text-gray-500 font-normal">(ad pods — pre+mid+post roll)</span></span>
+                <button @click="copyVastText(vastOutput.vmapUrl, 'vmap')" class="text-xs text-indigo-400 hover:text-indigo-300">
+                  {{ vastCopied === 'vmap' ? 'Copied!' : 'Copy' }}
+                </button>
+              </div>
+              <code class="bg-gray-950 border border-white/10 rounded p-2 text-xs text-gray-200 font-mono break-all select-all">{{ vastOutput.vmapUrl }}</code>
+            </div>
+            <div class="flex flex-col gap-1">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-gray-300">IMA SDK snippet</span>
+                <button @click="copyVastText(vastOutput.imaSnippet, 'ima')" class="text-xs text-indigo-400 hover:text-indigo-300">
+                  {{ vastCopied === 'ima' ? 'Copied!' : 'Copy' }}
+                </button>
+              </div>
+              <textarea rows="8" readonly :value="vastOutput.imaSnippet"
+                class="bg-gray-950 border border-white/10 text-gray-200 font-mono text-xs px-3 py-2.5 rounded-lg resize-y leading-relaxed select-all">
+              </textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div><!-- /content area -->
   </div><!-- /main -->
 
@@ -1243,6 +1494,7 @@ Vue.createApp({
         { id:'tags',     label:'Export Tags',      addLabel:null,          addModal:null         },
         { id:'adstxt',   label:'ads.txt',          addLabel:null,          addModal:null         },
         { id:'sellers',  label:'sellers.json',     addLabel:null,          addModal:null         },
+        { id:'video',    label:'Video Tags',        addLabel:null,          addModal:null         },
       ],
       accounts:        "__ACCOUNTS__",
       adSlots:         "__AD_SLOTS__",
@@ -1273,6 +1525,15 @@ Vue.createApp({
       exportAccount: '',
       exportLoading: false,
       exportCopied:  null,
+      vastForm: {
+        pub:'', placement:'pre-roll', w:640, h:480,
+        mindur:5, maxdur:30, skip:false, skipafter:5,
+        bidfloor:'', domain:'', page:'',
+        placement_type:1, protocols:[2,3,7,8], playbackmethod:2,
+        app_bundle:'', app_name:'', showCtv:false,
+      },
+      vastOutput: null,
+      vastCopied:  null,
     };
   },
   computed: {
@@ -1762,6 +2023,46 @@ Vue.createApp({
     downloadTags: function() {
       var url = '/admin/adtag/export-bulk?account_id='+encodeURIComponent(this.exportAccount)+'&download=1';
       window.open(url, '_blank');
+    },
+    generateVastTag: function() {
+      var f = this.vastForm;
+      var base = 'https://ads.thenexusengine.com';
+      var params = new URLSearchParams();
+      if (f.pub)           params.set('pub', f.pub);
+      if (f.placement)     params.set('placement', f.placement);
+      if (f.w)             params.set('w', f.w);
+      if (f.h)             params.set('h', f.h);
+      if (f.mindur)        params.set('mindur', f.mindur);
+      if (f.maxdur)        params.set('maxdur', f.maxdur);
+      params.set('skip', f.skip ? '1' : '0');
+      if (f.skip && f.skipafter) params.set('skipafter', f.skipafter);
+      if (f.bidfloor)      params.set('bidfloor', f.bidfloor);
+      if (f.domain)        params.set('domain', f.domain);
+      if (f.page)          params.set('page', f.page);
+      params.set('placement_type', f.placement_type);
+      if (f.protocols && f.protocols.length) params.set('protocols', f.protocols.join(','));
+      params.set('playbackmethod', f.playbackmethod);
+      if (f.app_bundle)    params.set('app_bundle', f.app_bundle);
+      if (f.app_name)      params.set('app_name', f.app_name);
+      var qs = params.toString();
+      var vastUrl  = base + '/video/vast?' + qs;
+      var vmapUrl  = base + '/video/pod?'  + qs;
+      var imaSnippet = '<script src="https://imasdk.googleapis.com/js/sdkloader/ima3.js"><\/script>\n' +
+        '<script>\n' +
+        '  var adDisplayContainer = new google.ima.AdDisplayContainer(adContainerElement, videoElement);\n' +
+        '  var adsLoader = new google.ima.AdsLoader(adDisplayContainer);\n' +
+        '  var adsRequest = new google.ima.AdsRequest();\n' +
+        '  adsRequest.adTagUrl = "' + vastUrl + '";\n' +
+        '  adsLoader.requestAds(adsRequest);\n' +
+        '<\/script>';
+      this.vastOutput = { vastUrl: vastUrl, vmapUrl: vmapUrl, imaSnippet: imaSnippet };
+      this.vastCopied = null;
+    },
+    copyVastText: function(text, key) {
+      navigator.clipboard.writeText(text).then(function() {});
+      this.vastCopied = key;
+      var self = this;
+      setTimeout(function() { self.vastCopied = null; }, 1500);
     },
   },
 }).mount('#app');
