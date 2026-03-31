@@ -147,7 +147,9 @@ func (h *AdTagHandler) HandleGAMAd(w http.ResponseWriter, r *http.Request) {
 	// Write the ad markup directly into the GAM creative iframe via document.write.
 	// The markup is trusted SSP HTML/JS — do not sanitize it.
 	adMarkupJSON, _ := json.Marshal(adMarkup)
-	script := fmt.Sprintf("document.write(%s);", string(adMarkupJSON))
+	// document.open() is required before document.write() when called from an
+	// async script (which is how the GAM creative loads us via script.async=true)
+	script := fmt.Sprintf("document.open();document.write(%s);document.close();", string(adMarkupJSON))
 	w.Write([]byte(script))
 }
 
