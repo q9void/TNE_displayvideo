@@ -17,7 +17,6 @@ linters:
     - unparam
     - nakedret
     - prealloc
-    - exportloopref
     - bodyclose
     - noctx
     - sqlclosecheck
