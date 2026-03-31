@@ -480,10 +480,13 @@ func parseImpressionObject(imp *openrtb.Imp, extractWrapperExtFromImp, extractPu
 		return wrapExt, pubID, fmt.Errorf("failed to parse imp.ext for ImpID=%s: %w", imp.ID, err)
 	}
 
-	// Extract PubMatic-specific params from ext.pubmatic
-	pubmaticData, ok := extMap["pubmatic"]
+	// Prefer imp.ext.bidder (PBS standard injected by bid handler), fall back to imp.ext.pubmatic
+	pubmaticData, ok := extMap["bidder"]
 	if !ok || len(pubmaticData) == 0 {
-		return wrapExt, pubID, fmt.Errorf("no PubMatic parameters found in imp.ext for ImpID=%s", imp.ID)
+		pubmaticData, ok = extMap["pubmatic"]
+		if !ok || len(pubmaticData) == 0 {
+			return wrapExt, pubID, fmt.Errorf("no PubMatic parameters found in imp.ext for ImpID=%s", imp.ID)
+		}
 	}
 
 	var pubmaticExt ExtImpPubmatic
