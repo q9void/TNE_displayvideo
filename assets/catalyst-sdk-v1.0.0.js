@@ -1669,12 +1669,16 @@
 
       if (targetSlot) {
         // Set Catalyst-specific header bidding keys (no overlap with Prebid)
-        if (bid.cpm) {
+        if (bid.targeting && bid.targeting['hb_pb_catalyst']) {
+          targetSlot.setTargeting('hb_pb_catalyst', bid.targeting['hb_pb_catalyst']);
+        } else if (bid.cpm) {
           targetSlot.setTargeting('hb_pb_catalyst', bid.cpm.toFixed(2));
         }
 
+        if (bid.adId) {
+          targetSlot.setTargeting('hb_adid_catalyst', bid.adId);
+        }
         if (bid.creativeId) {
-          targetSlot.setTargeting('hb_adid_catalyst', bid.creativeId);
           targetSlot.setTargeting('hb_creative_catalyst', bid.creativeId);
         }
 
@@ -1708,7 +1712,9 @@
         }
       } else {
         // Set page-level targeting if no slot found (Catalyst-specific keys only)
-        if (bid.cpm) {
+        if (bid.targeting && bid.targeting['hb_pb_catalyst']) {
+          pubads.setTargeting('hb_pb_catalyst', bid.targeting['hb_pb_catalyst']);
+        } else if (bid.cpm) {
           pubads.setTargeting('hb_pb_catalyst', bid.cpm.toFixed(2));
         }
 

@@ -64,11 +64,28 @@ Targeting: hb_pb_catalyst = 2.00
 
 **Creative code:**
 ```html
-<script src="https://ads.thenexusengine.com/ad/render?adid=%%PATTERN:hb_adid_catalyst%%&w=%%WIDTH%%&h=%%HEIGHT%%"></script>
+<script>
+(function() {
+  var defined = function(v) { return v && v !== '' && v.indexOf('%%') === -1; };
+  var bidId = '%%PATTERN:hb_adid_catalyst%%';
+  var creativeId = '%%PATTERN:hb_creative_catalyst%%';
+  var size = '%%PATTERN:hb_size_catalyst%%';
+  var pb = '%%PATTERN:hb_pb_catalyst%%';
+  if (!defined(bidId)) { document.write('<div style="display:none"></div>'); return; }
+  var w = 0, h = 0;
+  if (defined(size)) { var p = size.split('x'); w = parseInt(p[0],10)||0; h = parseInt(p[1],10)||0; }
+  var url = 'https://ads.thenexusengine.com/ad/gam?bid=' + encodeURIComponent(bidId)
+    + '&creative=' + encodeURIComponent(creativeId)
+    + '&w=' + w + '&h=' + h + '&pb=' + encodeURIComponent(pb);
+  var s = document.createElement('script'); s.src = url; s.async = true; document.body.appendChild(s);
+})();
+</script>
 ```
 
-- `%%PATTERN:hb_adid_catalyst%%` — GAM macro that injects the winning bid's creative ID
-- `%%WIDTH%%` / `%%HEIGHT%%` — standard GAM size macros
+- `%%PATTERN:hb_adid_catalyst%%` — GAM macro for the winning bid ID
+- `%%PATTERN:hb_creative_catalyst%%` — GAM macro for the creative ID (CRID)
+- `%%PATTERN:hb_pb_catalyst%%` — GAM macro for the price bucket
+- `%%PATTERN:hb_size_catalyst%%` — GAM macro for ad dimensions
 
 **Add this single creative to all price-tier line items** (GAM allows creative reuse).
 
