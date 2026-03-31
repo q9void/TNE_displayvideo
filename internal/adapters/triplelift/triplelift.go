@@ -64,68 +64,57 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		requestCopy = *composed
 	}
 
-	// NOTE: ID clearing is now handled by Privacy/Consent hook (no longer needed here)
-
-	// Process each impression - extract TripleLift parameters
+	// Process each impression — mirrors PBS TripLift adapter (processImp logic)
 	for _, imp := range requestCopy.Imp {
-		var tripleliftExt struct {
+		if imp.Ext == nil {
+			errs = append(errs, fmt.Errorf("imp %s missing required imp.ext", imp.ID))
+			continue
+		}
+
+		// Prefer imp.ext.bidder (standard PBS format injected by bid handler),
+		// fall back to imp.ext.triplelift for legacy compatibility
+		var impExt struct {
+			Triplelift json.RawMessage `json:"triplelift"`
+			Bidder     json.RawMessage `json:"bidder"`
+		}
+		if err := json.Unmarshal(imp.Ext, &impExt); err != nil {
+			errs = append(errs, fmt.Errorf("failed to parse imp.ext for imp %s: %w", imp.ID, err))
+			continue
+		}
+		bidderParams := impExt.Bidder
+		if len(bidderParams) == 0 {
+			bidderParams = impExt.Triplelift
+		}
+		if len(bidderParams) == 0 {
+			errs = append(errs, fmt.Errorf("imp %s missing triplelift/bidder extension", imp.ID))
+			continue
+		}
+
+		var tlExt struct {
 			InventoryCode string  `json:"inventoryCode"`
 			Floor         float64 `json:"floor,omitempty"`
 		}
-
-		// Task #38: Check for multiformat preference
-		// Count media types to detect multiformat impressions
-		mediaTypeCount := 0
-		if imp.Banner != nil {
-			mediaTypeCount++
+		if err := json.Unmarshal(bidderParams, &tlExt); err != nil {
+			errs = append(errs, fmt.Errorf("failed to parse triplelift params for imp %s: %w", imp.ID, err))
+			continue
 		}
-		if imp.Native != nil {
-			mediaTypeCount++
-		}
-		// TripleLift only supports banner and native
-
-		// Extract TripleLift params from imp.ext.triplelift
-		if imp.Ext != nil {
-			var impExt struct {
-				Triplelift json.RawMessage `json:"triplelift"`
-			}
-			if err := json.Unmarshal(imp.Ext, &impExt); err != nil {
-				errs = append(errs, fmt.Errorf("failed to parse imp.ext for imp %s: %w", imp.ID, err))
-				continue
-			}
-			if len(impExt.Triplelift) > 0 {
-				if err := json.Unmarshal(impExt.Triplelift, &tripleliftExt); err != nil {
-					errs = append(errs, fmt.Errorf("failed to parse triplelift params for imp %s: %w", imp.ID, err))
-					continue
-				}
-			}
-		}
-
-		// Validate required parameter
-		if tripleliftExt.InventoryCode == "" {
+		if tlExt.InventoryCode == "" {
 			errs = append(errs, fmt.Errorf("imp %s missing required inventoryCode", imp.ID))
 			continue
 		}
 
-		// Validate impression has Banner or Native
-		if imp.Banner == nil && imp.Native == nil {
-			errs = append(errs, fmt.Errorf("imp %s must have Banner or Native", imp.ID))
+		// TripLift requires Banner or Video — matches PBS adapter behaviour
+		if imp.Banner == nil && imp.Video == nil {
+			errs = append(errs, fmt.Errorf("imp %s: neither Banner nor Video object specified", imp.ID))
 			continue
 		}
 
-		// Task #41: Validate native.request for native impressions
-		if imp.Native != nil && imp.Native.Request == "" {
-			errs = append(errs, fmt.Errorf("imp %s has Native but missing native.request", imp.ID))
-			continue
-		}
-
-		// Create impression copy and set TripleLift-specific fields
 		impCopy := imp
-		impCopy.TagID = tripleliftExt.InventoryCode
+		impCopy.TagID = tlExt.InventoryCode
 
-		// Rewrite imp.ext to PBS bidder format — TripleLift's endpoint expects imp.ext.bidder.inventoryCode
+		// Rewrite imp.ext to imp.ext.bidder.inventoryCode (what TripLift's endpoint expects)
 		rewritten, err := json.Marshal(map[string]interface{}{
-			"bidder": map[string]string{"inventoryCode": tripleliftExt.InventoryCode},
+			"bidder": map[string]string{"inventoryCode": tlExt.InventoryCode},
 		})
 		if err != nil {
 			errs = append(errs, fmt.Errorf("failed to rewrite imp.ext for imp %s: %w", imp.ID, err))
@@ -133,12 +122,8 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		}
 		impCopy.Ext = rewritten
 
-		// Set bid floor if provided
-		// Task #40: Don't force BidFloorCur = USD - only set if not already set
-		if tripleliftExt.Floor > 0 {
-			impCopy.BidFloor = tripleliftExt.Floor
-			// Only set currency if floor is provided but currency is missing
-			// Don't overwrite existing currency as it breaks non-USD floors
+		if tlExt.Floor > 0 {
+			impCopy.BidFloor = tlExt.Floor
 		}
 
 		validImps = append(validImps, impCopy)
