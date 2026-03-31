@@ -39,6 +39,9 @@ type ServerConfig struct {
 
 	// CORS
 	CORSOrigins []string
+
+	// Paths (override for testing; defaults resolve relative to working directory)
+	BidderMappingPath string
 }
 
 // DatabaseConfig holds database connection configuration

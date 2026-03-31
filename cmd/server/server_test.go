@@ -38,6 +38,7 @@ func TestNewServer_MinimalConfig(t *testing.T) {
 		CurrencyConversionEnabled: true,
 		DefaultCurrency:           "USD",
 		HostURL:                   "https://example.com",
+		BidderMappingPath:         "../../config/bizbudding-all-bidders-mapping.json",
 	}
 
 	server, err := NewServer(cfg)
@@ -338,8 +339,8 @@ func TestServer_AllRoutes(t *testing.T) {
 		{"/status", http.StatusOK},
 		{"/info/bidders", http.StatusOK},
 		{"/metrics", http.StatusOK},
-		{"/admin/dashboard", http.StatusOK},
-		{"/admin/circuit-breaker", http.StatusOK},
+		{"/admin/dashboard", http.StatusForbidden},
+		{"/admin/circuit-breaker", http.StatusForbidden},
 	}
 
 	for _, route := range routes {

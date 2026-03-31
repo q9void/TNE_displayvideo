@@ -256,8 +256,9 @@ func TestMakeBids_EmptyResponse(t *testing.T) {
 func TestInfo(t *testing.T) {
 	info := Info()
 
-	if !info.Enabled {
-		t.Error("Expected adapter to be enabled")
+	// Demo adapter is intentionally disabled in production — it competes with real bidders
+	if info.Enabled {
+		t.Error("Expected adapter to be disabled in production")
 	}
 
 	if info.GVLVendorID != 0 {
@@ -305,9 +306,9 @@ func TestAdapterInfo(t *testing.T) {
 	adapter := New("")
 	info := adapter.Info()
 
-	// Should return same as package Info()
-	if !info.Enabled {
-		t.Error("Expected adapter to be enabled")
+	// Should return same as package Info() — disabled in production
+	if info.Enabled {
+		t.Error("Expected adapter to be disabled in production")
 	}
 
 	if info.DemandType != adapters.DemandTypePlatform {

@@ -20,8 +20,8 @@ func TestParseConfig_Defaults(t *testing.T) {
 		t.Errorf("Expected default port '8000', got '%s'", cfg.Port)
 	}
 
-	if cfg.Timeout != 1000*time.Millisecond {
-		t.Errorf("Expected default timeout 1000ms, got %v", cfg.Timeout)
+	if cfg.Timeout != 2500*time.Millisecond {
+		t.Errorf("Expected default timeout 2500ms, got %v", cfg.Timeout)
 	}
 
 	if cfg.IDRUrl != "http://localhost:5050" {

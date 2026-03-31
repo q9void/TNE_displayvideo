@@ -380,7 +380,7 @@ func TestGetBiddersToSync_DefaultBidders(t *testing.T) {
 	bidders := handler.getBiddersToSync(req, cookie)
 
 	// Should return default common bidders
-	expectedDefaults := []string{"appnexus", "rubicon", "pubmatic", "openx", "triplelift"}
+	expectedDefaults := []string{"appnexus", "rubicon", "pubmatic", "openx", "triplelift", "kargo"}
 	if len(bidders) != len(expectedDefaults) {
 		t.Errorf("expected %d default bidders, got %d", len(expectedDefaults), len(bidders))
 	}

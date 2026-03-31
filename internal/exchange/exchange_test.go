@@ -553,11 +553,14 @@ func TestBidValidation(t *testing.T) {
 			wantErr:    false,
 		},
 		{
-			name:        "invalid banner dimensions",
-			bid:         &openrtb.Bid{ID: "bid1", ImpID: "imp1", Price: 2.00, AdM: "<div>ad</div>", W: 999, H: 999},
-			bidderCode:  "test-bidder",
-			wantErr:     true,
-			errContains: "do not match any allowed banner formats",
+			// Banner dimension validation is intentionally not enforced — SSPs such as Kargo
+			// return creatives with dimensions that differ from the requested format. Rejecting
+			// these bids would drop valid revenue. Rendering correctness is enforced by the
+			// placement ID / ad slot configuration, not by the exchange validator.
+			name:       "bid with non-matching banner dimensions is accepted",
+			bid:        &openrtb.Bid{ID: "bid1", ImpID: "imp1", Price: 2.00, AdM: "<div>ad</div>", W: 999, H: 999},
+			bidderCode: "test-bidder",
+			wantErr:    false,
 		},
 		{
 			name:       "valid banner dimensions for imp2",
