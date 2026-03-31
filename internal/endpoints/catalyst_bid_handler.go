@@ -484,6 +484,33 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 	maiResp := h.convertToMAIResponse(auctionResp, impToSlot)
 	maiResp.ResponseTime = int(time.Since(startTime).Milliseconds())
 
+	// Log each winning bid sent to the SDK
+	for _, b := range maiResp.Bids {
+		bidLog := log.Info().
+			Str("div_id", b.DivID).
+			Float64("cpm", b.CPM).
+			Str("ad_id", b.AdID).
+			Str("creative_id", b.CreativeID).
+			Int("width", b.Width).
+			Int("height", b.Height)
+		if b.Meta != nil {
+			bidLog = bidLog.Str("bidder", b.Meta.NetworkName)
+		}
+		if pb, ok := b.Targeting["hb_pb_catalyst"]; ok {
+			bidLog = bidLog.Str("hb_pb_catalyst", pb)
+		}
+		if bidder, ok := b.Targeting["hb_bidder_catalyst"]; ok {
+			bidLog = bidLog.Str("hb_bidder_catalyst", bidder)
+		}
+		if size, ok := b.Targeting["hb_size_catalyst"]; ok {
+			bidLog = bidLog.Str("hb_size_catalyst", size)
+		}
+		if source, ok := b.Targeting["hb_source_catalyst"]; ok {
+			bidLog = bidLog.Str("hb_source_catalyst", source)
+		}
+		bidLog.Msg("💰 Bid sent to SDK")
+	}
+
 	// DEBUG: Full response dump if enabled
 	debugDumpResponses := os.Getenv("DEBUG_DUMP_RESPONSES") == "true"
 	if debugDumpResponses {
