@@ -3,8 +3,6 @@ run:
   modules-download-mode: readonly
 
 linters:
-  disable:
-    - typecheck  # covered by go build/vet; golangci-lint's bundled Go lags behind CI Go version
   enable:
     - errcheck
     - gosimple
