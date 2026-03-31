@@ -1679,77 +1679,34 @@
         }
       }
 
+      var target = targetSlot || pubads;
+
+      // Set all server-computed targeting keys — includes hb_pb, hb_pb_catalyst,
+      // hb_bidder, hb_bidder_catalyst, hb_size_catalyst, hb_source_catalyst, etc.
+      if (bid.targeting) {
+        for (var k in bid.targeting) {
+          if (bid.targeting.hasOwnProperty(k)) {
+            target.setTargeting(k, bid.targeting[k]);
+          }
+        }
+      }
+
+      // Overlay bid-object fields that aren't in the targeting map
+      if (bid.adId) {
+        target.setTargeting('hb_adid_catalyst', bid.adId);
+      }
+      if (bid.creativeId) {
+        target.setTargeting('hb_creative_catalyst', bid.creativeId);
+      }
+      if (bid.width && bid.height) {
+        target.setTargeting('hb_size_catalyst', bid.width + 'x' + bid.height);
+      }
+
       if (targetSlot) {
-        // Set Catalyst-specific header bidding keys (no overlap with Prebid)
-        if (bid.targeting && bid.targeting['hb_pb_catalyst']) {
-          targetSlot.setTargeting('hb_pb_catalyst', bid.targeting['hb_pb_catalyst']);
-        } else if (bid.cpm) {
-          targetSlot.setTargeting('hb_pb_catalyst', bid.cpm.toFixed(2));
-        }
-
-        if (bid.adId) {
-          targetSlot.setTargeting('hb_adid_catalyst', bid.adId);
-        }
-        if (bid.creativeId) {
-          targetSlot.setTargeting('hb_creative_catalyst', bid.creativeId);
-        }
-
-        if (bid.width && bid.height) {
-          targetSlot.setTargeting('hb_size_catalyst', bid.width + 'x' + bid.height);
-        }
-
-        // Set bid source (server-to-server)
-        targetSlot.setTargeting('hb_source_catalyst', 's2s');
-
-        // Set format (banner ads)
-        targetSlot.setTargeting('hb_format_catalyst', 'banner');
-
-        // Set deal ID if present (for PMP deals)
-        if (bid.dealId) {
-          targetSlot.setTargeting('hb_deal_catalyst', bid.dealId);
-        }
-
-        // Set advertiser domain if available
-        if (bid.meta && bid.meta.advertiserDomains && bid.meta.advertiserDomains.length > 0) {
-          targetSlot.setTargeting('hb_adomain_catalyst', bid.meta.advertiserDomains[0]);
-        }
-
-        // Set actual demand partner that won (if available in meta)
-        if (bid.meta && bid.meta.networkName) {
-          targetSlot.setTargeting('hb_partner', bid.meta.networkName);
-          targetSlot.setTargeting('hb_bidder_catalyst', bid.meta.networkName);
-          catalyst.log('Set slot targeting for', bid.divId, 'CPM:', bid.cpm, 'Partner:', bid.meta.networkName);
-        } else {
-          catalyst.log('Set slot targeting for', bid.divId, 'CPM:', bid.cpm);
-        }
+        catalyst.log('Set slot targeting for', bid.divId, 'CPM:', bid.cpm,
+          'hb_pb:', bid.targeting && bid.targeting['hb_pb'],
+          'hb_pb_catalyst:', bid.targeting && bid.targeting['hb_pb_catalyst']);
       } else {
-        // Set page-level targeting if no slot found (Catalyst-specific keys only)
-        if (bid.targeting && bid.targeting['hb_pb_catalyst']) {
-          pubads.setTargeting('hb_pb_catalyst', bid.targeting['hb_pb_catalyst']);
-        } else if (bid.cpm) {
-          pubads.setTargeting('hb_pb_catalyst', bid.cpm.toFixed(2));
-        }
-
-        // Set bid source and format
-        pubads.setTargeting('hb_source_catalyst', 's2s');
-        pubads.setTargeting('hb_format_catalyst', 'banner');
-
-        // Set deal ID if present
-        if (bid.dealId) {
-          pubads.setTargeting('hb_deal_catalyst', bid.dealId);
-        }
-
-        // Set advertiser domain if available
-        if (bid.meta && bid.meta.advertiserDomains && bid.meta.advertiserDomains.length > 0) {
-          pubads.setTargeting('hb_adomain_catalyst', bid.meta.advertiserDomains[0]);
-        }
-
-        // Set actual demand partner
-        if (bid.meta && bid.meta.networkName) {
-          pubads.setTargeting('hb_partner', bid.meta.networkName);
-          pubads.setTargeting('hb_bidder_catalyst', bid.meta.networkName);
-        }
-
         catalyst.log('Set page-level targeting (slot not found):', bid.divId);
       }
     } catch (e) {
