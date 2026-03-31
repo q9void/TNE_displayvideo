@@ -282,10 +282,13 @@ func extractSovrnParams(impExt json.RawMessage) (*sovrnParams, error) {
 		return nil, fmt.Errorf("failed to unmarshal imp.ext: %w", err)
 	}
 
-	// Look for Sovrn params in ext.sovrn
-	sovrnData, ok := extMap["sovrn"]
+	// Prefer imp.ext.bidder (PBS standard injected by bid handler), fall back to imp.ext.sovrn
+	sovrnData, ok := extMap["bidder"]
 	if !ok {
-		return nil, fmt.Errorf("no Sovrn parameters found in imp.ext")
+		sovrnData, ok = extMap["sovrn"]
+		if !ok {
+			return nil, fmt.Errorf("no Sovrn parameters found in imp.ext")
+		}
 	}
 
 	// Marshal back to JSON and unmarshal into struct
