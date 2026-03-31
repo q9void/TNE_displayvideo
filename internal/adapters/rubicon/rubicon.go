@@ -18,14 +18,13 @@ import (
 )
 
 // defaultLoader is set by the server after startup via SetLoader.
-// nil = Composer disabled (Phase 1 behaviour preserved).
 var defaultLoader *routing.Loader
 
 // SetLoader injects the routing Loader. Call once from cmd/server/server.go after startup.
 func SetLoader(l *routing.Loader) { defaultLoader = l }
 
 // filterNonRPRules returns only rules that don't conflict with Rubicon's
-// native ext.rp nesting logic (those fields are handled by the Go adapter).
+// native ext.rp nesting logic.
 func filterNonRPRules(rules []storage.BidderFieldRule) []storage.BidderFieldRule {
 	out := make([]storage.BidderFieldRule, 0, len(rules))
 	for _, r := range rules {
@@ -36,8 +35,8 @@ func filterNonRPRules(rules []storage.BidderFieldRule) []storage.BidderFieldRule
 	return out
 }
 
-// extractSlotParams reads imp[0].ext.rubicon (or imp[0].ext.bidder after PBS translation)
-// into a flat map for the Composer's slotParams argument.
+// extractSlotParams reads imp[0].ext.bidder or imp[0].ext.rubicon into a flat map
+// for the Composer's slotParams argument.
 func extractSlotParams(imps []openrtb.Imp) map[string]interface{} {
 	if len(imps) == 0 || imps[0].Ext == nil {
 		return nil
@@ -46,9 +45,9 @@ func extractSlotParams(imps []openrtb.Imp) map[string]interface{} {
 	if err := json.Unmarshal(imps[0].Ext, &outer); err != nil {
 		return nil
 	}
-	raw, ok := outer["rubicon"]
+	raw, ok := outer["bidder"]
 	if !ok {
-		raw, ok = outer["bidder"]
+		raw, ok = outer["rubicon"]
 		if !ok {
 			return nil
 		}
@@ -59,21 +58,30 @@ func extractSlotParams(imps []openrtb.Imp) map[string]interface{} {
 }
 
 const (
-	// Authenticated regional endpoint (US-East) — requires RUBICON_XAPI_USER/PASS
 	defaultEndpoint = "http://exapi-us-east.rubiconproject.com/a/api/exchange.json?tk_sdc=us-east"
+	maxBAdv         = 50
 )
 
 // Rubicon-specific extension structures
+
 type rubiconParams struct {
-	AccountID        int  `json:"accountId"`
-	SiteID           int  `json:"siteId"`
-	ZoneID           int  `json:"zoneId"`
-	SizeID           int  `json:"sizeId"`
-	BidOnMultiformat bool `json:"bidonmultiformat"`
+	AccountID        int             `json:"accountId"`
+	SiteID           int             `json:"siteId"`
+	ZoneID           int             `json:"zoneId"`
+	SizeID           int             `json:"sizeId"`
+	Inventory        json.RawMessage `json:"inventory,omitempty"`
+	Visitor          json.RawMessage `json:"visitor,omitempty"`
+	BidOnMultiformat bool            `json:"bidonmultiformat"`
+	Video            *rubiconVideo   `json:"video,omitempty"`
 }
 
-type rubiconImpExt struct {
-	RP rubiconImpExtRP `json:"rp"`
+type rubiconVideo struct {
+	Language     string `json:"language,omitempty"`
+	PlayerHeight int    `json:"playerHeight,omitempty"`
+	PlayerWidth  int    `json:"playerWidth,omitempty"`
+	SizeID       int    `json:"size_id,omitempty"`
+	Skip         *int   `json:"skip,omitempty"`
+	SkipDelay    int    `json:"skipdelay,omitempty"`
 }
 
 type rubiconImpExtRP struct {
@@ -85,6 +93,25 @@ type rubiconImpExtRP struct {
 type rubiconTrack struct {
 	Mint        string `json:"mint"`
 	MintVersion string `json:"mint_version"`
+}
+
+type rubiconBannerExt struct {
+	RP rubiconBannerExtRP `json:"rp"`
+}
+
+type rubiconBannerExtRP struct {
+	Mime   string `json:"mime"`
+	SizeID int    `json:"size_id,omitempty"`
+}
+
+type rubiconVideoExt struct {
+	RP rubiconVideoExtRP `json:"rp"`
+}
+
+type rubiconVideoExtRP struct {
+	SizeID    int  `json:"size_id,omitempty"`
+	Skip      *int `json:"skip,omitempty"`
+	SkipDelay int  `json:"skipdelay,omitempty"`
 }
 
 type rubiconSiteExt struct {
@@ -127,8 +154,6 @@ func New(endpoint string) *Adapter {
 		endpoint = defaultEndpoint
 	}
 
-	// Load XAPI credentials from environment
-	// These are required for Rubicon authentication
 	xapiUser := os.Getenv("RUBICON_XAPI_USER")
 	xapiPass := os.Getenv("RUBICON_XAPI_PASS")
 
@@ -146,7 +171,203 @@ func New(endpoint string) *Adapter {
 	}
 }
 
-// MakeRequests builds HTTP requests for Rubicon
+// extractRubiconParams reads Rubicon params from imp.ext.bidder (PBS standard) or imp.ext.rubicon (legacy).
+func extractRubiconParams(impExt json.RawMessage) (*rubiconParams, error) {
+	if len(impExt) == 0 {
+		return nil, fmt.Errorf("imp.ext is empty or nil")
+	}
+
+	var outer map[string]json.RawMessage
+	if err := json.Unmarshal(impExt, &outer); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal imp.ext: %w", err)
+	}
+
+	// Prefer imp.ext.bidder (PBS standard injected by bid handler), fall back to imp.ext.rubicon
+	raw, ok := outer["bidder"]
+	if !ok {
+		raw, ok = outer["rubicon"]
+	}
+	if !ok {
+		return nil, fmt.Errorf("no Rubicon parameters found in imp.ext (checked bidder and rubicon)")
+	}
+
+	var params rubiconParams
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal rubicon params: %w", err)
+	}
+
+	if params.AccountID == 0 {
+		return nil, fmt.Errorf("accountId is required")
+	}
+	if params.SiteID == 0 {
+		return nil, fmt.Errorf("siteId is required")
+	}
+	if params.ZoneID == 0 {
+		return nil, fmt.Errorf("zoneId is required")
+	}
+
+	return &params, nil
+}
+
+// updateRequestTo26 migrates legacy field locations to their OpenRTB 2.6 / Rubicon-expected locations:
+//   - source.schain (top-level) → source.ext.schain
+//   - regs.gdpr (top-level) → regs.ext.gdpr
+//   - regs.us_privacy (top-level) → regs.ext.us_privacy
+func updateRequestTo26(reqCopy *openrtb.BidRequest) {
+	if reqCopy.Source != nil && reqCopy.Source.SChain != nil {
+		sourceCopy := *reqCopy.Source
+		var sourceExt map[string]json.RawMessage
+		if len(sourceCopy.Ext) > 0 {
+			json.Unmarshal(sourceCopy.Ext, &sourceExt) //nolint:errcheck
+		}
+		if sourceExt == nil {
+			sourceExt = make(map[string]json.RawMessage)
+		}
+		if _, alreadySet := sourceExt["schain"]; !alreadySet {
+			if schainBytes, err := json.Marshal(sourceCopy.SChain); err == nil {
+				sourceExt["schain"] = schainBytes
+			}
+		}
+		if extBytes, err := json.Marshal(sourceExt); err == nil {
+			sourceCopy.Ext = extBytes
+		}
+		sourceCopy.SChain = nil
+		reqCopy.Source = &sourceCopy
+	}
+
+	if reqCopy.Regs != nil && (reqCopy.Regs.GDPR != nil || reqCopy.Regs.USPrivacy != "") {
+		regsCopy := *reqCopy.Regs
+		var regsExt map[string]json.RawMessage
+		if len(regsCopy.Ext) > 0 {
+			json.Unmarshal(regsCopy.Ext, &regsExt) //nolint:errcheck
+		}
+		if regsExt == nil {
+			regsExt = make(map[string]json.RawMessage)
+		}
+		if regsCopy.GDPR != nil {
+			if _, alreadySet := regsExt["gdpr"]; !alreadySet {
+				if v, err := json.Marshal(*regsCopy.GDPR); err == nil {
+					regsExt["gdpr"] = v
+				}
+			}
+			regsCopy.GDPR = nil
+		}
+		if regsCopy.USPrivacy != "" {
+			if _, alreadySet := regsExt["us_privacy"]; !alreadySet {
+				if v, err := json.Marshal(regsCopy.USPrivacy); err == nil {
+					regsExt["us_privacy"] = v
+				}
+			}
+			regsCopy.USPrivacy = ""
+		}
+		if extBytes, err := json.Marshal(regsExt); err == nil {
+			regsCopy.Ext = extBytes
+		}
+		reqCopy.Regs = &regsCopy
+	}
+}
+
+// splitMultiFormatImp returns one imp per format when bidonmultiformat is false.
+// When bidonmultiformat is true or only one format is present, returns [imp] unchanged.
+func splitMultiFormatImp(imp openrtb.Imp, bidonmultiformat bool) []openrtb.Imp {
+	formats := 0
+	if imp.Banner != nil {
+		formats++
+	}
+	if imp.Video != nil {
+		formats++
+	}
+	if imp.Native != nil {
+		formats++
+	}
+
+	if bidonmultiformat || formats <= 1 {
+		return []openrtb.Imp{imp}
+	}
+
+	// One imp per format
+	var result []openrtb.Imp
+	if imp.Banner != nil {
+		copy := imp
+		copy.Video = nil
+		copy.Native = nil
+		result = append(result, copy)
+	}
+	if imp.Video != nil {
+		copy := imp
+		copy.Banner = nil
+		copy.Native = nil
+		result = append(result, copy)
+	}
+	if imp.Native != nil {
+		copy := imp
+		copy.Banner = nil
+		copy.Video = nil
+		result = append(result, copy)
+	}
+	return result
+}
+
+// getVideoSizeID returns the Rubicon video size_id based on ad start delay.
+// pre-roll: -1 or 0 → 201, mid-roll: >0 → 202, post-roll: 2 → 203.
+func getVideoSizeID(video *openrtb.Video) int {
+	if video.StartDelay == nil {
+		return 201 // default: pre-roll
+	}
+	switch *video.StartDelay {
+	case -1:
+		return 201 // generic pre-roll
+	case 0:
+		return 201 // pre-roll
+	case -2:
+		return 202 // generic mid-roll
+	case 2:
+		return 203 // post-roll
+	default:
+		if *video.StartDelay > 0 {
+			return 202 // specific mid-roll
+		}
+		return 201
+	}
+}
+
+// buildImpRPTarget merges FPD inventory data and pbs_login target into a single JSON object.
+func buildImpRPTarget(inventory json.RawMessage, xapiUser string, existingTarget json.RawMessage) json.RawMessage {
+	merged := map[string]interface{}{
+		"pbs_login":   xapiUser,
+		"pbs_version": "pbs-go/tne-1.0",
+		"pbs_url":     "https://ads.thenexusengine.com",
+	}
+
+	// Merge existing target without overriding PBS keys
+	if len(existingTarget) > 0 {
+		var existing map[string]interface{}
+		if json.Unmarshal(existingTarget, &existing) == nil {
+			for k, v := range existing {
+				if _, set := merged[k]; !set {
+					merged[k] = v
+				}
+			}
+		}
+	}
+
+	// Merge inventory FPD without overriding existing keys
+	if len(inventory) > 0 {
+		var inv map[string]interface{}
+		if json.Unmarshal(inventory, &inv) == nil {
+			for k, v := range inv {
+				if _, set := merged[k]; !set {
+					merged[k] = v
+				}
+			}
+		}
+	}
+
+	result, _ := json.Marshal(merged)
+	return result
+}
+
+// MakeRequests builds HTTP requests for Rubicon — one per impression.
 func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.ExtraRequestInfo) ([]*adapters.RequestData, []error) {
 	var errors []error
 	requests := make([]*adapters.RequestData, 0, len(request.Imp))
@@ -157,324 +378,23 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 		Str("request_id", request.ID).
 		Msg("Rubicon MakeRequests called")
 
-	// Rubicon requires one request per impression
 	for _, imp := range request.Imp {
-		// Extract Rubicon parameters from imp.Ext
-		rubiconParams, err := extractRubiconParams(imp.Ext)
+		params, err := extractRubiconParams(imp.Ext)
 		if err != nil {
-			errors = append(errors, fmt.Errorf("failed to extract Rubicon params for imp %s: %w", imp.ID, err))
+			errors = append(errors, fmt.Errorf("imp %s: %w", imp.ID, err))
 			continue
 		}
 
-		// Create a copy of the request for this impression
-		reqCopy := *request
-		impCopy := imp
+		// Split multi-format imps per PBS logic
+		impsToProcess := splitMultiFormatImp(imp, params.BidOnMultiformat)
 
-		// Apply standard-field routing rules (non-rp fields only) before Rubicon-specific ext.rp nesting
-		if defaultLoader != nil {
-			rules := defaultLoader.Get(context.Background(), "rubicon")
-			safeRules := filterNonRPRules(rules)
-			composer := routing.NewComposer(safeRules)
-			composed, _ := composer.Apply("rubicon", &reqCopy, extractSlotParams(reqCopy.Imp), nil, nil)
-			reqCopy = *composed
-		}
-
-		// Transform impression extension to Rubicon's expected format
-		// Task #22: Preserve existing imp.ext.rp.target if it exists
-		var existingImpExt map[string]interface{}
-		var existingTarget json.RawMessage
-
-		if len(impCopy.Ext) > 0 {
-			if err := json.Unmarshal(impCopy.Ext, &existingImpExt); err == nil {
-				if rpData, ok := existingImpExt["rp"].(map[string]interface{}); ok {
-					if target, ok := rpData["target"]; ok {
-						// Re-marshal the target to preserve it
-						if targetBytes, err := json.Marshal(target); err == nil {
-							existingTarget = targetBytes
-						}
-					}
-				}
+		for _, impToProcess := range impsToProcess {
+			reqData, impErrors := a.buildRequest(request, impToProcess, params)
+			errors = append(errors, impErrors...)
+			if reqData != nil {
+				requests = append(requests, reqData)
 			}
 		}
-
-		// Task #26: Check for existing tracking data and preserve if valid
-		var existingTrack *rubiconTrack
-		if existingImpExt != nil {
-			if rpData, ok := existingImpExt["rp"].(map[string]interface{}); ok {
-				if trackData, ok := rpData["track"].(map[string]interface{}); ok {
-					mint, hasMint := trackData["mint"].(string)
-					mintVersion, hasVersion := trackData["mint_version"].(string)
-					// Only preserve if both fields exist and at least one is non-empty
-					if hasMint && hasVersion && (mint != "" || mintVersion != "") {
-						existingTrack = &rubiconTrack{
-							Mint:        mint,
-							MintVersion: mintVersion,
-						}
-					}
-				}
-			}
-		}
-
-		// Build the new rp extension
-		rpExt := rubiconImpExtRP{
-			ZoneID: rubiconParams.ZoneID,
-		}
-
-		// Set tracking data - use existing if valid, otherwise use empty defaults
-		if existingTrack != nil {
-			rpExt.Track = *existingTrack
-		} else {
-			rpExt.Track = rubiconTrack{Mint: "", MintVersion: ""}
-		}
-
-		// Build PBS identity target — Magnite requires these to identify and route demand to this PBS instance
-		pbsTarget := map[string]interface{}{
-			"pbs_login":   a.xapiUser,
-			"pbs_version": "pbs-go/tne-1.0",
-			"pbs_url":     "https://ads.thenexusengine.com",
-		}
-		// Merge any existing target fields without overriding PBS keys
-		if len(existingTarget) > 0 {
-			var existingTargetMap map[string]interface{}
-			if merr := json.Unmarshal(existingTarget, &existingTargetMap); merr == nil {
-				for k, v := range existingTargetMap {
-					if _, alreadySet := pbsTarget[k]; !alreadySet {
-						pbsTarget[k] = v
-					}
-				}
-			}
-		}
-		if targetBytes, merr := json.Marshal(pbsTarget); merr == nil {
-			rpExt.Target = targetBytes
-		}
-
-		impExtMap := map[string]interface{}{
-			"rp": rpExt,
-		}
-
-		// Preserve bidonmultiformat parameter if enabled
-		if rubiconParams.BidOnMultiformat {
-			impExtMap["bidonmultiformat"] = true
-		}
-
-		impCopy.Ext, err = json.Marshal(impExtMap)
-		if err != nil {
-			errors = append(errors, fmt.Errorf("failed to marshal imp ext for imp %s: %w", imp.ID, err))
-			continue
-		}
-
-		// Rubicon requires mime type and size_id in banner.ext.rp for all banner impressions
-		if impCopy.Banner != nil {
-			bannerRP := map[string]interface{}{
-				"mime": "text/html",
-			}
-			if rubiconParams.SizeID > 0 {
-				bannerRP["size_id"] = rubiconParams.SizeID
-			}
-			impCopy.Banner.Ext, _ = json.Marshal(map[string]interface{}{
-				"rp": bannerRP,
-			})
-		}
-
-		reqCopy.Imp = []openrtb.Imp{impCopy}
-
-		// Transform Site with Rubicon extensions
-		if reqCopy.Site != nil {
-			siteCopy := *reqCopy.Site
-
-			// NOTE: ID clearing is now handled by Privacy/Consent hook (no longer needed here)
-
-			// Set Rubicon site extension
-			siteExt := rubiconSiteExt{
-				RP: rubiconSiteExtRP{
-					SiteID: rubiconParams.SiteID,
-				},
-			}
-			siteCopy.Ext, err = json.Marshal(siteExt)
-			if err != nil {
-				errors = append(errors, fmt.Errorf("failed to marshal site ext: %w", err))
-				continue
-			}
-
-			// Task #23: Create Site.Publisher when nil
-			// Task #25: Ensure publisher.id is always set for account context
-			if siteCopy.Publisher == nil {
-				siteCopy.Publisher = &openrtb.Publisher{}
-			}
-
-			// CRITICAL: Set publisher.id to Rubicon's account ID
-			// Rubicon checks this field BEFORE ext.rp.account_id
-			accountIDStr := fmt.Sprintf("%d", rubiconParams.AccountID)
-
-			logger.Log.Debug().
-				Str("adapter", "rubicon").
-				Str("before_id", siteCopy.Publisher.ID).
-				Str("setting_to", accountIDStr).
-				Msg("About to set publisher.id")
-
-			siteCopy.Publisher.ID = accountIDStr
-
-			logger.Log.Debug().
-				Str("adapter", "rubicon").
-				Str("after_id", siteCopy.Publisher.ID).
-				Msg("After setting publisher.id")
-
-			pubExt := rubiconPubExt{
-				RP: rubiconPubExtRP{
-					AccountID: rubiconParams.AccountID,
-				},
-			}
-			siteCopy.Publisher.Ext, err = json.Marshal(pubExt)
-			if err != nil {
-				errors = append(errors, fmt.Errorf("failed to marshal publisher ext: %w", err))
-				continue
-			}
-
-			reqCopy.Site = &siteCopy
-		}
-
-		// Task #21: Add App request handling (parallel to Site logic)
-		// Task #24: Transform App traffic properly
-		if reqCopy.App != nil {
-			appCopy := *reqCopy.App
-
-			// Set Rubicon app extension
-			appExt := rubiconAppExt{
-				RP: rubiconAppExtRP{
-					SiteID: rubiconParams.SiteID,
-				},
-			}
-			appCopy.Ext, err = json.Marshal(appExt)
-			if err != nil {
-				errors = append(errors, fmt.Errorf("failed to marshal app ext: %w", err))
-				continue
-			}
-
-			// Task #25: Create App.Publisher when nil and ensure publisher.id is always set
-			if appCopy.Publisher == nil {
-				appCopy.Publisher = &openrtb.Publisher{}
-			}
-
-			// Set publisher.id to Rubicon's account ID (same as Site)
-			accountIDStr := fmt.Sprintf("%d", rubiconParams.AccountID)
-
-			logger.Log.Debug().
-				Str("adapter", "rubicon").
-				Str("before_id", appCopy.Publisher.ID).
-				Str("setting_to", accountIDStr).
-				Msg("About to set app publisher.id")
-
-			appCopy.Publisher.ID = accountIDStr
-
-			logger.Log.Debug().
-				Str("adapter", "rubicon").
-				Str("after_id", appCopy.Publisher.ID).
-				Msg("After setting app publisher.id")
-
-			pubExt := rubiconPubExt{
-				RP: rubiconPubExtRP{
-					AccountID: rubiconParams.AccountID,
-				},
-			}
-			appCopy.Publisher.Ext, err = json.Marshal(pubExt)
-			if err != nil {
-				errors = append(errors, fmt.Errorf("failed to marshal app publisher ext: %w", err))
-				continue
-			}
-
-			reqCopy.App = &appCopy
-		}
-
-		// Rubicon expects schain in source.ext.schain (legacy location) rather than
-		// the OpenRTB 2.5+ top-level source.schain field.
-		if reqCopy.Source != nil && reqCopy.Source.SChain != nil {
-			sourceCopy := *reqCopy.Source
-			var sourceExt map[string]json.RawMessage
-			if len(sourceCopy.Ext) > 0 {
-				json.Unmarshal(sourceCopy.Ext, &sourceExt) //nolint:errcheck
-			}
-			if sourceExt == nil {
-				sourceExt = make(map[string]json.RawMessage)
-			}
-			if schainBytes, merr := json.Marshal(sourceCopy.SChain); merr == nil {
-				sourceExt["schain"] = schainBytes
-			}
-			if extBytes, merr := json.Marshal(sourceExt); merr == nil {
-				sourceCopy.Ext = extBytes
-			}
-			sourceCopy.SChain = nil
-			reqCopy.Source = &sourceCopy
-		}
-
-		// Set user fields required by Magnite: buyeruid from synced UID and user.ext.rp = {}
-		if reqCopy.User != nil {
-			userCopy := *reqCopy.User
-
-			// Set buyeruid from Rubicon-synced EID in user.eids (standard top-level location)
-			for _, eid := range userCopy.EIDs {
-				if eid.Source == "rubiconproject.com" && len(eid.UIDs) > 0 {
-					userCopy.BuyerUID = eid.UIDs[0].ID
-					break
-				}
-			}
-
-			// Magnite reference adapter always injects user.ext.rp = {}
-			var userExt map[string]json.RawMessage
-			if len(userCopy.Ext) > 0 {
-				json.Unmarshal(userCopy.Ext, &userExt) //nolint:errcheck
-			}
-			if userExt == nil {
-				userExt = make(map[string]json.RawMessage)
-			}
-			if _, hasRP := userExt["rp"]; !hasRP {
-				userExt["rp"] = json.RawMessage(`{}`)
-			}
-			if extBytes, merr := json.Marshal(userExt); merr == nil {
-				userCopy.Ext = extBytes
-			}
-
-			reqCopy.User = &userCopy
-		}
-
-		requestBody, err := json.Marshal(reqCopy)
-		if err != nil {
-			errors = append(errors, fmt.Errorf("failed to marshal request for imp %s: %w", imp.ID, err))
-			continue
-		}
-
-		headers := http.Header{}
-		headers.Set("Content-Type", "application/json;charset=utf-8")
-		headers.Set("Accept", "application/json")
-
-		// Add XAPI basic authentication
-		if a.xapiUser != "" && a.xapiPass != "" {
-			auth := base64.StdEncoding.EncodeToString([]byte(a.xapiUser + ":" + a.xapiPass))
-			headers.Set("Authorization", "Basic "+auth)
-		}
-
-		requests = append(requests, &adapters.RequestData{
-			Method:  "POST",
-			URI:     a.endpoint,
-			Body:    requestBody,
-			Headers: headers,
-		})
-
-		// Log the request body for verification
-		requestPreview := string(requestBody)
-		if len(requestPreview) > 1500 {
-			requestPreview = requestPreview[:1500] + "..."
-		}
-
-		logger.Log.Debug().
-			Str("adapter", "rubicon").
-			Str("imp_id", imp.ID).
-			Str("endpoint", a.endpoint).
-			Int("account_id", rubiconParams.AccountID).
-			Int("site_id", rubiconParams.SiteID).
-			Int("zone_id", rubiconParams.ZoneID).
-			Int("body_size", len(requestBody)).
-			Str("request_body", requestPreview).
-			Msg("Rubicon request created")
 	}
 
 	logger.Log.Debug().
@@ -486,94 +406,241 @@ func (a *Adapter) MakeRequests(request *openrtb.BidRequest, extraInfo *adapters.
 	return requests, errors
 }
 
-// extractRubiconParams extracts Rubicon-specific parameters from impression extension
-func extractRubiconParams(impExt json.RawMessage) (*rubiconParams, error) {
-	// Handle nil or empty imp.ext
-	if len(impExt) == 0 {
-		return nil, fmt.Errorf("imp.ext is empty or nil")
+// buildRequest creates one HTTP request for a single imp.
+func (a *Adapter) buildRequest(request *openrtb.BidRequest, imp openrtb.Imp, params *rubiconParams) (*adapters.RequestData, []error) {
+	var errors []error
+
+	reqCopy := *request
+
+	// Apply standard-field routing rules (non-rp fields only)
+	if defaultLoader != nil {
+		rules := defaultLoader.Get(context.Background(), "rubicon")
+		safeRules := filterNonRPRules(rules)
+		composer := routing.NewComposer(safeRules)
+		composed, _ := composer.Apply("rubicon", &reqCopy, extractSlotParams(reqCopy.Imp), nil, nil)
+		reqCopy = *composed
 	}
 
-	var extMap map[string]interface{}
-	if err := json.Unmarshal(impExt, &extMap); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal imp.ext: %w", err)
+	// Migrate legacy field locations (schain, gdpr, us_privacy)
+	updateRequestTo26(&reqCopy)
+
+	// BAdv: Rubicon enforces a max of 50 blocked advertisers
+	if len(reqCopy.BAdv) > maxBAdv {
+		reqCopy.BAdv = reqCopy.BAdv[:maxBAdv]
 	}
 
-	// Look for Rubicon params in ext.rubicon
-	var rubiconData map[string]interface{}
+	// Rubicon doesn't use top-level Cur or Ext
+	reqCopy.Cur = nil
+	reqCopy.Ext = nil
 
-	if rubicon, ok := extMap["rubicon"].(map[string]interface{}); ok {
-		rubiconData = rubicon
-	}
+	impCopy := imp
 
-	if rubiconData == nil {
-		return nil, fmt.Errorf("no Rubicon parameters found in imp.ext")
-	}
+	// Build imp.ext.rp — extract existing target/track for merging
+	var existingTarget json.RawMessage
+	var existingTrack *rubiconTrack
 
-	params := &rubiconParams{}
-
-	// Extract accountId (can be int or float64 from JSON)
-	if accountID, ok := rubiconData["accountId"]; ok {
-		switch v := accountID.(type) {
-		case float64:
-			params.AccountID = int(v)
-		case int:
-			params.AccountID = v
-		default:
-			return nil, fmt.Errorf("accountId must be a number")
+	if len(impCopy.Ext) > 0 {
+		var existingImpExt map[string]interface{}
+		if json.Unmarshal(impCopy.Ext, &existingImpExt) == nil {
+			if rpData, ok := existingImpExt["rp"].(map[string]interface{}); ok {
+				if target, ok := rpData["target"]; ok {
+					if targetBytes, err := json.Marshal(target); err == nil {
+						existingTarget = targetBytes
+					}
+				}
+				if trackData, ok := rpData["track"].(map[string]interface{}); ok {
+					mint, _ := trackData["mint"].(string)
+					mintVer, _ := trackData["mint_version"].(string)
+					if mint != "" || mintVer != "" {
+						existingTrack = &rubiconTrack{Mint: mint, MintVersion: mintVer}
+					}
+				}
+			}
 		}
+	}
+
+	rpExt := rubiconImpExtRP{
+		ZoneID: params.ZoneID,
+		Target: buildImpRPTarget(params.Inventory, a.xapiUser, existingTarget),
+	}
+	if existingTrack != nil {
+		rpExt.Track = *existingTrack
 	} else {
-		return nil, fmt.Errorf("accountId is required")
+		rpExt.Track = rubiconTrack{Mint: "", MintVersion: ""}
 	}
 
-	// Extract siteId
-	if siteID, ok := rubiconData["siteId"]; ok {
-		switch v := siteID.(type) {
-		case float64:
-			params.SiteID = int(v)
-		case int:
-			params.SiteID = v
-		default:
-			return nil, fmt.Errorf("siteId must be a number")
+	impExtMap := map[string]interface{}{"rp": rpExt}
+	if params.BidOnMultiformat {
+		impExtMap["bidonmultiformat"] = true
+	}
+
+	var err error
+	impCopy.Ext, err = json.Marshal(impExtMap)
+	if err != nil {
+		return nil, []error{fmt.Errorf("imp %s: failed to marshal imp.ext: %w", imp.ID, err)}
+	}
+
+	// Banner ext: mime + size_id
+	if impCopy.Banner != nil {
+		bannerCopy := *impCopy.Banner
+		bannerRP := rubiconBannerExtRP{Mime: "text/html", SizeID: params.SizeID}
+		bannerCopy.Ext, _ = json.Marshal(rubiconBannerExt{RP: bannerRP})
+		impCopy.Banner = &bannerCopy
+	}
+
+	// Video ext: size_id (derived from startdelay), skip, skipdelay
+	if impCopy.Video != nil {
+		videoCopy := *impCopy.Video
+		videoRP := rubiconVideoExtRP{}
+
+		// Prefer explicit video size_id from params, otherwise derive from startdelay
+		if params.Video != nil && params.Video.SizeID > 0 {
+			videoRP.SizeID = params.Video.SizeID
+		} else {
+			videoRP.SizeID = getVideoSizeID(&videoCopy)
 		}
-	} else {
-		return nil, fmt.Errorf("siteId is required")
-	}
 
-	// Extract zoneId
-	if zoneID, ok := rubiconData["zoneId"]; ok {
-		switch v := zoneID.(type) {
-		case float64:
-			params.ZoneID = int(v)
-		case int:
-			params.ZoneID = v
-		default:
-			return nil, fmt.Errorf("zoneId must be a number")
+		if videoCopy.Skip != nil {
+			videoRP.Skip = videoCopy.Skip
 		}
-	} else {
-		return nil, fmt.Errorf("zoneId is required")
-	}
-
-	// Extract sizeId (optional, recommended for banner)
-	if sizeID, ok := rubiconData["sizeId"]; ok {
-		switch v := sizeID.(type) {
-		case float64:
-			params.SizeID = int(v)
-		case int:
-			params.SizeID = v
+		if videoCopy.SkipAfter > 0 {
+			videoRP.SkipDelay = videoCopy.SkipAfter
 		}
+
+		videoCopy.Ext, _ = json.Marshal(rubiconVideoExt{RP: videoRP})
+		impCopy.Video = &videoCopy
 	}
 
-	// Extract bidonmultiformat (optional)
-	if bidonmultiformat, ok := rubiconData["bidonmultiformat"]; ok {
-		if v, ok := bidonmultiformat.(bool); ok {
-			params.BidOnMultiformat = v
+	reqCopy.Imp = []openrtb.Imp{impCopy}
+
+	// Site
+	if reqCopy.Site != nil {
+		siteCopy := *reqCopy.Site
+		siteExt := rubiconSiteExt{RP: rubiconSiteExtRP{SiteID: params.SiteID}}
+		siteCopy.Ext, err = json.Marshal(siteExt)
+		if err != nil {
+			return nil, []error{fmt.Errorf("imp %s: failed to marshal site.ext: %w", imp.ID, err)}
 		}
+		if siteCopy.Publisher == nil {
+			siteCopy.Publisher = &openrtb.Publisher{}
+		}
+		siteCopy.Publisher.ID = fmt.Sprintf("%d", params.AccountID)
+		pubExt := rubiconPubExt{RP: rubiconPubExtRP{AccountID: params.AccountID}}
+		siteCopy.Publisher.Ext, _ = json.Marshal(pubExt)
+		reqCopy.Site = &siteCopy
 	}
 
-	return params, nil
+	// App
+	if reqCopy.App != nil {
+		appCopy := *reqCopy.App
+		appExt := rubiconAppExt{RP: rubiconAppExtRP{SiteID: params.SiteID}}
+		appCopy.Ext, err = json.Marshal(appExt)
+		if err != nil {
+			return nil, []error{fmt.Errorf("imp %s: failed to marshal app.ext: %w", imp.ID, err)}
+		}
+		if appCopy.Publisher == nil {
+			appCopy.Publisher = &openrtb.Publisher{}
+		}
+		appCopy.Publisher.ID = fmt.Sprintf("%d", params.AccountID)
+		pubExt := rubiconPubExt{RP: rubiconPubExtRP{AccountID: params.AccountID}}
+		appCopy.Publisher.Ext, _ = json.Marshal(pubExt)
+		reqCopy.App = &appCopy
+	}
+
+	// Device ext: pxratio
+	if reqCopy.Device != nil && reqCopy.Device.PxRatio > 0 {
+		deviceCopy := *reqCopy.Device
+		var deviceExt map[string]json.RawMessage
+		if len(deviceCopy.Ext) > 0 {
+			json.Unmarshal(deviceCopy.Ext, &deviceExt) //nolint:errcheck
+		}
+		if deviceExt == nil {
+			deviceExt = make(map[string]json.RawMessage)
+		}
+		if _, hasRP := deviceExt["rp"]; !hasRP {
+			rpBytes, _ := json.Marshal(map[string]float64{"pixelratio": deviceCopy.PxRatio})
+			deviceExt["rp"] = rpBytes
+		}
+		if extBytes, merr := json.Marshal(deviceExt); merr == nil {
+			deviceCopy.Ext = extBytes
+		}
+		reqCopy.Device = &deviceCopy
+	}
+
+	// User: buyeruid from EIDs, visitor FPD, user.ext.rp
+	if reqCopy.User != nil {
+		userCopy := *reqCopy.User
+
+		// Set buyeruid from Rubicon-synced EID
+		for _, eid := range userCopy.EIDs {
+			if eid.Source == "rubiconproject.com" && len(eid.UIDs) > 0 {
+				userCopy.BuyerUID = eid.UIDs[0].ID
+				break
+			}
+		}
+
+		var userExt map[string]json.RawMessage
+		if len(userCopy.Ext) > 0 {
+			json.Unmarshal(userCopy.Ext, &userExt) //nolint:errcheck
+		}
+		if userExt == nil {
+			userExt = make(map[string]json.RawMessage)
+		}
+
+		// visitor FPD → user.ext.rp.target
+		if len(params.Visitor) > 0 {
+			var rpData map[string]json.RawMessage
+			if existing, ok := userExt["rp"]; ok {
+				json.Unmarshal(existing, &rpData) //nolint:errcheck
+			}
+			if rpData == nil {
+				rpData = make(map[string]json.RawMessage)
+			}
+			rpData["target"] = params.Visitor
+			rpBytes, _ := json.Marshal(rpData)
+			userExt["rp"] = rpBytes
+		} else if _, hasRP := userExt["rp"]; !hasRP {
+			userExt["rp"] = json.RawMessage(`{}`)
+		}
+
+		if extBytes, merr := json.Marshal(userExt); merr == nil {
+			userCopy.Ext = extBytes
+		}
+		reqCopy.User = &userCopy
+	}
+
+	requestBody, merr := json.Marshal(reqCopy)
+	if merr != nil {
+		return nil, []error{fmt.Errorf("imp %s: failed to marshal request: %w", imp.ID, merr)}
+	}
+
+	headers := http.Header{}
+	headers.Set("Content-Type", "application/json;charset=utf-8")
+	headers.Set("Accept", "application/json")
+
+	if a.xapiUser != "" && a.xapiPass != "" {
+		auth := base64.StdEncoding.EncodeToString([]byte(a.xapiUser + ":" + a.xapiPass))
+		headers.Set("Authorization", "Basic "+auth)
+	}
+
+	logger.Log.Debug().
+		Str("adapter", "rubicon").
+		Str("imp_id", imp.ID).
+		Int("account_id", params.AccountID).
+		Int("site_id", params.SiteID).
+		Int("zone_id", params.ZoneID).
+		Int("body_size", len(requestBody)).
+		Msg("Rubicon request built")
+
+	return &adapters.RequestData{
+		Method:  "POST",
+		URI:     a.endpoint,
+		Body:    requestBody,
+		Headers: headers,
+	}, errors
 }
 
-// MakeBids parses Rubicon responses into bids
+// MakeBids parses Rubicon responses into bids.
 func (a *Adapter) MakeBids(request *openrtb.BidRequest, responseData *adapters.ResponseData) (*adapters.BidderResponse, []error) {
 	if responseData.StatusCode == http.StatusNoContent {
 		return nil, nil
@@ -587,33 +654,23 @@ func (a *Adapter) MakeBids(request *openrtb.BidRequest, responseData *adapters.R
 		return nil, []error{fmt.Errorf("unexpected status: %d", responseData.StatusCode)}
 	}
 
-	// Log the raw response for debugging
 	logger.Log.Debug().
 		Str("adapter", "rubicon").
 		Int("status_code", responseData.StatusCode).
 		Int("body_size", len(responseData.Body)).
-		Str("raw_response", string(responseData.Body)).
-		Msg("Rubicon raw HTTP response")
+		Msg("Rubicon response received")
 
 	var bidResp openrtb.BidResponse
 	if err := json.Unmarshal(responseData.Body, &bidResp); err != nil {
 		return nil, []error{fmt.Errorf("failed to parse response: %w", err)}
 	}
 
-	logger.Log.Debug().
-		Str("adapter", "rubicon").
-		Str("response_id", bidResp.ID).
-		Str("currency", bidResp.Cur).
-		Int("seatbids", len(bidResp.SeatBid)).
-		Msg("Rubicon parsed response")
-
 	response := &adapters.BidderResponse{
 		Currency:   bidResp.Cur,
-		ResponseID: bidResp.ID, // P1-1: Include ResponseID for validation
+		ResponseID: bidResp.ID,
 		Bids:       make([]*adapters.TypedBid, 0),
 	}
 
-	// P2-3: Build impression map once for O(1) lookups instead of O(n) per bid
 	impMap := adapters.BuildImpMap(request.Imp)
 
 	for _, seatBid := range bidResp.SeatBid {
@@ -626,13 +683,8 @@ func (a *Adapter) MakeBids(request *openrtb.BidRequest, responseData *adapters.R
 				Str("bid_id", bid.ID).
 				Str("imp_id", bid.ImpID).
 				Float64("price", bid.Price).
-				Str("currency", bidResp.Cur).
-				Str("creative_id", bid.CRID).
-				Str("deal_id", bid.DealID).
-				Int("width", bid.W).
-				Int("height", bid.H).
 				Str("bid_type", string(bidType)).
-				Msg("Rubicon bid details")
+				Msg("Rubicon bid")
 
 			response.Bids = append(response.Bids, &adapters.TypedBid{
 				Bid:     bid,
@@ -641,15 +693,10 @@ func (a *Adapter) MakeBids(request *openrtb.BidRequest, responseData *adapters.R
 		}
 	}
 
-	logger.Log.Debug().
-		Str("adapter", "rubicon").
-		Int("total_bids", len(response.Bids)).
-		Msg("Rubicon MakeBids completed")
-
 	return response, nil
 }
 
-// Info returns bidder information
+// Info returns bidder information.
 func Info() adapters.BidderInfo {
 	return adapters.BidderInfo{
 		Enabled: true,
@@ -672,7 +719,7 @@ func Info() adapters.BidderInfo {
 		},
 		GVLVendorID: 52,
 		Endpoint:    defaultEndpoint,
-		DemandType:  adapters.DemandTypePlatform, // Platform demand (obfuscated as "thenexusengine")
+		DemandType:  adapters.DemandTypePlatform,
 	}
 }
 
