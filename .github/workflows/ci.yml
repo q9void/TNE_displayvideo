@@ -94,6 +94,7 @@ jobs:
         with:
           version: v1.64.8
           args: --timeout=5m
+          only-new-issues: true
 
   security:
     name: Security Scan
