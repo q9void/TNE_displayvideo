@@ -43,6 +43,10 @@
   // Per-slot bid cache: divId → {auctionId, bidder, cpm}
   // Populated when targeting is set; consumed by render beacon listeners.
   catalyst._slotBids = {};
+
+  // Full bid cache: divId → full bid object from requestBids response
+  // Allows setTargeting(arrayOfSlotIds) without needing the bids array
+  catalyst._bidCache = {};
   catalyst._renderListenersSetUp = false;
 
   // Geolocation cache (15-30% CPM lift when available)
@@ -598,6 +602,10 @@
       var auctionId = response.auctionId || '';
       for (var b = 0; b < bids.length; b++) {
         bids[b].auctionId = auctionId;
+        // Cache full bid by divId so setTargeting(slotIds) can look it up
+        if (bids[b].divId) {
+          catalyst._bidCache[bids[b].divId] = bids[b];
+        }
       }
 
       // Auto-set GPT targeting and trigger refresh — only for publishers
@@ -1606,9 +1614,13 @@
 
       // Handle different input formats
       if (Array.isArray(targetingData)) {
-        // Array of bids - set targeting for each
+        // Array of bids or slot ID strings - set targeting for each
         for (var i = 0; i < targetingData.length; i++) {
           var bid = targetingData[i];
+          // If passed a string slot ID, look up the cached bid for that slot
+          if (typeof bid === 'string') {
+            bid = catalyst._bidCache[bid] || null;
+          }
           if (bid && bid.divId) {
             catalyst._setSlotTargeting(bid);
           }
