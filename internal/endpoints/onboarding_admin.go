@@ -1584,7 +1584,7 @@ const onboardingHTML = `<!DOCTYPE html>
 
 </div><!-- /#app -->
 
-<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
 <script>
 Vue.createApp({
   data: function() {
