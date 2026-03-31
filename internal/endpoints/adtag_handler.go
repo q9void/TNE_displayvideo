@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/thenexusengine/tne_springwire/internal/bidcache"
 	"github.com/thenexusengine/tne_springwire/internal/exchange"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
@@ -18,12 +19,14 @@ import (
 // AdTagHandler handles direct ad tag requests
 type AdTagHandler struct {
 	exchange *exchange.Exchange
+	bidCache *bidcache.BidCache
 }
 
 // NewAdTagHandler creates a new ad tag handler
-func NewAdTagHandler(ex *exchange.Exchange) *AdTagHandler {
+func NewAdTagHandler(ex *exchange.Exchange, bc *bidcache.BidCache) *AdTagHandler {
 	return &AdTagHandler{
 		exchange: ex,
+		bidCache: bc,
 	}
 }
 
@@ -109,45 +112,43 @@ func (h *AdTagHandler) HandleIframeAd(w http.ResponseWriter, r *http.Request) {
 	h.writeHTMLResponse(w, params, winningBid)
 }
 
-// HandleGAMAd handles GAM 3rd party script ad requests
+// HandleGAMAd serves the winning ad markup to the GAM 3rd-party creative.
+// Called by the creative snippet with ?bid=<hb_adid_catalyst>&creative=<hb_creative_catalyst>&w=...&h=...&pb=...
+// The bid ID is used to look up the markup cached at auction time — no new auction is run.
 func (h *AdTagHandler) HandleGAMAd(w http.ResponseWriter, r *http.Request) {
 	log := logger.Log
+	q := r.URL.Query()
+	bidID := q.Get("bid")
 
-	// Parse parameters
-	params := parseAdParams(r)
-	if params == nil {
-		http.Error(w, "Invalid parameters", http.StatusBadRequest)
+	if bidID == "" {
+		log.Warn().Msg("/ad/gam called without bid parameter")
+		w.Header().Set("Content-Type", "application/javascript")
+		w.Write([]byte("/* no bid id */"))
 		return
 	}
 
-	// Build OpenRTB request
-	bidRequest := h.buildBidRequest(r, params)
-
-	// Run auction
-	ctx, cancel := context.WithTimeout(r.Context(), 1000*time.Millisecond)
-	defer cancel()
-
-	auctionReq := &exchange.AuctionRequest{
-		BidRequest: bidRequest,
-		Timeout:    1000 * time.Millisecond,
-	}
-
-	auctionResp, err := h.exchange.RunAuction(ctx, auctionReq)
-	if err != nil {
-		log.Error().Err(err).Msg("Auction failed")
-		h.writeNoAdResponse(w, params.DivID)
+	adMarkup, ok := h.bidCache.Get(bidID)
+	if !ok {
+		log.Warn().Str("bid_id", bidID).Msg("/ad/gam bid not found in cache (expired or unknown)")
+		w.Header().Set("Content-Type", "application/javascript")
+		w.Write([]byte("/* bid expired */"))
 		return
 	}
 
-	// Extract winning bid
-	winningBid := h.extractWinningBid(auctionResp)
-	if winningBid == nil {
-		h.writeNoAdResponse(w, params.DivID)
-		return
-	}
+	log.Info().
+		Str("bid_id", bidID).
+		Str("creative_id", q.Get("creative")).
+		Str("pb", q.Get("pb")).
+		Msg("/ad/gam serving cached markup")
 
-	// Render GAM-compatible JavaScript response
-	h.writeGAMResponse(w, params, winningBid)
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+
+	// Write the ad markup directly into the GAM creative iframe via document.write.
+	// The markup is trusted SSP HTML/JS — do not sanitize it.
+	adMarkupJSON, _ := json.Marshal(adMarkup)
+	script := fmt.Sprintf("document.write(%s);", string(adMarkupJSON))
+	w.Write([]byte(script))
 }
 
 // AdParams represents parsed ad request parameters

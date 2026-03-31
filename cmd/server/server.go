@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/thenexusengine/tne_springwire/internal/bidcache"
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/appnexus"
 	// _ "github.com/thenexusengine/tne_springwire/internal/adapters/demo" // Disabled - no demo bids in production
@@ -289,8 +290,11 @@ func (s *Server) initHandlers() {
 
 	log.Info().Msg("Video handlers initialized")
 
+	// Shared bid cache — stores winning ad markup by bid ID so /ad/gam can serve it
+	bc := bidcache.New()
+
 	// Ad tag handlers (direct publisher integration)
-	adTagHandler := endpoints.NewAdTagHandler(s.exchange)
+	adTagHandler := endpoints.NewAdTagHandler(s.exchange, bc)
 	adTagGenerator := endpoints.NewAdTagGeneratorHandler(s.config.HostURL, s.publisher)
 
 	log.Info().Msg("Ad tag handlers initialized")
@@ -374,7 +378,7 @@ func (s *Server) initHandlers() {
 		Strs("bidders", bidderMapping.Publisher.DefaultBidders).
 		Msg("Loaded bidder mapping configuration")
 
-	catalystBidHandler := endpoints.NewCatalystBidHandler(s.exchange, bidderMapping, s.publisher, s.userSyncStore, syncAwaiter)
+	catalystBidHandler := endpoints.NewCatalystBidHandler(s.exchange, bidderMapping, s.publisher, s.userSyncStore, syncAwaiter, bc)
 	mux.Handle("/v1/bid", privacyMiddleware(http.HandlerFunc(catalystBidHandler.HandleBidRequest)))
 
 	renderHandler := endpoints.NewRenderHandler(s.rawDB)

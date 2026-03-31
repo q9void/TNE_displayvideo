@@ -29,7 +29,7 @@ func TestCatalystIntegration_EndToEnd(t *testing.T) {
 	ex := exchange.New(registry, exchangeConfig)
 
 	// Create handler
-	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil)
+	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil, nil)
 
 	// Simulate a real MAI Publisher bid request
 	bidRequest := endpoints.MAIBidRequest{
@@ -160,7 +160,7 @@ func TestCatalystIntegration_HighLoad(t *testing.T) {
 		MaxConcurrentBidders: 10,
 	}
 	ex := exchange.New(registry, exchangeConfig)
-	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil)
+	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil, nil)
 
 	// Create bid request
 	bidRequest := endpoints.MAIBidRequest{
@@ -258,7 +258,7 @@ func TestCatalystIntegration_SDKCompatibility(t *testing.T) {
 		MaxBidders:     10,
 	}
 	ex := exchange.New(registry, exchangeConfig)
-	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil)
+	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil, nil)
 
 	// Create test server
 	server := httptest.NewServer(http.HandlerFunc(handler.HandleBidRequest))
@@ -331,7 +331,7 @@ func BenchmarkCatalystBidRequest(b *testing.B) {
 		MaxBidders:     10,
 	}
 	ex := exchange.New(registry, exchangeConfig)
-	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil)
+	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil, nil)
 
 	bidRequest := endpoints.MAIBidRequest{
 		AccountID: "benchmark-account",

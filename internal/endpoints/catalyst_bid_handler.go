@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/thenexusengine/tne_springwire/internal/bidcache"
 	"github.com/thenexusengine/tne_springwire/internal/device"
 	"github.com/thenexusengine/tne_springwire/internal/exchange"
 	"github.com/thenexusengine/tne_springwire/internal/geo"
@@ -77,6 +78,7 @@ type CatalystBidHandler struct {
 	publisherStore *storage.PublisherStore // Dynamic hierarchical config from database
 	userSyncStore  *storage.UserSyncStore  // User sync storage for persistent UIDs
 	syncAwaiter    *usersync.SyncAwaiter
+	bidCache       *bidcache.BidCache
 }
 
 // LoadBidderMapping loads bidder parameter mapping from JSON file
@@ -100,13 +102,14 @@ func LoadBidderMapping(path string) (*BidderMapping, error) {
 }
 
 // NewCatalystBidHandler creates a new Catalyst bid handler
-func NewCatalystBidHandler(ex *exchange.Exchange, mapping *BidderMapping, publisherStore *storage.PublisherStore, userSyncStore *storage.UserSyncStore, syncAwaiter *usersync.SyncAwaiter) *CatalystBidHandler {
+func NewCatalystBidHandler(ex *exchange.Exchange, mapping *BidderMapping, publisherStore *storage.PublisherStore, userSyncStore *storage.UserSyncStore, syncAwaiter *usersync.SyncAwaiter, bc *bidcache.BidCache) *CatalystBidHandler {
 	return &CatalystBidHandler{
 		exchange:       ex,
 		mapping:        mapping,
 		publisherStore: publisherStore,
 		userSyncStore:  userSyncStore,
 		syncAwaiter:    syncAwaiter,
+		bidCache:       bc,
 	}
 }
 
@@ -1623,6 +1626,11 @@ func (h *CatalystBidHandler) convertToMAIResponse(auctionResp *exchange.AuctionR
 					NetworkID:         bid.CID,
 					NetworkName:       seatBid.Seat,
 				}
+			}
+
+			// Cache the ad markup so /ad/gam can serve it when the GAM creative fires
+			if h.bidCache != nil && bid.AdM != "" {
+				h.bidCache.Store(bid.ID, bid.AdM)
 			}
 
 			// Extract pre-built GAM targeting keys from bid extension
