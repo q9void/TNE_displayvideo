@@ -3648,7 +3648,7 @@ func (e *Exchange) buildBidExtension(vb ValidatedBid) *openrtb.BidExt {
 	// These are set server-side so GAM line items can target Catalyst bids directly
 	targeting["hb_pb"] = priceBucket
 	targeting["hb_pb_catalyst"] = priceBucket
-	targeting["hb_bidder_catalyst"] = displayBidderCode
+	targeting["hb_bidder_catalyst"] = adapters.PlatformSeatName // always "thenexusengine" — GAM line items target this value regardless of underlying bidder
 	targeting["hb_partner"] = displayBidderCode
 	targeting["hb_source_catalyst"] = "s2s"
 	targeting["hb_format_catalyst"] = bidType

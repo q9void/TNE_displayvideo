@@ -38,7 +38,7 @@ order:
 # Each line item targets a specific CPM price bucket.
 # price_priority ensures Catalyst competes fairly with other demand.
 line_item:
-  name: "Catalyst-{{ media_type }}-{{ time }} @ {{ cpm }}"
+  name: "Catalyst-{{ media_type }} @ {{ cpm }}"
   item_type: "price_priority"
   priority: 12
 
