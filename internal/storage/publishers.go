@@ -405,9 +405,9 @@ func NewDBConnection(ctx context.Context, host, port, user, password, dbname, ss
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Configure connection pool for high-concurrency auction workload
-	db.SetMaxOpenConns(100) // Increased for parallel bidder lookups
-	db.SetMaxIdleConns(25)  // Keep more idle connections ready
+	// Configure connection pool — defaults kept conservative; tune via DB_MAX_CONNECTIONS
+	db.SetMaxOpenConns(20)
+	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(10 * time.Minute)
 
 	// Test connection using provided context

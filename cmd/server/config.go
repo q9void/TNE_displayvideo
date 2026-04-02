@@ -89,8 +89,8 @@ func ParseConfig() *ServerConfig {
 			Password:        getEnvOrDefault("DB_PASSWORD", ""),
 			Name:            getEnvOrDefault("DB_NAME", "catalyst"),
 			SSLMode:         getEnvOrDefault("DB_SSL_MODE", "disable"),
-			MaxConnections:  getEnvIntOrDefault("DB_MAX_CONNECTIONS", 100),
-			MaxIdleConns:    getEnvIntOrDefault("DB_MAX_IDLE_CONNS", 10),
+			MaxConnections:  getEnvIntOrDefault("DB_MAX_CONNECTIONS", 20),
+			MaxIdleConns:    getEnvIntOrDefault("DB_MAX_IDLE_CONNS", 5),
 			ConnMaxLifetime: time.Duration(getEnvIntOrDefault("DB_CONN_MAX_LIFETIME_SECONDS", 3600)) * time.Second,
 		}
 	}
@@ -119,7 +119,7 @@ func (c *ServerConfig) ToExchangeConfig() *exchange.Config {
 		IDREnabled:         c.IDREnabled,
 		IDRServiceURL:      c.IDRUrl,
 		IDRAPIKey:          c.IDRAPIKey,
-		EventRecordEnabled: true,
+		EventRecordEnabled: os.Getenv("IDR_EVENT_RECORD_ENABLED") == "true",
 		EventBufferSize:    100,
 		CurrencyConv:       c.CurrencyConversionEnabled,
 		DefaultCurrency:    c.DefaultCurrency,

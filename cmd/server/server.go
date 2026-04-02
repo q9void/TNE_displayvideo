@@ -622,9 +622,22 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
+// noLogPaths are high-frequency endpoints that don't need per-request log lines
+var noLogPaths = map[string]bool{
+	"/health":       true,
+	"/health/ready": true,
+	"/status":       true,
+	"/metrics":      true,
+}
+
 // loggingMiddleware logs HTTP requests with structured logging
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if noLogPaths[r.URL.Path] {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		start := time.Now()
 
 		// Wrap response writer to capture status
