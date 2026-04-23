@@ -29,6 +29,18 @@ These examples show the exact request format Catalyst expects, including bidder-
 - Shows how to pass different parameters to each bidder
 - Demonstrates geo-targeting and content categories
 
+### Video / GAM
+
+**gam-vast-tag.html** / **gam-vast-tag.txt**
+- Ready-to-paste VAST tag for Google Ad Manager "Third Party VAST Redirect"
+- Forwards every GAM macro (page, domain, referrer, cache buster, ad unit,
+  content key-values, privacy signals, IFA, schain) to `/video/vast`
+- Includes the GAM-macro -> Catalyst-param -> OpenRTB 2.5 mapping
+- See `docs/integrations/video-vast/SETUP.md` Step 4.6 for trafficking steps
+
+**vast-test.html**
+- Local IMA SDK harness for validating VAST responses before going live
+
 ### Test Scripts
 
 **test-rubicon-params.sh**

@@ -313,6 +313,96 @@ placement: 4  // In-feed
 placement: 5  // Interstitial/slider
 ```
 
+## Step 4.6: Google Ad Manager Direct Integration
+
+For publishers serving video via Google Ad Manager, Catalyst can be trafficked
+as a **Third Party VAST Redirect** creative. GAM substitutes its macros
+server-side at ad call time, so every enrichment (page, referrer, ad unit,
+content KVs, privacy signals, IFA) lands on the Catalyst endpoint populated.
+
+### Ready-to-paste VAST tag
+
+Copy this URL into GAM's VAST Tag URL field. Replace `{PUBLISHER_ID}`,
+`{GVL_ID}` (TCF vendor ID - ask your account manager), `{MIN}`/`{MAX}`
+duration, and `{FLOOR}` before saving.
+
+```
+https://api.tne-catalyst.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&description_url=%%DESCRIPTION_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%&ua=%%USER_AGENT_ESC%%&session_id=%%CLICK_ID%%&schain=%%SCHAIN%%
+```
+
+A formatted version with copy-button and full macro reference lives at
+[`examples/gam-vast-tag.html`](../../../examples/gam-vast-tag.html); a
+plaintext copy is at [`examples/gam-vast-tag.txt`](../../../examples/gam-vast-tag.txt).
+
+### Macro -> OpenRTB 2.5 mapping
+
+| Enrichment | GAM macro | Catalyst param | OpenRTB field |
+|---|---|---|---|
+| Page URL | `%%PAGE_URL%%` | `page_url` | `site.page` |
+| Domain | `%%SITE_DOMAIN%%` | `domain` | `site.domain` |
+| Referrer | `%%REFERRER_URL%%` | `ref` | `site.ref` |
+| Description URL | `%%DESCRIPTION_URL%%` | `description_url` | `site.content.url` |
+| Cache buster | `%%CACHEBUSTER%%` | `cb` | *(not carried; forces fresh fetch)* |
+| Ad unit / placement | `%%ADUNIT%%` | `placement_id` | `imp[0].tagid` |
+| Player width / height | `%%WIDTH%%` / `%%HEIGHT%%` | `w` / `h` | `imp[0].video.w` / `.h` |
+| User agent | `%%USER_AGENT_ESC%%` | `ua` | `device.ua` |
+| KV `sport` | `%%PATTERN:sport%%` | `sport` | `site.content.genre` + `imp.ext.context.sport` |
+| KV `competition` | `%%PATTERN:competition%%` | `competition` | `site.content.series` + `imp.ext.context.competition` |
+| KV `language` | `%%PATTERN:language%%` | `lang` | `site.content.language` (BCP-47) |
+| KV `device` | `%%PATTERN:device%%` | `device_type` | `device.devicetype` |
+| KV `geo` | `%%PATTERN:geo%%` | `geo` | `device.geo.country` (ISO 3166-1 alpha-3) |
+| KV `content_type` | `%%PATTERN:content_type%%` | `content_type` | `site.content.cattax` + `site.content.cat[]` |
+| GDPR applies | `%%GDPR%%` | `gdpr` | `regs.ext.gdpr` |
+| TCF v2 consent | `%%GDPR_CONSENT_{GVL_ID}%%` | `gdpr_consent` | `user.ext.consent` |
+| Google AC string | `%%ADDTL_CONSENT%%` | `addtl_consent` | `user.ext.ConsentedProvidersSettings.consented_providers` |
+| US Privacy (CCPA) | `%%US_PRIVACY%%` | `us_privacy` | `regs.ext.us_privacy` |
+| GPP string | `%%GPP_STRING%%` | `gpp` | `regs.gpp` |
+| GPP section IDs | `%%GPP_SID%%` | `gpp_sid` | `regs.gpp_sid[]` |
+| COPPA | `%%TFCD%%` | `coppa` | `regs.coppa` |
+| Limit Ad Tracking | `%%LIMITADTRACKING%%` | `lmt` | `device.lmt` |
+| IFA (IDFA/AAID/RIDA/TIFA) | `%%ADVERTISING_IDENTIFIER_PLAIN%%` | `ifa` | `device.ifa` |
+| IFA type | `%%ADVERTISING_IDENTIFIER_TYPE%%` | `ifa_type` | `device.ext.ifa_type` |
+| Supply chain | `%%SCHAIN%%` | `schain` | `source.ext.schain` |
+
+### First-party identifier strategy (future state)
+
+The GET tag above carries publisher enrichments, but deterministic IDs
+(UID 2.0, ID5, LiveRamp RampID, SharedID, hashed PPID) should be sent as
+structured `user.ext.eids[]` objects. Switch to `POST /video/openrtb` once
+you're ready to pass them:
+
+```json
+{
+  "user": {
+    "ext": {
+      "eids": [
+        { "source": "uidapi.com",   "uids": [{ "id": "<UID2 token>", "atype": 3 }] },
+        { "source": "id5-sync.com", "uids": [{ "id": "<ID5 ID>",     "atype": 1, "ext": { "linkType": 2 } }] },
+        { "source": "yoursite.com", "uids": [{ "id": "<hashed PPID>","atype": 1, "ext": { "stype": "ppuid" } }] }
+      ]
+    }
+  }
+}
+```
+
+| Source | `eids[].source` | Notes |
+|---|---|---|
+| UID 2.0 | `uidapi.com` | Token rotates ~30 days; refresh server-side |
+| ID5 | `id5-sync.com` | Populate `ext.linkType` (0/1/2) |
+| LiveRamp RampID | `liveramp.com` | ATS envelope, `ext.rtiPartner=idl` |
+| SharedID | `pubcid.org` | First-party cookie; region-safe |
+| Publisher PPID | `{your-domain}` | Hashed + salted internal user ID; `ext.stype=ppuid` |
+
+### Trafficking checklist (GAM UI)
+
+1. Delivery -> Orders -> create/select order.
+2. New line item, type **Price priority** (or **Sponsorship** for guaranteed).
+3. Creative type **Video**, format **VAST redirect**.
+4. Paste the URL above into **VAST Tag URL**.
+5. Leave **"Convert to XML"** off - Catalyst already returns VAST XML.
+6. Save, approve, traffic. The Catalyst team validates enrichment coverage
+   after the first ~1,000 bid requests land.
+
 ## Step 5: Privacy Compliance
 
 ### 5.1 GDPR (EU Traffic)

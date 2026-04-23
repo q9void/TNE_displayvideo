@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TNE Catalyst — GAM VAST Tag (with Enrichments)</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 1100px; margin: 40px auto; padding: 0 20px; color: #222; }
+  h1 { border-bottom: 2px solid #007bff; padding-bottom: 8px; }
+  h2 { margin-top: 36px; }
+  code, pre { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  pre { background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  .tag-box { position: relative; }
+  .copy-btn { position: absolute; top: 10px; right: 10px; background: #007bff; color: #fff; border: 0; padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+  .copy-btn:hover { background: #0056b3; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0 24px; font-size: 14px; }
+  th, td { border: 1px solid #dcdcdc; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f6f8fa; }
+  .note { background: #fff8dc; border-left: 4px solid #f0c040; padding: 12px 14px; border-radius: 4px; margin: 16px 0; }
+  .ok   { background: #e6f4ea; border-left: 4px solid #34a853; padding: 12px 14px; border-radius: 4px; margin: 16px 0; }
+  .mono { font-family: "SFMono-Regular", Menlo, Consolas, monospace; background: #f1f3f5; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<h1>Google Ad Manager &rarr; TNE Catalyst VAST Tag</h1>
+
+<p>
+  Drop the tag below into the Google Ad Manager line item / creative as a
+  <strong>Third Party VAST Redirect</strong>. All publisher-supplied enrichments
+  (page, referrer, cache buster, ad unit, content key-values, privacy signals)
+  are forwarded to <span class="mono">/video/vast</span> via GAM macros and
+  mapped server-side onto the OpenRTB 2.5 bid request Catalyst emits to demand.
+</p>
+
+<div class="note">
+  <strong>Replace before use:</strong>
+  <ul>
+    <li><span class="mono">{PUBLISHER_ID}</span> &mdash; your Catalyst publisher ID (e.g. <span class="mono">pub-video-123456</span>).</li>
+    <li><span class="mono">{GVL_ID}</span> in <span class="mono">%%GDPR_CONSENT_{GVL_ID}%%</span> &mdash; Catalyst&rsquo;s TCF vendor (GVL) ID. Ask your Catalyst account manager for the current value.</li>
+    <li><span class="mono">{MIN}</span>/<span class="mono">{MAX}</span> &mdash; creative duration constraints in seconds.</li>
+    <li><span class="mono">{FLOOR}</span> &mdash; bid floor in USD (omit if not needed).</li>
+  </ul>
+</div>
+
+<h2>Production VAST Tag URL</h2>
+
+<div class="tag-box">
+  <button class="copy-btn" onclick="copyTag()">Copy</button>
+<pre id="vast-tag">https://api.tne-catalyst.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&description_url=%%DESCRIPTION_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%&ua=%%USER_AGENT_ESC%%&session_id=%%CLICK_ID%%&schain=%%SCHAIN%%</pre>
+</div>
+
+<p>
+  GAM substitutes each <span class="mono">%%...%%</span> at ad call time, so the
+  request that hits Catalyst is fully populated. Line breaks above are for
+  readability only &mdash; the tag is a single URL.
+</p>
+
+<h2>Macro &rarr; Catalyst Parameter &rarr; OpenRTB Mapping</h2>
+
+<h3>Standard VAST Enrichments</h3>
+<table>
+  <thead>
+    <tr><th>Enrichment</th><th>GAM Macro</th><th>Catalyst Query Param</th><th>OpenRTB 2.5 Field</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Page URL</td><td><span class="mono">%%PAGE_URL%%</span></td><td><span class="mono">page_url</span></td><td><span class="mono">site.page</span></td></tr>
+    <tr><td>Domain</td><td><span class="mono">%%SITE_DOMAIN%%</span></td><td><span class="mono">domain</span></td><td><span class="mono">site.domain</span></td></tr>
+    <tr><td>Referrer</td><td><span class="mono">%%REFERRER_URL%%</span></td><td><span class="mono">ref</span></td><td><span class="mono">site.ref</span></td></tr>
+    <tr><td>Description URL (video context)</td><td><span class="mono">%%DESCRIPTION_URL%%</span></td><td><span class="mono">description_url</span></td><td><span class="mono">site.content.url</span></td></tr>
+    <tr><td>Cache buster</td><td><span class="mono">%%CACHEBUSTER%%</span></td><td><span class="mono">cb</span></td><td>&mdash; (forces fresh fetch; not carried in OpenRTB)</td></tr>
+    <tr><td>Ad unit path / placement</td><td><span class="mono">%%ADUNIT%%</span></td><td><span class="mono">placement_id</span></td><td><span class="mono">imp[0].tagid</span></td></tr>
+    <tr><td>Player width</td><td><span class="mono">%%WIDTH%%</span></td><td><span class="mono">w</span></td><td><span class="mono">imp[0].video.w</span></td></tr>
+    <tr><td>Player height</td><td><span class="mono">%%HEIGHT%%</span></td><td><span class="mono">h</span></td><td><span class="mono">imp[0].video.h</span></td></tr>
+    <tr><td>User agent</td><td><span class="mono">%%USER_AGENT_ESC%%</span></td><td><span class="mono">ua</span></td><td><span class="mono">device.ua</span></td></tr>
+  </tbody>
+</table>
+
+<h3>Custom Key-Values (Contextual Targeting)</h3>
+<p>
+  Each KV defined in your Ad Manager network is read via the
+  <span class="mono">%%PATTERN:&lt;key&gt;%%</span> macro and forwarded as a
+  typed query parameter. Catalyst attaches them to the bid request under
+  <span class="mono">site.content</span> and
+  <span class="mono">imp[0].ext.context</span> so downstream DSPs can target
+  them directly.
+</p>
+<table>
+  <thead>
+    <tr><th>KV Key</th><th>GAM Macro</th><th>Catalyst Query Param</th><th>OpenRTB 2.5 Field</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>sport</td><td><span class="mono">%%PATTERN:sport%%</span></td><td><span class="mono">sport</span></td><td><span class="mono">site.content.genre</span> + <span class="mono">imp.ext.context.sport</span></td></tr>
+    <tr><td>competition</td><td><span class="mono">%%PATTERN:competition%%</span></td><td><span class="mono">competition</span></td><td><span class="mono">site.content.series</span> + <span class="mono">imp.ext.context.competition</span></td></tr>
+    <tr><td>language</td><td><span class="mono">%%PATTERN:language%%</span></td><td><span class="mono">lang</span></td><td><span class="mono">site.content.language</span> (BCP-47)</td></tr>
+    <tr><td>device</td><td><span class="mono">%%PATTERN:device%%</span></td><td><span class="mono">device_type</span></td><td><span class="mono">device.devicetype</span> (OpenRTB enum) + <span class="mono">device.ext.raw</span></td></tr>
+    <tr><td>geo</td><td><span class="mono">%%PATTERN:geo%%</span></td><td><span class="mono">geo</span></td><td><span class="mono">device.geo.country</span> (ISO 3166-1 alpha-3)</td></tr>
+    <tr><td>content_type</td><td><span class="mono">%%PATTERN:content_type%%</span></td><td><span class="mono">content_type</span></td><td><span class="mono">site.content.cattax</span> + <span class="mono">site.content.cat[]</span></td></tr>
+  </tbody>
+</table>
+
+<h3>Privacy &amp; Consent Signals</h3>
+<table>
+  <thead>
+    <tr><th>Signal</th><th>GAM Macro</th><th>Catalyst Query Param</th><th>OpenRTB 2.5 Field</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>GDPR applies flag</td><td><span class="mono">%%GDPR%%</span></td><td><span class="mono">gdpr</span></td><td><span class="mono">regs.ext.gdpr</span> (0/1)</td></tr>
+    <tr><td>TCF v2 consent string</td><td><span class="mono">%%GDPR_CONSENT_{GVL_ID}%%</span></td><td><span class="mono">gdpr_consent</span></td><td><span class="mono">user.ext.consent</span></td></tr>
+    <tr><td>Google Additional Consent (AC)</td><td><span class="mono">%%ADDTL_CONSENT%%</span></td><td><span class="mono">addtl_consent</span></td><td><span class="mono">user.ext.ConsentedProvidersSettings.consented_providers</span></td></tr>
+    <tr><td>CCPA / US Privacy</td><td><span class="mono">%%US_PRIVACY%%</span></td><td><span class="mono">us_privacy</span></td><td><span class="mono">regs.ext.us_privacy</span></td></tr>
+    <tr><td>GPP string (multi-state US)</td><td><span class="mono">%%GPP_STRING%%</span></td><td><span class="mono">gpp</span></td><td><span class="mono">regs.gpp</span></td></tr>
+    <tr><td>GPP section IDs</td><td><span class="mono">%%GPP_SID%%</span></td><td><span class="mono">gpp_sid</span></td><td><span class="mono">regs.gpp_sid[]</span></td></tr>
+    <tr><td>COPPA / tag-for-child-directed</td><td><span class="mono">%%TFCD%%</span></td><td><span class="mono">coppa</span></td><td><span class="mono">regs.coppa</span> (0/1)</td></tr>
+    <tr><td>Limit Ad Tracking</td><td><span class="mono">%%LIMITADTRACKING%%</span></td><td><span class="mono">lmt</span></td><td><span class="mono">device.lmt</span></td></tr>
+  </tbody>
+</table>
+
+<h3>User / Device Identifiers (OTT &amp; Mobile)</h3>
+<table>
+  <thead>
+    <tr><th>Identifier</th><th>GAM Macro</th><th>Catalyst Query Param</th><th>OpenRTB 2.5 Field</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>IFA (IDFA / AAID / RIDA / TIFA)</td><td><span class="mono">%%ADVERTISING_IDENTIFIER_PLAIN%%</span></td><td><span class="mono">ifa</span></td><td><span class="mono">device.ifa</span></td></tr>
+    <tr><td>IFA type</td><td><span class="mono">%%ADVERTISING_IDENTIFIER_TYPE%%</span></td><td><span class="mono">ifa_type</span></td><td><span class="mono">device.ext.ifa_type</span></td></tr>
+    <tr><td>Supply chain object (sellers.json)</td><td><span class="mono">%%SCHAIN%%</span></td><td><span class="mono">schain</span></td><td><span class="mono">source.ext.schain</span></td></tr>
+  </tbody>
+</table>
+
+<h2>Future: First-Party Identifier Strategy</h2>
+
+<p>
+  When you&rsquo;re ready to pass deterministic first-party IDs, use the
+  <strong>POST <span class="mono">/video/openrtb</span></strong> endpoint (not the
+  GET tag) so you can send structured <span class="mono">user.ext.eids[]</span>
+  objects. Recommended sources:
+</p>
+
+<table>
+  <thead>
+    <tr><th>Source</th><th><span class="mono">eids[].source</span></th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>UID 2.0</td><td><span class="mono">uidapi.com</span></td><td>Token rotates every ~30 days; refresh server-side.</td></tr>
+    <tr><td>ID5</td><td><span class="mono">id5-sync.com</span></td><td>Populate <span class="mono">ext.linkType</span> (0=not linked, 1=authenticated, 2=deterministic).</td></tr>
+    <tr><td>LiveRamp RampID</td><td><span class="mono">liveramp.com</span></td><td>Use ATS envelope (<span class="mono">ext.rtiPartner=idl</span>).</td></tr>
+    <tr><td>SharedID (Prebid)</td><td><span class="mono">pubcid.org</span></td><td>First-party cookie; safe for most regions.</td></tr>
+    <tr><td>Publisher-provided ID (PPID)</td><td><span class="mono">{your-domain}</span></td><td>Hashed &amp; salted internal user ID; <span class="mono">ext.stype=ppuid</span>.</td></tr>
+  </tbody>
+</table>
+
+<pre>{
+  "user": {
+    "ext": {
+      "eids": [
+        { "source": "uidapi.com",    "uids": [{ "id": "&lt;UID2 token&gt;", "atype": 3 }] },
+        { "source": "id5-sync.com",  "uids": [{ "id": "&lt;ID5 ID&gt;",    "atype": 1, "ext": { "linkType": 2 } }] },
+        { "source": "yoursite.com",  "uids": [{ "id": "&lt;hashed PPID&gt;", "atype": 1, "ext": { "stype": "ppuid" } }] }
+      ]
+    }
+  }
+}</pre>
+
+<div class="ok">
+  <strong>Testing endpoint:</strong>
+  Use <span class="mono">https://test.tne-catalyst.com/video/vast?...</span> (same
+  query string) against publisher ID <span class="mono">pub-video-test</span>
+  before going live. Once the first ~1,000 bid requests land, the Catalyst team
+  will verify that every enrichment is being populated (no <span class="mono">%%&hellip;%%</span>
+  strings passing through) and share a troubleshooting report.
+</div>
+
+<h2>Where to paste this in Google Ad Manager</h2>
+<ol>
+  <li>GAM UI &rarr; <strong>Delivery</strong> &rarr; <strong>Orders</strong> &rarr; new or existing order.</li>
+  <li>Create a <strong>Line item</strong> with type <em>Price priority</em> (or <em>Sponsorship</em> for guaranteed).</li>
+  <li>Set <strong>Creative type = Video</strong> and choose <strong>VAST redirect</strong>.</li>
+  <li>Paste the URL above into the <strong>VAST Tag URL</strong> field.</li>
+  <li>Enable <strong>&ldquo;Convert to XML&rdquo;</strong> off &mdash; Catalyst already returns VAST XML.</li>
+  <li>Save, approve, and traffic.</li>
+</ol>
+
+<script>
+function copyTag() {
+  var text = document.getElementById('vast-tag').textContent;
+  navigator.clipboard.writeText(text).then(function() {
+    var btn = document.querySelector('.copy-btn');
+    var original = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(function () { btn.textContent = original; }, 1500);
+  });
+}
+</script>
+
+</body>
+</html>
