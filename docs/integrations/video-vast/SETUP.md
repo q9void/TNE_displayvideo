@@ -322,17 +322,14 @@ content KVs, privacy signals, IFA) lands on the Catalyst endpoint populated.
 
 ### Ready-to-paste VAST tag
 
-This template lives in the repo so The Nexus Engine team can bake in
-`{GVL_ID}` (our own IAB TCF vendor ID) before emailing the tag to the
-publisher &mdash; the publisher never has to look it up.
+`{GVL_ID}` in `%%GDPR_CONSENT_{GVL_ID}%%` is our own registered IAB TCF
+vendor ID - a static constant baked into the template once. Publishers
+never see it. When a CMP on the publisher's page has us in its vendor
+list, GAM emits the full signed TCF consent string; Catalyst decodes it
+server-side and applies per-bidder GVL checks before fanning out to SSPs.
 
 **Publisher fills in:** `{PUBLISHER_ID}`, `{MIN}`/`{MAX}` duration, and
 `{FLOOR}` (or drop the `bidfloor=` pair to disable).
-
-**The Nexus Engine fills in before delivery:** `{GVL_ID}` in the
-`%%GDPR_CONSENT_{GVL_ID}%%` macro. The macro needs a concrete numeric
-vendor ID for GAM to emit the signed TCF string &mdash; GAM returns empty
-if the GVL is unregistered.
 
 ```
 https://ads.thenexusengine.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&description_url=%%DESCRIPTION_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%&ua=%%USER_AGENT_ESC%%&session_id=%%CLICK_ID%%&schain=%%SCHAIN%%

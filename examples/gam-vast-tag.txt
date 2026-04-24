@@ -1,15 +1,15 @@
 # The Nexus Engine - Catalyst GAM VAST Tag (Publisher Enrichments)
 #
-# This template lives in the repo. The Nexus Engine team bakes in our own
-# TCF vendor (GVL) ID before emailing the tag to a publisher; the publisher
-# only fills in the publisher-side placeholders below and pastes the URL
-# into Google Ad Manager as a "Third Party VAST Redirect" creative. GAM
-# substitutes every %%...%% macro at ad call time and Catalyst maps them
-# onto OpenRTB 2.5 fields before calling demand.
+# This template lives in the repo. {GVL_ID} is our own registered IAB TCF
+# vendor ID - a static constant, baked into the tag once at template level.
+# Publishers never see it; when a CMP on the publisher's page has us in its
+# vendor list, GAM emits the full signed TCF consent string via
+# %%GDPR_CONSENT_{GVL_ID}%%. Catalyst decodes that string server-side and
+# applies per-bidder TCF GVL checks before fanning out to SSPs - no further
+# publisher action required.
 #
-# Nexus Engine fills in before delivery:
-#   {GVL_ID}        -> our registered IAB TCF v2 vendor ID (numeric).
-#                      Required - GAM returns empty if the GVL is unknown.
+# Before emailing a copy of this URL to a publisher:
+#   {GVL_ID}   -> replace with our numeric GVL ID (one-time, repo-wide).
 #
 # Publisher fills in when trafficking:
 #   {PUBLISHER_ID}  -> Nexus Engine publisher ID (e.g. pub-video-123456)

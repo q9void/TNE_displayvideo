@@ -33,14 +33,16 @@
 </p>
 
 <div class="note">
-  <strong>This template lives in the repo.</strong> The Nexus Engine team bakes
-  in our own TCF vendor (GVL) ID before emailing the tag to the publisher &mdash;
-  the publisher never has to look it up.
+  <strong>How consent works here:</strong>
+  <span class="mono">{GVL_ID}</span> inside
+  <span class="mono">%%GDPR_CONSENT_{GVL_ID}%%</span> is our own registered
+  IAB TCF vendor ID &mdash; a static constant we bake into the template once.
+  Publishers never see it. When a CMP on the publisher&rsquo;s page includes
+  The Nexus Engine in its vendor list, GAM emits the full signed TCF consent
+  string; Catalyst decodes it server-side and applies per-bidder GVL checks
+  before fanning out to SSPs. No further publisher action required.
   <ul>
-    <li><strong>Nexus Engine fills in before delivery:</strong>
-      <span class="mono">{GVL_ID}</span> inside
-      <span class="mono">%%GDPR_CONSENT_{GVL_ID}%%</span>. GAM needs a concrete
-      numeric vendor ID here or it returns an empty consent string.</li>
+    <li><strong>One-time, repo-level:</strong> replace <span class="mono">{GVL_ID}</span> with our numeric GVL ID.</li>
     <li><strong>Publisher fills in when trafficking:</strong>
       <ul>
         <li><span class="mono">{PUBLISHER_ID}</span> &mdash; their Nexus Engine publisher ID (e.g. <span class="mono">pub-video-123456</span>).</li>
