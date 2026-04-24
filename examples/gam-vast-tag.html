@@ -57,7 +57,7 @@
 
 <div class="tag-box">
   <button class="copy-btn" onclick="copyTag()">Copy</button>
-<pre id="vast-tag">https://ads.thenexusengine.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&description_url=%%DESCRIPTION_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%&ua=%%USER_AGENT_ESC%%&session_id=%%CLICK_ID%%&schain=%%SCHAIN%%</pre>
+<pre id="vast-tag">https://ads.thenexusengine.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%</pre>
 </div>
 
 <p>
@@ -77,12 +77,10 @@
     <tr><td>Page URL</td><td><span class="mono">%%PAGE_URL%%</span></td><td><span class="mono">page_url</span></td><td><span class="mono">site.page</span></td></tr>
     <tr><td>Domain</td><td><span class="mono">%%SITE_DOMAIN%%</span></td><td><span class="mono">domain</span></td><td><span class="mono">site.domain</span></td></tr>
     <tr><td>Referrer</td><td><span class="mono">%%REFERRER_URL%%</span></td><td><span class="mono">ref</span></td><td><span class="mono">site.ref</span></td></tr>
-    <tr><td>Description URL (video context)</td><td><span class="mono">%%DESCRIPTION_URL%%</span></td><td><span class="mono">description_url</span></td><td><span class="mono">site.content.url</span></td></tr>
     <tr><td>Cache buster</td><td><span class="mono">%%CACHEBUSTER%%</span></td><td><span class="mono">cb</span></td><td>&mdash; (forces fresh fetch; not carried in OpenRTB)</td></tr>
     <tr><td>Ad unit path / placement</td><td><span class="mono">%%ADUNIT%%</span></td><td><span class="mono">placement_id</span></td><td><span class="mono">imp[0].tagid</span></td></tr>
     <tr><td>Player width</td><td><span class="mono">%%WIDTH%%</span></td><td><span class="mono">w</span></td><td><span class="mono">imp[0].video.w</span></td></tr>
     <tr><td>Player height</td><td><span class="mono">%%HEIGHT%%</span></td><td><span class="mono">h</span></td><td><span class="mono">imp[0].video.h</span></td></tr>
-    <tr><td>User agent</td><td><span class="mono">%%USER_AGENT_ESC%%</span></td><td><span class="mono">ua</span></td><td><span class="mono">device.ua</span></td></tr>
   </tbody>
 </table>
 
@@ -126,7 +124,7 @@
   </tbody>
 </table>
 
-<h3>User / Device Identifiers (OTT &amp; Mobile)</h3>
+<h3>User Signals (privacy-compliant identifiers via GAM)</h3>
 <table>
   <thead>
     <tr><th>Identifier</th><th>GAM Macro</th><th>Catalyst Query Param</th><th>OpenRTB 2.5 Field</th></tr>
@@ -134,9 +132,16 @@
   <tbody>
     <tr><td>IFA (IDFA / AAID / RIDA / TIFA)</td><td><span class="mono">%%ADVERTISING_IDENTIFIER_PLAIN%%</span></td><td><span class="mono">ifa</span></td><td><span class="mono">device.ifa</span></td></tr>
     <tr><td>IFA type</td><td><span class="mono">%%ADVERTISING_IDENTIFIER_TYPE%%</span></td><td><span class="mono">ifa_type</span></td><td><span class="mono">device.ext.ifa_type</span></td></tr>
-    <tr><td>Supply chain object (sellers.json)</td><td><span class="mono">%%SCHAIN%%</span></td><td><span class="mono">schain</span></td><td><span class="mono">source.ext.schain</span></td></tr>
   </tbody>
 </table>
+<p style="font-size:13px;color:#555;">
+  No deterministic first-party identifiers are carried in this VAST tag.
+  When the publisher&rsquo;s first-party data strategy is ready, switch that
+  line item to <span class="mono">POST /video/openrtb</span> so we can take
+  them as structured <span class="mono">user.ext.eids[]</span> objects
+  (UID 2.0, ID5, LiveRamp, SharedID, hashed PPID) &mdash; the GET tag can&rsquo;t
+  carry structured EID arrays.
+</p>
 
 <h2>Future: First-Party Identifier Strategy</h2>
 

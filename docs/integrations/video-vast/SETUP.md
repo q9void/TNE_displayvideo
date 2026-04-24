@@ -332,7 +332,7 @@ server-side and applies per-bidder GVL checks before fanning out to SSPs.
 `{FLOOR}` (or drop the `bidfloor=` pair to disable).
 
 ```
-https://ads.thenexusengine.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&description_url=%%DESCRIPTION_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%&ua=%%USER_AGENT_ESC%%&session_id=%%CLICK_ID%%&schain=%%SCHAIN%%
+https://ads.thenexusengine.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%
 ```
 
 A formatted version with copy-button and full macro reference lives at
@@ -341,22 +341,32 @@ plaintext copy is at [`examples/gam-vast-tag.txt`](../../../examples/gam-vast-ta
 
 ### Macro -> OpenRTB 2.5 mapping
 
+**Standard VAST enrichments**
+
 | Enrichment | GAM macro | Catalyst param | OpenRTB field |
 |---|---|---|---|
 | Page URL | `%%PAGE_URL%%` | `page_url` | `site.page` |
 | Domain | `%%SITE_DOMAIN%%` | `domain` | `site.domain` |
 | Referrer | `%%REFERRER_URL%%` | `ref` | `site.ref` |
-| Description URL | `%%DESCRIPTION_URL%%` | `description_url` | `site.content.url` |
 | Cache buster | `%%CACHEBUSTER%%` | `cb` | *(not carried; forces fresh fetch)* |
 | Ad unit / placement | `%%ADUNIT%%` | `placement_id` | `imp[0].tagid` |
 | Player width / height | `%%WIDTH%%` / `%%HEIGHT%%` | `w` / `h` | `imp[0].video.w` / `.h` |
-| User agent | `%%USER_AGENT_ESC%%` | `ua` | `device.ua` |
-| KV `sport` | `%%PATTERN:sport%%` | `sport` | `site.content.genre` + `imp.ext.context.sport` |
-| KV `competition` | `%%PATTERN:competition%%` | `competition` | `site.content.series` + `imp.ext.context.competition` |
-| KV `language` | `%%PATTERN:language%%` | `lang` | `site.content.language` (BCP-47) |
-| KV `device` | `%%PATTERN:device%%` | `device_type` | `device.devicetype` |
-| KV `geo` | `%%PATTERN:geo%%` | `geo` | `device.geo.country` (ISO 3166-1 alpha-3) |
-| KV `content_type` | `%%PATTERN:content_type%%` | `content_type` | `site.content.cattax` + `site.content.cat[]` |
+
+**Custom key-values (contextual targeting)**
+
+| KV | GAM macro | Catalyst param | OpenRTB field |
+|---|---|---|---|
+| `sport` | `%%PATTERN:sport%%` | `sport` | `site.content.genre` + `imp.ext.context.sport` |
+| `competition` | `%%PATTERN:competition%%` | `competition` | `site.content.series` + `imp.ext.context.competition` |
+| `language` | `%%PATTERN:language%%` | `lang` | `site.content.language` (BCP-47) |
+| `device` | `%%PATTERN:device%%` | `device_type` | `device.devicetype` |
+| `geo` | `%%PATTERN:geo%%` | `geo` | `device.geo.country` (ISO 3166-1 alpha-3) |
+| `content_type` | `%%PATTERN:content_type%%` | `content_type` | `site.content.cattax` + `site.content.cat[]` |
+
+**Privacy signals (passed through GAM where applicable)**
+
+| Signal | GAM macro | Catalyst param | OpenRTB field |
+|---|---|---|---|
 | GDPR applies | `%%GDPR%%` | `gdpr` | `regs.ext.gdpr` |
 | TCF v2 consent | `%%GDPR_CONSENT_{GVL_ID}%%` | `gdpr_consent` | `user.ext.consent` |
 | Google AC string | `%%ADDTL_CONSENT%%` | `addtl_consent` | `user.ext.ConsentedProvidersSettings.consented_providers` |
@@ -364,10 +374,14 @@ plaintext copy is at [`examples/gam-vast-tag.txt`](../../../examples/gam-vast-ta
 | GPP string | `%%GPP_STRING%%` | `gpp` | `regs.gpp` |
 | GPP section IDs | `%%GPP_SID%%` | `gpp_sid` | `regs.gpp_sid[]` |
 | COPPA | `%%TFCD%%` | `coppa` | `regs.coppa` |
-| Limit Ad Tracking | `%%LIMITADTRACKING%%` | `lmt` | `device.lmt` |
-| IFA (IDFA/AAID/RIDA/TIFA) | `%%ADVERTISING_IDENTIFIER_PLAIN%%` | `ifa` | `device.ifa` |
+
+**User signals (privacy-compliant identifiers via GAM)**
+
+| Identifier | GAM macro | Catalyst param | OpenRTB field |
+|---|---|---|---|
+| IFA (IDFA / AAID / RIDA / TIFA) | `%%ADVERTISING_IDENTIFIER_PLAIN%%` | `ifa` | `device.ifa` |
 | IFA type | `%%ADVERTISING_IDENTIFIER_TYPE%%` | `ifa_type` | `device.ext.ifa_type` |
-| Supply chain | `%%SCHAIN%%` | `schain` | `source.ext.schain` |
+| Limit Ad Tracking | `%%LIMITADTRACKING%%` | `lmt` | `device.lmt` |
 
 ### First-party identifier strategy (future state)
 
