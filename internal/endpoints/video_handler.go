@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -201,15 +202,26 @@ func (h *VideoHandler) setVASTCORSHeaders(w http.ResponseWriter) {
 func (h *VideoHandler) parseVASTRequest(r *http.Request) (*openrtb.BidRequest, error) {
 	q := r.URL.Query()
 
-	// Required parameters
-	requestID := q.Get("id")
+	// Request ID: prefer IAB VAST 4 [TRANSACTIONID] from the player, then
+	// explicit id=, else auto-generate. cleanMacro strips "-1" per IAB spec
+	// and empty values, so an unsupported macro falls through cleanly.
+	requestID := cleanMacro(q.Get("transaction_id"))
+	if requestID == "" {
+		requestID = q.Get("id")
+	}
 	if requestID == "" {
 		requestID = generateRequestID()
 	}
 
-	// Load publisher video config if pub param is present
+	// Publisher ID: accept GAM's pub_id first, fall back to legacy pub.
+	pubID := cleanMacro(q.Get("pub_id"))
+	if pubID == "" {
+		pubID = q.Get("pub")
+	}
+
+	// Load publisher video config if we have a publisher ID
 	var vidCfg *storage.PublisherVideoConfig
-	if pubID := q.Get("pub"); pubID != "" && h.publishers != nil {
+	if pubID != "" && h.publishers != nil {
 		if pub, err := h.publishers.GetByPublisherID(r.Context(), pubID); err == nil && pub != nil {
 			if p, ok := pub.(*storage.Publisher); ok {
 				vidCfg = p.GetVideoConfig()
@@ -365,11 +377,9 @@ func (h *VideoHandler) parseVASTRequest(r *http.Request) (*openrtb.BidRequest, e
 		}
 	}
 
-	// Publisher ID (used for auth; applies to both site and app contexts)
-	pubID := q.Get("pub")
-
-	// App object takes precedence for CTV requests
-	appBundle := q.Get("app_bundle")
+	// App object takes precedence for CTV requests.
+	// app_bundle may also come from IAB [APPBUNDLE]; cleanMacro drops "-1".
+	appBundle := cleanMacro(q.Get("app_bundle"))
 	appName := q.Get("app_name")
 	if appBundle != "" || appName != "" {
 		app := &openrtb.App{
@@ -384,15 +394,21 @@ func (h *VideoHandler) parseVASTRequest(r *http.Request) (*openrtb.BidRequest, e
 		return bidReq, nil
 	}
 
-	// Site object for desktop instream
+	// Site object for web / desktop in-stream. Accept both the legacy
+	// page= param and GAM's page_url (%%PAGE_URL%%); ref from %%REFERRER_URL%%.
 	siteID := q.Get("site_id")
 	domain := q.Get("domain")
 	page := q.Get("page")
-	if siteID != "" || domain != "" {
+	if page == "" {
+		page = q.Get("page_url")
+	}
+	ref := q.Get("ref")
+	if siteID != "" || domain != "" || page != "" {
 		site := &openrtb.Site{
 			ID:      siteID,
 			Domain:  domain,
 			Page:    page,
+			Ref:     ref,
 			Content: content,
 		}
 		if pubID != "" {
@@ -401,7 +417,357 @@ func (h *VideoHandler) parseVASTRequest(r *http.Request) (*openrtb.BidRequest, e
 		bidReq.Site = site
 	}
 
+	// Apply GAM + IAB VAST 4 enrichments (placement_id, KVs, privacy,
+	// identifiers, player/content context). Mutates bidReq in place.
+	h.applyVASTEnrichments(q, bidReq)
+
 	return bidReq, nil
+}
+
+// applyVASTEnrichments layers GAM macro + IAB VAST 4 player signals onto the
+// bid request built by parseVASTRequest. Maps each query param to its
+// OpenRTB 2.6 home and enforces the two-layer resolution rules documented
+// in docs/integrations/video-vast/SETUP.md:
+//
+//   - imp.video.w/h         → player_size (IAB) wins over GAM w/h
+//   - imp.video.placement   → placement_type (IAB) wins over placement= default
+//   - device.geo.*          → GAM geo country + IAB lat_long precision, merged
+//
+// Values of "-1" (IAB "macro unsupported" sentinel) and empty strings are
+// treated as absent so the handler never overwrites a real default with a
+// placeholder.
+func (h *VideoHandler) applyVASTEnrichments(q url.Values, bidReq *openrtb.BidRequest) {
+	if len(bidReq.Imp) == 0 {
+		return
+	}
+	imp := &bidReq.Imp[0]
+
+	// --- Placement / ad unit ---
+	if tagID := cleanMacro(q.Get("placement_id")); tagID != "" {
+		imp.TagID = tagID
+	}
+
+	// --- Player size override (IAB [PLAYERSIZE] = "WxH") ---
+	if w, hgt, ok := parsePlayerSize(q.Get("player_size")); ok && imp.Video != nil {
+		imp.Video.W = w
+		imp.Video.H = hgt
+		if bidReq.Device != nil {
+			bidReq.Device.W = w
+			bidReq.Device.H = hgt
+		}
+	}
+
+	// --- Placement type override (IAB [PLACEMENTTYPE] = IAB enum int) ---
+	if pt := cleanMacro(q.Get("placement_type")); pt != "" {
+		if n, err := strconv.Atoi(pt); err == nil && n > 0 && imp.Video != nil {
+			imp.Video.Placement = n
+			imp.Video.Plcmt = n // OpenRTB 2.6 field
+		}
+	}
+
+	// --- OMID partner / verification vendors ---
+	if omid := cleanMacro(q.Get("omid_partner")); omid != "" && imp.Video != nil {
+		imp.Video.Ext = setExtKey(imp.Video.Ext, []string{"omidpartner"}, omid)
+	}
+	if vv := cleanMacro(q.Get("verification_vendors")); vv != "" {
+		imp.Ext = setExtKey(imp.Ext, []string{"verification"}, splitCSV(vv))
+	}
+
+	// --- Inventory state (autoplay/muted bitmask from the player) ---
+	if inv := cleanMacro(q.Get("inventory_state")); inv != "" {
+		imp.Ext = setExtKey(imp.Ext, []string{"inventorystate"}, inv)
+	}
+
+	// --- Content enrichments (populate site.content or app.content) ---
+	contentID := cleanMacro(q.Get("content_id"))
+	contentURL := cleanMacro(q.Get("content_url"))
+	sport := cleanMacro(q.Get("sport"))
+	competition := cleanMacro(q.Get("competition"))
+	lang := cleanMacro(q.Get("lang"))
+	contentType := cleanMacro(q.Get("content_type"))
+
+	if contentID != "" || contentURL != "" || sport != "" || competition != "" || lang != "" || contentType != "" {
+		content := resolveContent(bidReq)
+		if contentID != "" {
+			content.ID = contentID
+		}
+		if contentURL != "" {
+			content.URL = contentURL
+		}
+		if sport != "" && content.Genre == "" {
+			content.Genre = sport
+		}
+		if competition != "" && content.Series == "" {
+			content.Series = competition
+		}
+		if lang != "" {
+			content.Language = lang
+			content.LangB = lang
+		}
+		if contentType != "" {
+			content.Cat = appendUnique(content.Cat, contentType)
+		}
+	}
+
+	// --- KVs → imp.ext.context (forward-compat channel; every SSP reads this) ---
+	for _, kv := range []struct{ param, key string }{
+		{"sport", "sport"},
+		{"competition", "competition"},
+		{"content_type", "content_type"},
+		{"lang", "language"},
+	} {
+		if v := cleanMacro(q.Get(kv.param)); v != "" {
+			imp.Ext = setExtKey(imp.Ext, []string{"context", kv.key}, v)
+		}
+	}
+
+	// --- Device enrichments ---
+	if bidReq.Device == nil {
+		bidReq.Device = &openrtb.Device{}
+	}
+	dev := bidReq.Device
+
+	if dt := cleanMacro(q.Get("device_type")); dt != "" {
+		if n := parseDeviceType(dt); n > 0 {
+			dev.DeviceType = n
+		}
+	}
+	if ifa := cleanMacro(q.Get("ifa")); ifa != "" {
+		dev.IFA = ifa
+	}
+	if ifaType := cleanMacro(q.Get("ifa_type")); ifaType != "" {
+		dev.Ext = setExtKey(dev.Ext, []string{"ifa_type"}, ifaType)
+	}
+	if lmt := cleanMacro(q.Get("lmt")); lmt != "" {
+		if n, err := strconv.Atoi(lmt); err == nil {
+			dev.Lmt = &n
+		}
+	}
+
+	// Geo: GAM country + IAB lat/lng merged.
+	geoCountry := cleanMacro(q.Get("geo"))
+	lat, lon, hasLatLon := parseLatLong(q.Get("lat_long"))
+	if geoCountry != "" || hasLatLon {
+		if dev.Geo == nil {
+			dev.Geo = &openrtb.Geo{}
+		}
+		if geoCountry != "" {
+			dev.Geo.Country = geoCountry
+		}
+		if hasLatLon {
+			dev.Geo.Lat = lat
+			dev.Geo.Lon = lon
+		}
+	}
+
+	// --- Regs (GDPR flag, COPPA, US Privacy, GPP) ---
+	regs := bidReq.Regs
+	ensureRegs := func() *openrtb.Regs {
+		if regs == nil {
+			regs = &openrtb.Regs{}
+			bidReq.Regs = regs
+		}
+		return regs
+	}
+	if gdpr := cleanMacro(q.Get("gdpr")); gdpr != "" {
+		if n, err := strconv.Atoi(gdpr); err == nil {
+			ensureRegs().GDPR = &n
+		}
+	}
+	if coppa := cleanMacro(q.Get("coppa")); coppa != "" {
+		if n, err := strconv.Atoi(coppa); err == nil {
+			ensureRegs().COPPA = n
+		}
+	}
+	if usp := cleanMacro(q.Get("us_privacy")); usp != "" {
+		ensureRegs().USPrivacy = usp
+	}
+	if gpp := cleanMacro(q.Get("gpp")); gpp != "" {
+		ensureRegs().GPP = gpp
+	}
+	if gppSID := cleanMacro(q.Get("gpp_sid")); gppSID != "" {
+		ids := make([]int, 0, 4)
+		for _, p := range splitCSV(gppSID) {
+			if n, err := strconv.Atoi(p); err == nil {
+				ids = append(ids, n)
+			}
+		}
+		if len(ids) > 0 {
+			ensureRegs().GPPSID = ids
+		}
+	}
+
+	// --- User consent (TCF v2 string + Google Additional Consent) ---
+	ensureUser := func() *openrtb.User {
+		if bidReq.User == nil {
+			bidReq.User = &openrtb.User{}
+		}
+		return bidReq.User
+	}
+	if consent := cleanMacro(q.Get("gdpr_consent")); consent != "" {
+		ensureUser().Consent = consent
+	}
+	if addtl := cleanMacro(q.Get("addtl_consent")); addtl != "" {
+		u := ensureUser()
+		u.Ext = setExtKey(u.Ext, []string{"ConsentedProvidersSettings", "consented_providers"}, addtl)
+	}
+}
+
+// resolveContent returns the Content object attached to whichever inventory
+// parent this request uses (Site or App), creating it if necessary.
+func resolveContent(bidReq *openrtb.BidRequest) *openrtb.Content {
+	if bidReq.App != nil {
+		if bidReq.App.Content == nil {
+			bidReq.App.Content = &openrtb.Content{}
+		}
+		return bidReq.App.Content
+	}
+	if bidReq.Site == nil {
+		bidReq.Site = &openrtb.Site{}
+	}
+	if bidReq.Site.Content == nil {
+		bidReq.Site.Content = &openrtb.Content{}
+	}
+	return bidReq.Site.Content
+}
+
+// cleanMacro normalises an IAB VAST 4 macro value. Per IAB spec, players
+// emit "-1" for unsupported macros; treat that and empty strings as absent
+// so we never overwrite real defaults with sentinel placeholders.
+func cleanMacro(v string) string {
+	if v == "" || v == "-1" {
+		return ""
+	}
+	return v
+}
+
+// parsePlayerSize parses the IAB [PLAYERSIZE] macro output, format "WxH"
+// (e.g. "1920x1080"). Returns (0, 0, false) on any parse failure.
+func parsePlayerSize(v string) (int, int, bool) {
+	v = cleanMacro(v)
+	if v == "" {
+		return 0, 0, false
+	}
+	parts := splitOn(v, 'x')
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	w, err1 := strconv.Atoi(parts[0])
+	hgt, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil || w <= 0 || hgt <= 0 {
+		return 0, 0, false
+	}
+	return w, hgt, true
+}
+
+// parseLatLong parses the IAB [LATLONG] macro output, format "lat,lon".
+// Returns (0, 0, false) on any parse failure or consent-gated empty value.
+func parseLatLong(v string) (float64, float64, bool) {
+	v = cleanMacro(v)
+	if v == "" {
+		return 0, 0, false
+	}
+	parts := splitCSV(v)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	lat, err1 := strconv.ParseFloat(parts[0], 64)
+	lon, err2 := strconv.ParseFloat(parts[1], 64)
+	if err1 != nil || err2 != nil {
+		return 0, 0, false
+	}
+	return lat, lon, true
+}
+
+// parseDeviceType accepts either a numeric OpenRTB device-type enum or a
+// GAM-style string KV and returns the OpenRTB constant (0 = unknown).
+func parseDeviceType(v string) int {
+	if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		return n
+	}
+	switch strings.ToLower(v) {
+	case "mobile", "smartphone":
+		return openrtb.DeviceTypeMobile
+	case "pc", "desktop", "computer":
+		return openrtb.DeviceTypePC
+	case "ctv", "tv", "connectedtv", "connected_tv", "smarttv", "smart_tv":
+		return openrtb.DeviceTypeCTV
+	case "phone":
+		return openrtb.DeviceTypePhone
+	case "tablet":
+		return openrtb.DeviceTypeTablet
+	case "connected", "connecteddevice":
+		return openrtb.DeviceTypeConnected
+	case "stb", "settopbox", "set_top_box":
+		return openrtb.DeviceTypeSetTopBox
+	}
+	return 0
+}
+
+// setExtKey merges a value into an OpenRTB ext blob at the given path,
+// creating intermediate objects as needed. Returns the re-serialised JSON;
+// on marshal failure returns the original bytes unchanged.
+func setExtKey(raw json.RawMessage, path []string, value interface{}) json.RawMessage {
+	if len(path) == 0 {
+		return raw
+	}
+	m := map[string]interface{}{}
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &m)
+	}
+	cur := m
+	for _, key := range path[:len(path)-1] {
+		next, ok := cur[key].(map[string]interface{})
+		if !ok {
+			next = map[string]interface{}{}
+			cur[key] = next
+		}
+		cur = next
+	}
+	cur[path[len(path)-1]] = value
+	b, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return b
+}
+
+// splitCSV splits a comma-separated string and trims each element.
+func splitCSV(v string) []string {
+	return splitOn(v, ',')
+}
+
+// splitOn splits on a single separator rune and trims whitespace. Empty
+// segments are dropped so "a,,b" returns ["a", "b"].
+func splitOn(v string, sep rune) []string {
+	out := make([]string, 0, 4)
+	cur := make([]rune, 0, len(v))
+	flush := func() {
+		s := strings.TrimSpace(string(cur))
+		if s != "" {
+			out = append(out, s)
+		}
+		cur = cur[:0]
+	}
+	for _, r := range v {
+		if r == sep {
+			flush()
+			continue
+		}
+		cur = append(cur, r)
+	}
+	flush()
+	return out
+}
+
+// appendUnique appends v to list iff not already present (case-sensitive).
+func appendUnique(list []string, v string) []string {
+	for _, existing := range list {
+		if existing == v {
+			return list
+		}
+	}
+	return append(list, v)
 }
 
 // writeVASTError writes a VAST error response

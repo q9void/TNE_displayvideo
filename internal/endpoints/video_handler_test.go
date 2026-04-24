@@ -846,3 +846,256 @@ func TestGenerateRequestID(t *testing.T) {
 		t.Errorf("expected ID to start with 'video-', got %s", id1)
 	}
 }
+
+// TestParseVASTRequest_GAMAndIABEnrichments exercises the full Andres-style
+// tag: GAM macros (page_url, domain, cust KVs, privacy, IFA) plus IAB VAST 4
+// player macros (CONTENTID, PLAYERSIZE, PLACEMENTTYPE, LATLONG, etc.) and
+// verifies the two-layer resolution rules.
+func TestParseVASTRequest_GAMAndIABEnrichments(t *testing.T) {
+	handler := &VideoHandler{trackingBaseURL: "https://track.example.com"}
+
+	q := url.Values{
+		// Baseline
+		"pub_id":   {"pub-video-123"},
+		"w":        {"640"},  // GAM slot size - should be overridden
+		"h":        {"360"},
+		"mindur":   {"5"},
+		"maxdur":   {"30"},
+		"mimes":    {"video/mp4"},
+		"bidfloor": {"1.50"},
+
+		// GAM VAST enrichments
+		"placement_id": {"/1234/sports/livestream"},
+		"page_url":     {"https://sport.example.com/live"},
+		"domain":       {"sport.example.com"},
+		"ref":          {"https://sport.example.com/"},
+
+		// Custom KVs
+		"sport":        {"football"},
+		"competition":  {"la_liga"},
+		"lang":         {"es"},
+		"device_type":  {"ctv"},
+		"geo":          {"ESP"},
+		"content_type": {"livestream"},
+
+		// Privacy
+		"gdpr":         {"1"},
+		"gdpr_consent": {"CONSENT_STRING_123"},
+		"addtl_consent": {"1~1.35.41.101"},
+		"us_privacy":   {"1YNN"},
+		"gpp":          {"DBABMA~CPXxRfAPXxRfAAfKABENB-CgAAAAAAAAAAYgAAAAAAAA"},
+		"gpp_sid":      {"7,8"},
+		"coppa":        {"0"},
+
+		// User signals
+		"ifa":      {"AAAA-BBBB-CCCC-DDDD"},
+		"ifa_type": {"idfa"},
+		"lmt":      {"0"},
+
+		// IAB VAST 4 (Dailymotion-resolved)
+		"content_id":           {"x8dfgh3"},
+		"content_url":          {"https://dm.com/video/x8dfgh3.mp4"},
+		"player_size":          {"1920x1080"}, // should win over GAM w/h
+		"inventory_state":      {"autoplay_muted"},
+		"placement_type":       {"1"},
+		"omid_partner":         {"dailymotion"},
+		"transaction_id":       {"tx-abc-123"},
+		"verification_vendors": {"doubleverify.com,ias.net"},
+		"lat_long":             {"40.416775,-3.703790"},
+
+		// Sentinels - should be ignored
+		"app_bundle": {"-1"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/video/vast?"+q.Encode(), nil)
+	bidReq, err := handler.parseVASTRequest(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Transaction ID wins over auto-generated
+	if bidReq.ID != "tx-abc-123" {
+		t.Errorf("expected ID=tx-abc-123 (from transaction_id), got %s", bidReq.ID)
+	}
+
+	// Player size must override GAM slot size
+	imp := bidReq.Imp[0]
+	if imp.Video.W != 1920 || imp.Video.H != 1080 {
+		t.Errorf("expected player_size 1920x1080 to win, got %dx%d", imp.Video.W, imp.Video.H)
+	}
+
+	// Placement type from IAB macro, also mirrored to OpenRTB 2.6 Plcmt
+	if imp.Video.Placement != 1 || imp.Video.Plcmt != 1 {
+		t.Errorf("expected placement=1/plcmt=1, got placement=%d plcmt=%d", imp.Video.Placement, imp.Video.Plcmt)
+	}
+
+	// Ad unit → imp.tagid
+	if imp.TagID != "/1234/sports/livestream" {
+		t.Errorf("expected TagID=/1234/sports/livestream, got %s", imp.TagID)
+	}
+
+	// "-1" app_bundle must not create an App object
+	if bidReq.App != nil {
+		t.Errorf("app_bundle=-1 should be treated as absent; got App=%+v", bidReq.App)
+	}
+
+	// Site should be present with page/domain/ref and publisher
+	if bidReq.Site == nil {
+		t.Fatal("expected Site to be built from page_url/domain")
+	}
+	if bidReq.Site.Page != "https://sport.example.com/live" {
+		t.Errorf("site.page wrong: %s", bidReq.Site.Page)
+	}
+	if bidReq.Site.Ref != "https://sport.example.com/" {
+		t.Errorf("site.ref wrong: %s", bidReq.Site.Ref)
+	}
+	if bidReq.Site.Publisher == nil || bidReq.Site.Publisher.ID != "pub-video-123" {
+		t.Errorf("publisher wrong: %+v", bidReq.Site.Publisher)
+	}
+
+	// Content: ID, URL, genre (sport), series (competition), language, cat (content_type)
+	c := bidReq.Site.Content
+	if c == nil {
+		t.Fatal("expected site.content to be populated")
+	}
+	if c.ID != "x8dfgh3" {
+		t.Errorf("content.id wrong: %s", c.ID)
+	}
+	if c.URL != "https://dm.com/video/x8dfgh3.mp4" {
+		t.Errorf("content.url wrong: %s", c.URL)
+	}
+	if c.Genre != "football" {
+		t.Errorf("content.genre (from sport) wrong: %s", c.Genre)
+	}
+	if c.Series != "la_liga" {
+		t.Errorf("content.series (from competition) wrong: %s", c.Series)
+	}
+	if c.Language != "es" {
+		t.Errorf("content.language wrong: %s", c.Language)
+	}
+	if len(c.Cat) != 1 || c.Cat[0] != "livestream" {
+		t.Errorf("content.cat should contain content_type, got %v", c.Cat)
+	}
+
+	// imp.ext.context.* dual-write
+	var impExt map[string]interface{}
+	if err := json.Unmarshal(imp.Ext, &impExt); err != nil {
+		t.Fatalf("imp.ext not valid JSON: %v\n%s", err, string(imp.Ext))
+	}
+	ctx, _ := impExt["context"].(map[string]interface{})
+	if ctx == nil || ctx["sport"] != "football" || ctx["competition"] != "la_liga" {
+		t.Errorf("imp.ext.context KVs wrong: %+v", ctx)
+	}
+	if impExt["inventorystate"] != "autoplay_muted" {
+		t.Errorf("imp.ext.inventorystate wrong: %+v", impExt["inventorystate"])
+	}
+	if verif, _ := impExt["verification"].([]interface{}); len(verif) != 2 || verif[0] != "doubleverify.com" {
+		t.Errorf("imp.ext.verification wrong: %+v", impExt["verification"])
+	}
+
+	// video.ext.omidpartner
+	var videoExt map[string]interface{}
+	if err := json.Unmarshal(imp.Video.Ext, &videoExt); err != nil {
+		t.Fatalf("video.ext not valid JSON: %v", err)
+	}
+	if videoExt["omidpartner"] != "dailymotion" {
+		t.Errorf("video.ext.omidpartner wrong: %+v", videoExt["omidpartner"])
+	}
+
+	// Device: type, IFA, lmt, geo country + lat/lon
+	dev := bidReq.Device
+	if dev == nil {
+		t.Fatal("expected device to be populated")
+	}
+	if dev.DeviceType != openrtb.DeviceTypeCTV {
+		t.Errorf("device.devicetype wrong (expected CTV=3): %d", dev.DeviceType)
+	}
+	if dev.IFA != "AAAA-BBBB-CCCC-DDDD" {
+		t.Errorf("device.ifa wrong: %s", dev.IFA)
+	}
+	if dev.Lmt == nil || *dev.Lmt != 0 {
+		t.Errorf("device.lmt wrong: %+v", dev.Lmt)
+	}
+	if dev.Geo == nil || dev.Geo.Country != "ESP" {
+		t.Errorf("device.geo.country wrong: %+v", dev.Geo)
+	}
+	if dev.Geo.Lat != 40.416775 || dev.Geo.Lon != -3.703790 {
+		t.Errorf("device.geo lat/lon wrong: %f,%f", dev.Geo.Lat, dev.Geo.Lon)
+	}
+
+	// Regs: GDPR applies, US Privacy, GPP, COPPA
+	if bidReq.Regs == nil {
+		t.Fatal("expected regs to be populated")
+	}
+	if bidReq.Regs.GDPR == nil || *bidReq.Regs.GDPR != 1 {
+		t.Errorf("regs.gdpr wrong: %+v", bidReq.Regs.GDPR)
+	}
+	if bidReq.Regs.USPrivacy != "1YNN" {
+		t.Errorf("regs.us_privacy wrong: %s", bidReq.Regs.USPrivacy)
+	}
+	if bidReq.Regs.GPP == "" {
+		t.Error("regs.gpp should be populated")
+	}
+	if len(bidReq.Regs.GPPSID) != 2 || bidReq.Regs.GPPSID[0] != 7 {
+		t.Errorf("regs.gpp_sid wrong: %v", bidReq.Regs.GPPSID)
+	}
+	if bidReq.Regs.COPPA != 0 {
+		t.Errorf("regs.coppa should be 0, got %d", bidReq.Regs.COPPA)
+	}
+
+	// User consent (TCF + Google AC)
+	if bidReq.User == nil || bidReq.User.Consent != "CONSENT_STRING_123" {
+		t.Errorf("user.consent wrong: %+v", bidReq.User)
+	}
+}
+
+// TestParseVASTRequest_IABMacroSentinels confirms that "-1" from the player
+// (IAB spec "macro unsupported") never overwrites real values.
+func TestParseVASTRequest_IABMacroSentinels(t *testing.T) {
+	handler := &VideoHandler{trackingBaseURL: "https://track.example.com"}
+
+	q := url.Values{
+		"pub_id":         {"pub-1"},
+		"w":              {"800"},
+		"h":              {"450"},
+		"domain":         {"ex.com"},
+		"transaction_id": {"-1"},
+		"content_id":     {"-1"},
+		"player_size":    {"-1"},
+		"placement_type": {"-1"},
+		"omid_partner":   {"-1"},
+		"lat_long":       {"-1"},
+		"ifa":            {"-1"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/video/vast?"+q.Encode(), nil)
+	bidReq, err := handler.parseVASTRequest(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Auto-generated ID should be used when transaction_id is -1
+	if !strings.HasPrefix(bidReq.ID, "video-") {
+		t.Errorf("transaction_id=-1 should fall through to auto-generated, got %s", bidReq.ID)
+	}
+
+	// GAM slot size preserved (player_size=-1 should not override)
+	if bidReq.Imp[0].Video.W != 800 || bidReq.Imp[0].Video.H != 450 {
+		t.Errorf("player_size=-1 must not override GAM w/h; got %dx%d", bidReq.Imp[0].Video.W, bidReq.Imp[0].Video.H)
+	}
+
+	// Default placement survives
+	if bidReq.Imp[0].Video.Placement != 1 {
+		t.Errorf("placement_type=-1 should keep default placement=1, got %d", bidReq.Imp[0].Video.Placement)
+	}
+
+	// -1 IFA must not populate device.ifa
+	if bidReq.Device.IFA != "" {
+		t.Errorf("ifa=-1 should be treated as absent, got %q", bidReq.Device.IFA)
+	}
+
+	// No content populated (all content macros were -1)
+	if bidReq.Site != nil && bidReq.Site.Content != nil {
+		t.Errorf("no content macros were real - site.content should be nil, got %+v", bidReq.Site.Content)
+	}
+}
