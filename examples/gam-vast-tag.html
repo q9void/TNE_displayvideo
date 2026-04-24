@@ -22,7 +22,7 @@
 </head>
 <body>
 
-<h1>Google Ad Manager &rarr; TNE Catalyst VAST Tag</h1>
+<h1>Google Ad Manager &rarr; The Nexus Engine Catalyst VAST Tag</h1>
 
 <p>
   Drop the tag below into the Google Ad Manager line item / creative as a
@@ -33,12 +33,21 @@
 </p>
 
 <div class="note">
-  <strong>Replace before use:</strong>
+  <strong>This template lives in the repo.</strong> The Nexus Engine team bakes
+  in our own TCF vendor (GVL) ID before emailing the tag to the publisher &mdash;
+  the publisher never has to look it up.
   <ul>
-    <li><span class="mono">{PUBLISHER_ID}</span> &mdash; your Catalyst publisher ID (e.g. <span class="mono">pub-video-123456</span>).</li>
-    <li><span class="mono">{GVL_ID}</span> in <span class="mono">%%GDPR_CONSENT_{GVL_ID}%%</span> &mdash; Catalyst&rsquo;s TCF vendor (GVL) ID. Ask your Catalyst account manager for the current value.</li>
-    <li><span class="mono">{MIN}</span>/<span class="mono">{MAX}</span> &mdash; creative duration constraints in seconds.</li>
-    <li><span class="mono">{FLOOR}</span> &mdash; bid floor in USD (omit if not needed).</li>
+    <li><strong>Nexus Engine fills in before delivery:</strong>
+      <span class="mono">{GVL_ID}</span> inside
+      <span class="mono">%%GDPR_CONSENT_{GVL_ID}%%</span>. GAM needs a concrete
+      numeric vendor ID here or it returns an empty consent string.</li>
+    <li><strong>Publisher fills in when trafficking:</strong>
+      <ul>
+        <li><span class="mono">{PUBLISHER_ID}</span> &mdash; their Nexus Engine publisher ID (e.g. <span class="mono">pub-video-123456</span>).</li>
+        <li><span class="mono">{MIN}</span>/<span class="mono">{MAX}</span> &mdash; creative duration constraints in seconds.</li>
+        <li><span class="mono">{FLOOR}</span> &mdash; bid floor in USD (omit if not needed).</li>
+      </ul>
+    </li>
   </ul>
 </div>
 
@@ -46,7 +55,7 @@
 
 <div class="tag-box">
   <button class="copy-btn" onclick="copyTag()">Copy</button>
-<pre id="vast-tag">https://api.tne-catalyst.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&description_url=%%DESCRIPTION_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%&ua=%%USER_AGENT_ESC%%&session_id=%%CLICK_ID%%&schain=%%SCHAIN%%</pre>
+<pre id="vast-tag">https://ads.thenexusengine.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&description_url=%%DESCRIPTION_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%&ua=%%USER_AGENT_ESC%%&session_id=%%CLICK_ID%%&schain=%%SCHAIN%%</pre>
 </div>
 
 <p>
@@ -162,12 +171,14 @@
 }</pre>
 
 <div class="ok">
-  <strong>Testing endpoint:</strong>
-  Use <span class="mono">https://test.tne-catalyst.com/video/vast?...</span> (same
-  query string) against publisher ID <span class="mono">pub-video-test</span>
-  before going live. Once the first ~1,000 bid requests land, the Catalyst team
-  will verify that every enrichment is being populated (no <span class="mono">%%&hellip;%%</span>
-  strings passing through) and share a troubleshooting report.
+  <strong>Testing:</strong>
+  <span class="mono">ads.thenexusengine.com</span> is the live Catalyst host
+  &mdash; there is no separate test subdomain. Staging runs behind the same
+  hostname via nginx traffic splitting. Use a test publisher ID during the
+  initial ~1,000-request validation window; once every enrichment is
+  populated (no <span class="mono">%%&hellip;%%</span> strings passing through)
+  and the troubleshooting report from The Nexus Engine team looks clean,
+  swap to the production publisher ID.
 </div>
 
 <h2>Where to paste this in Google Ad Manager</h2>

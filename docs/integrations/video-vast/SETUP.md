@@ -36,7 +36,7 @@ Best for: Simple integrations, quick testing
 
 ```javascript
 const vastUrl =
-  'https://api.tne-catalyst.com/video/vast?' +
+  'https://ads.thenexusengine.com/video/vast?' +
   'pub_id=pub-video-123456&' +
   'w=1920&h=1080&' +
   'mindur=5&maxdur=30&' +
@@ -50,7 +50,7 @@ Best for: Advanced targeting, complex scenarios
 
 ```javascript
 const response = await fetch(
-  'https://api.tne-catalyst.com/video/openrtb',
+  'https://ads.thenexusengine.com/video/openrtb',
   {
     method: 'POST',
     headers: {
@@ -145,7 +145,7 @@ const vastXml = await response.text();
     });
 
     function buildVastUrl(params) {
-      const base = 'https://api.tne-catalyst.com/video/vast';
+      const base = 'https://ads.thenexusengine.com/video/vast';
       const query = new URLSearchParams({
         pub_id: params.pubId,
         w: params.width,
@@ -217,7 +217,7 @@ const vastXml = await response.text();
     const player = videojs('video');
 
     player.ima({
-      adTagUrl: 'https://api.tne-catalyst.com/video/vast?' +
+      adTagUrl: 'https://ads.thenexusengine.com/video/vast?' +
         'pub_id=pub-video-123456&w=640&h=360&' +
         'mindur=5&maxdur=30&mimes=video/mp4'
     });
@@ -236,7 +236,7 @@ const vastXml = await response.text();
     file: 'content.mp4',
     advertising: {
       client: 'vast',
-      tag: 'https://api.tne-catalyst.com/video/vast?' +
+      tag: 'https://ads.thenexusengine.com/video/vast?' +
         'pub_id=pub-video-123456&w=1280&h=720&' +
         'mindur=5&maxdur=30&mimes=video/mp4',
       vpaidmode: 'insecure'
@@ -322,12 +322,20 @@ content KVs, privacy signals, IFA) lands on the Catalyst endpoint populated.
 
 ### Ready-to-paste VAST tag
 
-Copy this URL into GAM's VAST Tag URL field. Replace `{PUBLISHER_ID}`,
-`{GVL_ID}` (TCF vendor ID - ask your account manager), `{MIN}`/`{MAX}`
-duration, and `{FLOOR}` before saving.
+This template lives in the repo so The Nexus Engine team can bake in
+`{GVL_ID}` (our own IAB TCF vendor ID) before emailing the tag to the
+publisher &mdash; the publisher never has to look it up.
+
+**Publisher fills in:** `{PUBLISHER_ID}`, `{MIN}`/`{MAX}` duration, and
+`{FLOOR}` (or drop the `bidfloor=` pair to disable).
+
+**The Nexus Engine fills in before delivery:** `{GVL_ID}` in the
+`%%GDPR_CONSENT_{GVL_ID}%%` macro. The macro needs a concrete numeric
+vendor ID for GAM to emit the signed TCF string &mdash; GAM returns empty
+if the GVL is unregistered.
 
 ```
-https://api.tne-catalyst.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&description_url=%%DESCRIPTION_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%&ua=%%USER_AGENT_ESC%%&session_id=%%CLICK_ID%%&schain=%%SCHAIN%%
+https://ads.thenexusengine.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&description_url=%%DESCRIPTION_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%&ua=%%USER_AGENT_ESC%%&session_id=%%CLICK_ID%%&schain=%%SCHAIN%%
 ```
 
 A formatted version with copy-button and full macro reference lives at
@@ -400,8 +408,8 @@ you're ready to pass them:
 3. Creative type **Video**, format **VAST redirect**.
 4. Paste the URL above into **VAST Tag URL**.
 5. Leave **"Convert to XML"** off - Catalyst already returns VAST XML.
-6. Save, approve, traffic. The Catalyst team validates enrichment coverage
-   after the first ~1,000 bid requests land.
+6. Save, approve, traffic. The Nexus Engine team validates enrichment
+   coverage after the first ~1,000 bid requests land.
 
 ## Step 5: Privacy Compliance
 
@@ -457,7 +465,7 @@ vastUrl += '&coppa=1';
 ```brightscript
 ' BrightScript for Roku
 function loadVideoAd() as void
-    vastUrl = "https://api.tne-catalyst.com/video/vast?" +
+    vastUrl = "https://ads.thenexusengine.com/video/vast?" +
               "pub_id=pub-video-123456&" +
               "w=1920&h=1080&" +
               "mindur=15&maxdur=30&" +
@@ -475,7 +483,7 @@ end function
 
 ```java
 // Android Java
-String vastUrl = "https://api.tne-catalyst.com/video/vast?" +
+String vastUrl = "https://ads.thenexusengine.com/video/vast?" +
     "pub_id=pub-video-123456&" +
     "w=1920&h=1080&" +
     "mindur=15&maxdur=30&" +
@@ -489,7 +497,7 @@ adsLoader = adsLoaderBuilder.build();
 
 ```swift
 // Swift for tvOS
-let vastUrl = "https://api.tne-catalyst.com/video/vast?" +
+let vastUrl = "https://ads.thenexusengine.com/video/vast?" +
     "pub_id=pub-video-123456&" +
     "w=1920&h=1080&" +
     "mindur=15&maxdur=30&" +
@@ -581,7 +589,7 @@ fetch(vastUrl)
 // Change from test to production
 const VAST_ENDPOINT =
   process.env.NODE_ENV === 'production'
-    ? 'https://api.tne-catalyst.com/video/vast'
+    ? 'https://ads.thenexusengine.com/video/vast'
     : 'https://test.tne-catalyst.com/video/vast';
 
 const PUBLISHER_ID =

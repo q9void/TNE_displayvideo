@@ -1,22 +1,29 @@
-# TNE Catalyst - GAM VAST Tag (Publisher Enrichments)
+# The Nexus Engine - Catalyst GAM VAST Tag (Publisher Enrichments)
 #
-# Paste the single URL below into Google Ad Manager as a
-# "Third Party VAST Redirect" creative. GAM will substitute every %%...%%
-# macro at ad call time and Catalyst will map them onto OpenRTB 2.5 fields
-# before calling demand.
+# This template lives in the repo. The Nexus Engine team bakes in our own
+# TCF vendor (GVL) ID before emailing the tag to a publisher; the publisher
+# only fills in the publisher-side placeholders below and pastes the URL
+# into Google Ad Manager as a "Third Party VAST Redirect" creative. GAM
+# substitutes every %%...%% macro at ad call time and Catalyst maps them
+# onto OpenRTB 2.5 fields before calling demand.
 #
-# Replace before use:
-#   {PUBLISHER_ID}  -> your Catalyst publisher ID (e.g. pub-video-123456)
-#   {GVL_ID}        -> Catalyst's TCF v2 vendor (GVL) ID (ask account mgmt)
+# Nexus Engine fills in before delivery:
+#   {GVL_ID}        -> our registered IAB TCF v2 vendor ID (numeric).
+#                      Required - GAM returns empty if the GVL is unknown.
+#
+# Publisher fills in when trafficking:
+#   {PUBLISHER_ID}  -> Nexus Engine publisher ID (e.g. pub-video-123456)
 #   {MIN} / {MAX}   -> allowed creative duration in seconds (e.g. 5 / 30)
 #   {FLOOR}         -> USD bid floor (omit bidfloor= to disable)
 #
-# Test endpoint (use while validating the first 1,000 requests):
-#   https://test.tne-catalyst.com/video/vast?...   pub_id=pub-video-test
+# Endpoint: ads.thenexusengine.com is the live Catalyst host (no separate
+# test subdomain - staging runs behind the same hostname via nginx traffic
+# split). Use a test publisher ID during the initial 1,000-request window
+# and switch to production once validation passes.
 #
 # ---------------------------------------------------------------------------
 
-https://api.tne-catalyst.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&description_url=%%DESCRIPTION_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%&ua=%%USER_AGENT_ESC%%&session_id=%%CLICK_ID%%&schain=%%SCHAIN%%
+https://ads.thenexusengine.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&description_url=%%DESCRIPTION_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%&ua=%%USER_AGENT_ESC%%&session_id=%%CLICK_ID%%&schain=%%SCHAIN%%
 
 # ---------------------------------------------------------------------------
 # OpenRTB 2.5 mapping (reference)
