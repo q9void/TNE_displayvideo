@@ -332,8 +332,15 @@ server-side and applies per-bidder GVL checks before fanning out to SSPs.
 `{FLOOR}` (or drop the `bidfloor=` pair to disable).
 
 ```
-https://ads.thenexusengine.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%
+https://ads.thenexusengine.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%&content_id=[CONTENTID]&content_url=[CONTENTURI]&player_size=[PLAYERSIZE]&inventory_state=[INVENTORYSTATE]&placement_type=[PLACEMENTTYPE]&api=[APIFRAMEWORKS]&omid_partner=[OMIDPARTNER]&transaction_id=[TRANSACTIONID]&app_bundle=[APPBUNDLE]&verification_vendors=[VERIFICATIONVENDORS]&lat_long=[LATLONG]
 ```
+
+**Two-layer substitution.** `%%...%%` macros are resolved by GAM as it
+emits the VAST Wrapper redirecting to us. `[...]` macros are IAB VAST 4
+macros resolved by the video player (e.g. Dailymotion's
+[vast-client-js](https://github.com/dailymotion/vast-client-js)) as it
+chases the wrapper's `AdTagURI` per the IAB VAST 4.2 spec. Both passes
+happen before the request hits Catalyst.
 
 A formatted version with copy-button and full macro reference lives at
 [`examples/gam-vast-tag.html`](../../../examples/gam-vast-tag.html); a
@@ -382,6 +389,51 @@ plaintext copy is at [`examples/gam-vast-tag.txt`](../../../examples/gam-vast-ta
 | IFA (IDFA / AAID / RIDA / TIFA) | `%%ADVERTISING_IDENTIFIER_PLAIN%%` | `ifa` | `device.ifa` |
 | IFA type | `%%ADVERTISING_IDENTIFIER_TYPE%%` | `ifa_type` | `device.ext.ifa_type` |
 | Limit Ad Tracking | `%%LIMITADTRACKING%%` | `lmt` | `device.lmt` |
+
+### Layer 2 - IAB VAST 4 macros (resolved by the player)
+
+Per IAB VAST 4.2, wrapper `<VASTAdTagURI>` elements support macro
+substitution. The Dailymotion player (and any VAST 4.2-compliant player)
+chases our wrapper redirect and resolves the `[...]` macros below before
+the final request hits Catalyst. Unsupported macros are emitted as `-1`
+per IAB spec; Catalyst treats that as null server-side.
+
+**Content context (net-new vs GAM)**
+
+| Signal | IAB macro | Catalyst param | OpenRTB field |
+|---|---|---|---|
+| Content ID (Dailymotion video ID) | `[CONTENTID]` | `content_id` | `site.content.id` |
+| Content URL | `[CONTENTURI]` | `content_url` | `site.content.url` |
+
+**Player & session context**
+
+| Signal | IAB macro | Catalyst param | OpenRTB field |
+|---|---|---|---|
+| Player size (actual) | `[PLAYERSIZE]` | `player_size` | `imp[0].video.w` / `.h` (preferred over GAM slot size) |
+| Inventory state (autoplay/muted bitmask) | `[INVENTORYSTATE]` | `inventory_state` | `imp[0].ext.inventorystate` |
+| Placement type (IAB enum) | `[PLACEMENTTYPE]` | `placement_type` | `imp[0].video.placement` (overrides hardcoded `placement=1`) |
+| API frameworks (VPAID / OMID / MRAID) | `[APIFRAMEWORKS]` | `api` | `imp[0].video.api[]` |
+| OMID partner | `[OMIDPARTNER]` | `omid_partner` | `imp[0].video.ext.omidpartner` |
+| Verification vendors | `[VERIFICATIONVENDORS]` | `verification_vendors` | `imp[0].ext.verification` |
+| Transaction ID (per-request unique) | `[TRANSACTIONID]` | `transaction_id` | `bidrequest.id` |
+
+**App / CTV & geo precision**
+
+| Signal | IAB macro | Catalyst param | OpenRTB field |
+|---|---|---|---|
+| App bundle (in-app / CTV) | `[APPBUNDLE]` | `app_bundle` | `app.bundle` (empty on web) |
+| Device lat/lng (consent-gated) | `[LATLONG]` | `lat_long` | `device.geo.lat` / `.lon` (merged with GAM country) |
+
+**Resolution rules** when both layers contribute to the same OpenRTB field:
+
+- `imp.video.w/h` -> `player_size` wins when present, else GAM `w`/`h`
+- `imp.video.placement` -> `placement_type` wins when present, else hardcoded `placement=1`
+- `device.geo.*` -> GAM `geo` (country) + player `lat_long` (precision), merged
+
+**Dropped duplicates** (IAB macros GAM already provides): `[GDPRCONSENT]`,
+`[IFA]`, `[IFATYPE]`, `[LIMITADTRACKING]`, `[PAGEURL]`, `[DOMAIN]`,
+`[CACHEBUSTING]`, `[DEVICEUA]`/`[CLIENTUA]` - omitted to avoid
+two-source-of-truth drift.
 
 ### First-party identifier strategy (future state)
 

@@ -57,16 +57,24 @@
 
 <div class="tag-box">
   <button class="copy-btn" onclick="copyTag()">Copy</button>
-<pre id="vast-tag">https://ads.thenexusengine.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%</pre>
+<pre id="vast-tag">https://ads.thenexusengine.com/video/vast?pub_id={PUBLISHER_ID}&w=%%WIDTH%%&h=%%HEIGHT%%&mindur={MIN}&maxdur={MAX}&mimes=video/mp4,application/x-mpegURL&protocols=2,3,5,6,7,8&placement=1&linearity=1&bidfloor={FLOOR}&placement_id=%%ADUNIT%%&page_url=%%PAGE_URL%%&domain=%%SITE_DOMAIN%%&ref=%%REFERRER_URL%%&cb=%%CACHEBUSTER%%&sport=%%PATTERN:sport%%&competition=%%PATTERN:competition%%&lang=%%PATTERN:language%%&device_type=%%PATTERN:device%%&geo=%%PATTERN:geo%%&content_type=%%PATTERN:content_type%%&gdpr=%%GDPR%%&gdpr_consent=%%GDPR_CONSENT_{GVL_ID}%%&addtl_consent=%%ADDTL_CONSENT%%&us_privacy=%%US_PRIVACY%%&gpp=%%GPP_STRING%%&gpp_sid=%%GPP_SID%%&coppa=%%TFCD%%&ifa=%%ADVERTISING_IDENTIFIER_PLAIN%%&ifa_type=%%ADVERTISING_IDENTIFIER_TYPE%%&lmt=%%LIMITADTRACKING%%&content_id=[CONTENTID]&content_url=[CONTENTURI]&player_size=[PLAYERSIZE]&inventory_state=[INVENTORYSTATE]&placement_type=[PLACEMENTTYPE]&api=[APIFRAMEWORKS]&omid_partner=[OMIDPARTNER]&transaction_id=[TRANSACTIONID]&app_bundle=[APPBUNDLE]&verification_vendors=[VERIFICATIONVENDORS]&lat_long=[LATLONG]</pre>
 </div>
 
 <p>
-  GAM substitutes each <span class="mono">%%...%%</span> at ad call time, so the
-  request that hits Catalyst is fully populated. Line breaks above are for
-  readability only &mdash; the tag is a single URL.
+  <strong>Two-layer substitution:</strong>
+  <span class="mono">%%...%%</span> macros are resolved by Google Ad Manager
+  as it emits the VAST Wrapper redirecting to us;
+  <span class="mono">[...]</span> macros are IAB VAST 4 macros resolved by the
+  video player (e.g. Dailymotion&rsquo;s
+  <a href="https://github.com/dailymotion/vast-client-js">vast-client-js</a>)
+  as it chases the wrapper&rsquo;s <span class="mono">AdTagURI</span> per the
+  IAB VAST 4.2 spec. Both passes happen before the request hits Catalyst, so
+  every macro arrives populated.
 </p>
 
 <h2>Macro &rarr; Catalyst Parameter &rarr; OpenRTB Mapping</h2>
+
+<h3>Layer 1 &mdash; GAM macros</h3>
 
 <h3>Standard VAST Enrichments</h3>
 <table>
@@ -142,6 +150,65 @@
   (UID 2.0, ID5, LiveRamp, SharedID, hashed PPID) &mdash; the GET tag can&rsquo;t
   carry structured EID arrays.
 </p>
+
+<h3>Layer 2 &mdash; IAB VAST 4 macros (resolved by the Dailymotion player)</h3>
+
+<p>
+  Per IAB VAST 4.2, wrapper <span class="mono">&lt;VASTAdTagURI&gt;</span>
+  elements support macro substitution. Dailymotion&rsquo;s player chases our
+  wrapper redirect and resolves the <span class="mono">[...]</span> macros
+  below before the final request hits Catalyst. Unsupported macros are
+  emitted as <span class="mono">-1</span> per IAB spec; Catalyst treats that
+  as null server-side.
+</p>
+
+<h4>Content context (net-new vs GAM)</h4>
+<table>
+  <thead>
+    <tr><th>Signal</th><th>IAB macro</th><th>Catalyst param</th><th>OpenRTB 2.5 field</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Content ID (Dailymotion video ID)</td><td><span class="mono">[CONTENTID]</span></td><td><span class="mono">content_id</span></td><td><span class="mono">site.content.id</span></td></tr>
+    <tr><td>Content URL</td><td><span class="mono">[CONTENTURI]</span></td><td><span class="mono">content_url</span></td><td><span class="mono">site.content.url</span></td></tr>
+  </tbody>
+</table>
+
+<h4>Player &amp; session context</h4>
+<table>
+  <thead>
+    <tr><th>Signal</th><th>IAB macro</th><th>Catalyst param</th><th>OpenRTB 2.5 field</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Player size (actual dims)</td><td><span class="mono">[PLAYERSIZE]</span></td><td><span class="mono">player_size</span></td><td><span class="mono">imp[0].video.w</span> / <span class="mono">.h</span> (preferred over GAM slot size)</td></tr>
+    <tr><td>Inventory state (autoplay/muted bitmask)</td><td><span class="mono">[INVENTORYSTATE]</span></td><td><span class="mono">inventory_state</span></td><td><span class="mono">imp[0].ext.inventorystate</span></td></tr>
+    <tr><td>Placement type (IAB enum)</td><td><span class="mono">[PLACEMENTTYPE]</span></td><td><span class="mono">placement_type</span></td><td><span class="mono">imp[0].video.placement</span> (overrides hardcoded <span class="mono">placement=1</span>)</td></tr>
+    <tr><td>API frameworks (VPAID/OMID/MRAID)</td><td><span class="mono">[APIFRAMEWORKS]</span></td><td><span class="mono">api</span></td><td><span class="mono">imp[0].video.api[]</span></td></tr>
+    <tr><td>OMID partner</td><td><span class="mono">[OMIDPARTNER]</span></td><td><span class="mono">omid_partner</span></td><td><span class="mono">imp[0].video.ext.omidpartner</span></td></tr>
+    <tr><td>Verification vendors</td><td><span class="mono">[VERIFICATIONVENDORS]</span></td><td><span class="mono">verification_vendors</span></td><td><span class="mono">imp[0].ext.verification</span></td></tr>
+    <tr><td>Transaction ID (per-request unique)</td><td><span class="mono">[TRANSACTIONID]</span></td><td><span class="mono">transaction_id</span></td><td><span class="mono">bidrequest.id</span></td></tr>
+  </tbody>
+</table>
+
+<h4>App / CTV &amp; geo precision</h4>
+<table>
+  <thead>
+    <tr><th>Signal</th><th>IAB macro</th><th>Catalyst param</th><th>OpenRTB 2.5 field</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>App bundle (in-app / CTV)</td><td><span class="mono">[APPBUNDLE]</span></td><td><span class="mono">app_bundle</span></td><td><span class="mono">app.bundle</span> (empty on web)</td></tr>
+    <tr><td>Device lat/lng (consent-gated)</td><td><span class="mono">[LATLONG]</span></td><td><span class="mono">lat_long</span></td><td><span class="mono">device.geo.lat</span> / <span class="mono">.lon</span> (merged with GAM country)</td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <strong>Resolution rules</strong> when both layers contribute to the same OpenRTB field:
+  <ul>
+    <li><span class="mono">imp.video.w/h</span> &rarr; <span class="mono">player_size</span> wins when present, else GAM <span class="mono">w</span>/<span class="mono">h</span>.</li>
+    <li><span class="mono">imp.video.placement</span> &rarr; <span class="mono">placement_type</span> wins when present, else hardcoded <span class="mono">placement=1</span>.</li>
+    <li><span class="mono">device.geo.*</span> &rarr; GAM <span class="mono">geo</span> (country) + player <span class="mono">lat_long</span> (precision), merged.</li>
+  </ul>
+  <strong>Dropped duplicates:</strong> <span class="mono">[GDPRCONSENT]</span>, <span class="mono">[IFA]</span>, <span class="mono">[IFATYPE]</span>, <span class="mono">[LIMITADTRACKING]</span>, <span class="mono">[PAGEURL]</span>, <span class="mono">[DOMAIN]</span>, <span class="mono">[CACHEBUSTING]</span>, <span class="mono">[DEVICEUA]</span>/<span class="mono">[CLIENTUA]</span> &mdash; GAM already provides equivalents; omitted to avoid two-source-of-truth drift.
+</div>
 
 <h2>Future: First-Party Identifier Strategy</h2>
 
