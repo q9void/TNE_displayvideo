@@ -11,6 +11,7 @@ import (
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/endpoints"
 	"github.com/thenexusengine/tne_springwire/internal/exchange"
+	"github.com/thenexusengine/tne_springwire/internal/middleware"
 )
 
 // TestCatalystBidHandler_ValidRequest tests a valid bid request
@@ -213,7 +214,10 @@ func TestCatalystBidHandler_Timeout(t *testing.T) {
 	}
 }
 
-// TestCatalystBidHandler_CORS tests CORS headers
+// TestCatalystBidHandler_CORS tests CORS headers via the production middleware.
+// The handler itself doesn't set CORS headers; that's the middleware's job
+// (see cmd/server/server.go). Wrap the handler the same way to test the
+// production-equivalent behavior.
 func TestCatalystBidHandler_CORS(t *testing.T) {
 	registry := adapters.DefaultRegistry
 	exchangeConfig := &exchange.Config{
@@ -222,18 +226,29 @@ func TestCatalystBidHandler_CORS(t *testing.T) {
 	ex := exchange.New(registry, exchangeConfig)
 	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil, nil)
 
-	// Test OPTIONS preflight
+	const sdkOrigin = "https://example.com"
+	cors := middleware.NewCORS(&middleware.CORSConfig{
+		Enabled:        true,
+		AllowedOrigins: []string{sdkOrigin},
+		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders: []string{"Content-Type", "Origin"},
+	})
+	wrapped := cors.Middleware(http.HandlerFunc(handler.HandleBidRequest))
+
+	// Test OPTIONS preflight from an allowed origin
 	req := httptest.NewRequest("OPTIONS", "/v1/bid", nil)
+	req.Header.Set("Origin", sdkOrigin)
+	req.Header.Set("Access-Control-Request-Method", "POST")
 	w := httptest.NewRecorder()
 
-	handler.HandleBidRequest(w, req)
+	wrapped.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200 for OPTIONS, got %d", w.Code)
+	if w.Code != http.StatusNoContent {
+		t.Errorf("Expected status 204 for OPTIONS preflight, got %d", w.Code)
 	}
 
-	if w.Header().Get("Access-Control-Allow-Origin") != "*" {
-		t.Error("Expected CORS Allow-Origin header")
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != sdkOrigin {
+		t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, sdkOrigin)
 	}
 }
 
