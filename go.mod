@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
-	github.com/alicebob/miniredis/v2 v2.35.0
+	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/lib/pq v1.12.3
 	github.com/mssola/useragent v1.0.0
 	github.com/oschwald/geoip2-golang v1.13.0
