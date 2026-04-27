@@ -2,6 +2,7 @@ package tests
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -299,7 +300,9 @@ func TestCatalystIntegration_SDKCompatibility(t *testing.T) {
 	body, _ := json.Marshal(sdkRequest)
 
 	// Make request with Origin header so the CORS middleware can echo it back
-	req, err := http.NewRequest("POST", server.URL+"/v1/bid", bytes.NewReader(body))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", server.URL+"/v1/bid", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("Build request failed: %v", err)
 	}

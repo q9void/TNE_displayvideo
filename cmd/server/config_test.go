@@ -269,6 +269,10 @@ func TestParseConfig_DatabaseConfig_Defaults(t *testing.T) {
 }
 
 func TestToExchangeConfig(t *testing.T) {
+	// EventRecordEnabled is wired from the IDR_EVENT_RECORD_ENABLED env var
+	// (see ToExchangeConfig in config.go). Set it for the duration of the test.
+	t.Setenv("IDR_EVENT_RECORD_ENABLED", "true")
+
 	cfg := &ServerConfig{
 		Port:                      "8000",
 		Timeout:                   2000 * time.Millisecond,
