@@ -11,6 +11,7 @@ import (
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/endpoints"
 	"github.com/thenexusengine/tne_springwire/internal/exchange"
+	"github.com/thenexusengine/tne_springwire/internal/middleware"
 )
 
 // TestCatalystIntegration_EndToEnd tests the complete Catalyst integration flow
@@ -260,8 +261,17 @@ func TestCatalystIntegration_SDKCompatibility(t *testing.T) {
 	ex := exchange.New(registry, exchangeConfig)
 	handler := endpoints.NewCatalystBidHandler(ex, nil, nil, nil, nil, nil)
 
-	// Create test server
-	server := httptest.NewServer(http.HandlerFunc(handler.HandleBidRequest))
+	// Wrap with CORS middleware (mirrors cmd/server/server.go). Configure with an
+	// explicit allowed origin since the production middleware no longer falls back
+	// to a wildcard (P1-3 hardening in internal/middleware/cors.go).
+	const sdkOrigin = "https://example.com"
+	cors := middleware.NewCORS(&middleware.CORSConfig{
+		Enabled:        true,
+		AllowedOrigins: []string{sdkOrigin},
+		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders: []string{"Content-Type", "Origin"},
+	})
+	server := httptest.NewServer(cors.Middleware(http.HandlerFunc(handler.HandleBidRequest)))
 	defer server.Close()
 
 	// Simulate SDK request (what the JavaScript would send)
@@ -288,8 +298,14 @@ func TestCatalystIntegration_SDKCompatibility(t *testing.T) {
 
 	body, _ := json.Marshal(sdkRequest)
 
-	// Make request
-	resp, err := http.Post(server.URL+"/v1/bid", "application/json", bytes.NewReader(body))
+	// Make request with Origin header so the CORS middleware can echo it back
+	req, err := http.NewRequest("POST", server.URL+"/v1/bid", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("Build request failed: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", sdkOrigin)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
@@ -300,9 +316,9 @@ func TestCatalystIntegration_SDKCompatibility(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", resp.StatusCode)
 	}
 
-	// Verify CORS headers
-	if resp.Header.Get("Access-Control-Allow-Origin") != "*" {
-		t.Error("Missing CORS Allow-Origin header")
+	// Verify CORS headers (middleware echoes the request's Origin when allowed)
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != sdkOrigin {
+		t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, sdkOrigin)
 	}
 
 	// Parse response
