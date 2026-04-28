@@ -1,6 +1,7 @@
 package agentic
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -208,9 +209,81 @@ func (r *Registry) AgentsForLifecycle(lc Lifecycle) []AgentEndpoint {
 	return r.byLifecyc[lc]
 }
 
+// AgentFilter is the per-call hook used to drop agents that should not run
+// for a given auction. The callback is invoked with the agent's ID; return
+// true to keep, false to skip. Used to enforce the per-publisher override
+// rule: an agent bound to a curator only fires for publishers that
+// allow-list the curator.
+type AgentFilter func(agentID string) bool
+
+// AgentsForLifecycleFiltered is AgentsForLifecycle with an optional filter
+// applied. Returns a NEW slice (caller may freely mutate). When filter is
+// nil, behaves identically to AgentsForLifecycle but copies the slice for
+// safety.
+func (r *Registry) AgentsForLifecycleFiltered(lc Lifecycle, filter AgentFilter) []AgentEndpoint {
+	src := r.byLifecyc[lc]
+	if len(src) == 0 {
+		return nil
+	}
+	if filter == nil {
+		out := make([]AgentEndpoint, len(src))
+		copy(out, src)
+		return out
+	}
+	out := make([]AgentEndpoint, 0, len(src))
+	for _, a := range src {
+		if filter(a.ID) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 // AllAgents returns the full agent slice in priority order (test helper).
 func (r *Registry) AllAgents() []AgentEndpoint {
 	return r.agents
+}
+
+// PublisherCuratorAllowList is the surface a CuratorBinding-aware caller uses
+// to build a per-publisher AgentFilter. Implemented by *storage.CuratorStore
+// in production. Returns true when the (publisher_id, curator_id) pair is
+// allow-listed (or when the catalog uses empty-list-means-allow-all).
+type PublisherCuratorAllowList interface {
+	PublisherAllowedForCurator(ctx context.Context, publisherID int, curatorID string) (bool, error)
+}
+
+// AgentFilterForPublisher composes an AgentFilter that drops agents whose
+// bound curator is not allow-listed for publisherID. Agents NOT in
+// curatorBindings are unconditionally allowed (treated as platform-wide).
+//
+// publisherID == 0 disables the filter entirely (returns nil) — matches the
+// AuctionRequest convention that zero means "publisher unresolved".
+func AgentFilterForPublisher(
+	ctx context.Context,
+	publisherID int,
+	curatorBindings map[string]string,
+	allowList PublisherCuratorAllowList,
+) AgentFilter {
+	if publisherID <= 0 || allowList == nil || len(curatorBindings) == 0 {
+		return nil
+	}
+	cache := make(map[string]bool, len(curatorBindings))
+	return func(agentID string) bool {
+		curatorID, bound := curatorBindings[agentID]
+		if !bound {
+			return true // platform-wide agent, always runs
+		}
+		if v, ok := cache[curatorID]; ok {
+			return v
+		}
+		ok, err := allowList.PublisherAllowedForCurator(ctx, publisherID, curatorID)
+		if err != nil {
+			// Fail-open: a database hiccup shouldn't silently block agents.
+			return true
+		}
+		cache[curatorID] = ok
+		return ok
+	}
 }
 
 // AgentByID returns the agent with the given id, or false if absent.

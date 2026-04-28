@@ -1,6 +1,7 @@
 package agentic
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -46,6 +47,28 @@ type ApplierConfig struct {
 	// Now is injected for deterministic test latency tracking. Defaults to
 	// time.Now when nil.
 	Now func() time.Time
+
+	// CuratorBindings maps agent_id → curator_id. When an agent listed here
+	// emits ACTIVATE_DEALS or ACTIVATE_SEGMENTS, the applier validates the
+	// payload against the bound curator's catalog before applying:
+	//   - ACTIVATE_DEALS: deal_id must exist in curator_deals for the bound
+	//     curator. Unknown deals are dropped from the payload (decision
+	//     reason "deal_not_in_curator_catalog"); known deals proceed.
+	//   - ACTIVATE_SEGMENTS: segment IDs proceed unconditionally (segtax
+	//     allow-listing is enforced at the catalog layer).
+	// nil ⇒ no curator binding; agents emit free-form mutations as before.
+	CuratorBindings map[string]string
+
+	// CuratorValidator is the lookup surface used when CuratorBindings is
+	// set. nil ⇒ binding mode disables (cannot validate), ACTIVATE_DEALS
+	// from a bound agent is rejected with reason "no_curator_validator".
+	CuratorValidator CuratorValidator
+}
+
+// CuratorValidator is the minimal surface the applier needs to validate
+// curator-bound mutations. Implemented by *storage.CuratorStore in production.
+type CuratorValidator interface {
+	DealIsCuratedBy(ctx context.Context, dealID, curatorID string) (bool, error)
 }
 
 func (c ApplierConfig) defaults() ApplierConfig {
@@ -370,7 +393,7 @@ func applyActivateSegments(
 
 func applyActivateDeals(
 	req *openrtb.BidRequest, _ *openrtb.BidResponse,
-	m *pb.Mutation, origin MutationOrigin, _ ApplierConfig,
+	m *pb.Mutation, origin MutationOrigin, cfg ApplierConfig,
 	out *ApplyOutput, dec ApplyDecision,
 ) ApplyDecision {
 	if !pathOK(dec.Path, "imp", "imp[*].pmp.deals", "imp[*].pmp.deals[*]", "") {
@@ -384,6 +407,41 @@ func applyActivateDeals(
 		dec.Reason = "empty_payload"
 		return dec
 	}
+
+	// Curator-bound agents: every deal_id MUST belong to the bound curator's
+	// catalog. Unknown deal_ids are filtered out before mutation. This is the
+	// applier-side equivalent of an INJECT_CURATOR_SIGNALS intent — we use
+	// the existing ACTIVATE_DEALS shape with an upstream validation hook
+	// rather than introducing a new proto enum value.
+	curatorID, bound := cfg.CuratorBindings[origin.AgentID]
+	allowedIDs := ids.GetId()
+	if bound {
+		if cfg.CuratorValidator == nil {
+			dec.Decision = "rejected"
+			dec.Reason = "no_curator_validator"
+			return dec
+		}
+		filtered := make([]string, 0, len(allowedIDs))
+		dropped := 0
+		for _, id := range allowedIDs {
+			ok, err := cfg.CuratorValidator.DealIsCuratedBy(context.Background(), id, curatorID)
+			if err != nil || !ok {
+				dropped++
+				continue
+			}
+			filtered = append(filtered, id)
+		}
+		if len(filtered) == 0 {
+			dec.Decision = "rejected"
+			dec.Reason = "deal_not_in_curator_catalog"
+			return dec
+		}
+		allowedIDs = filtered
+		if dropped > 0 {
+			dec.Reason = fmt.Sprintf("dropped_%d_deals_not_in_curator_catalog", dropped)
+		}
+	}
+
 	for i := range req.Imp {
 		if req.Imp[i].PMP == nil {
 			req.Imp[i].PMP = &openrtb.PMP{}
@@ -392,7 +450,7 @@ func applyActivateDeals(
 		for _, d := range req.Imp[i].PMP.Deals {
 			existing[d.ID] = struct{}{}
 		}
-		for _, id := range ids.GetId() {
+		for _, id := range allowedIDs {
 			if _, ok := existing[id]; ok {
 				continue
 			}

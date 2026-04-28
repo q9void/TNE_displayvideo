@@ -1,6 +1,7 @@
 package agentic
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,6 +12,16 @@ import (
 	openrtbpb "github.com/thenexusengine/tne_springwire/agentic/gen/iabtechlab/openrtb/v26"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
 )
+
+// fakeCuratorValidator: in-memory CuratorValidator for tests.
+type fakeCuratorValidator struct {
+	deals map[string]string // deal_id -> curator_id
+}
+
+func (f *fakeCuratorValidator) DealIsCuratedBy(_ context.Context, dealID, curatorID string) (bool, error) {
+	got, ok := f.deals[dealID]
+	return ok && got == curatorID, nil
+}
 
 // helper builders
 func mut(intent pb.Intent, op pb.Operation, path string, value any) *pb.Mutation {
@@ -83,6 +94,55 @@ func TestApply_activateDeals_addsToAllImps(t *testing.T) {
 	assert.Equal(t, "applied", out.Decisions[0].Decision)
 	assert.Len(t, req.Imp[0].PMP.Deals, 2)
 	assert.Len(t, req.Imp[1].PMP.Deals, 2)
+}
+
+func TestApply_activateDeals_curatorBound_filtersUnknown(t *testing.T) {
+	a := NewApplier(ApplierConfig{
+		CuratorBindings:  map[string]string{"curator-agent-1": "c1"},
+		CuratorValidator: &fakeCuratorValidator{deals: map[string]string{"D1": "c1"}},
+	})
+	req := &openrtb.BidRequest{Imp: []openrtb.Imp{{ID: "imp1"}}}
+	out := a.Apply(req, nil, []*pb.Mutation{
+		mut(pb.Intent_ACTIVATE_DEALS, pb.Operation_OPERATION_ADD, "imp[*].pmp.deals",
+			&pb.IDsPayload{Id: []string{"D1", "UNKNOWN-DEAL"}}),
+	}, []MutationOrigin{origin("curator-agent-1", 0)}, LifecyclePublisherBidRequest)
+	require.Len(t, out.Decisions, 1)
+	assert.Equal(t, "applied", out.Decisions[0].Decision)
+	require.Len(t, req.Imp[0].PMP.Deals, 1)
+	assert.Equal(t, "D1", req.Imp[0].PMP.Deals[0].ID)
+	assert.Contains(t, out.Decisions[0].Reason, "dropped_1_deals_not_in_curator_catalog")
+}
+
+func TestApply_activateDeals_curatorBound_allUnknownRejects(t *testing.T) {
+	a := NewApplier(ApplierConfig{
+		CuratorBindings:  map[string]string{"a": "c1"},
+		CuratorValidator: &fakeCuratorValidator{deals: map[string]string{}},
+	})
+	req := &openrtb.BidRequest{Imp: []openrtb.Imp{{ID: "imp1"}}}
+	out := a.Apply(req, nil, []*pb.Mutation{
+		mut(pb.Intent_ACTIVATE_DEALS, pb.Operation_OPERATION_ADD, "imp[*].pmp.deals",
+			&pb.IDsPayload{Id: []string{"X", "Y"}}),
+	}, []MutationOrigin{origin("a", 0)}, LifecyclePublisherBidRequest)
+	require.Len(t, out.Decisions, 1)
+	assert.Equal(t, "rejected", out.Decisions[0].Decision)
+	assert.Equal(t, "deal_not_in_curator_catalog", out.Decisions[0].Reason)
+	assert.Empty(t, req.Imp[0].PMP)
+}
+
+func TestApply_activateDeals_unboundAgentUnaffected(t *testing.T) {
+	// Agent NOT in CuratorBindings → ACTIVATE_DEALS proceeds unconditionally.
+	a := NewApplier(ApplierConfig{
+		CuratorBindings:  map[string]string{"different-agent": "c1"},
+		CuratorValidator: &fakeCuratorValidator{deals: map[string]string{}},
+	})
+	req := &openrtb.BidRequest{Imp: []openrtb.Imp{{ID: "imp1"}}}
+	out := a.Apply(req, nil, []*pb.Mutation{
+		mut(pb.Intent_ACTIVATE_DEALS, pb.Operation_OPERATION_ADD, "imp[*].pmp.deals",
+			&pb.IDsPayload{Id: []string{"any-deal"}}),
+	}, []MutationOrigin{origin("a", 0)}, LifecyclePublisherBidRequest)
+	require.Len(t, out.Decisions, 1)
+	assert.Equal(t, "applied", out.Decisions[0].Decision)
+	require.Len(t, req.Imp[0].PMP.Deals, 1)
 }
 
 func TestApply_suppressDeals_removesByID(t *testing.T) {

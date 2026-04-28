@@ -310,6 +310,28 @@ func (s *CuratorStore) UpsertDeal(ctx context.Context, d *CuratorDeal) error {
 	).Scan(&d.CreatedAt, &d.UpdatedAt)
 }
 
+// DealIsCuratedBy reports whether dealID exists in curator_deals owned by
+// curatorID and is active. Returns (false, nil) when the deal is unknown,
+// inactive, or owned by a different curator. Used by the agentic applier
+// to validate ACTIVATE_DEALS payloads from curator-bound agents.
+func (s *CuratorStore) DealIsCuratedBy(ctx context.Context, dealID, curatorID string) (bool, error) {
+	if s.db == nil || dealID == "" || curatorID == "" {
+		return false, nil
+	}
+	ctx, cancel := withTimeout(ctx, DefaultDBTimeout)
+	defer cancel()
+
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM curator_deals
+		 WHERE deal_id = $1 AND curator_id = $2 AND active = TRUE`,
+		dealID, curatorID).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("DealIsCuratedBy(%s,%s): %w", dealID, curatorID, err)
+	}
+	return n > 0, nil
+}
+
 // DeleteDeal removes a deal row. Hard delete is fine — the deal_id is a
 // natural key; analytics tables retain a copy in win_events/bidder_events.
 func (s *CuratorStore) DeleteDeal(ctx context.Context, dealID string) error {
