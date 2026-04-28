@@ -46,7 +46,7 @@ const (
 	envelopeHardCapBytes = 8 * 1024 // entire ext.aamp dropped above this
 )
 
-// extWrap is the marshalling helper for round-tripping an existing ext blob
+// extWrap is the marshaling helper for round-tripping an existing ext blob
 // while only modifying the `aamp` key. Existing keys are preserved verbatim.
 type extWrap struct {
 	AAMP json.RawMessage `json:"aamp,omitempty"`
