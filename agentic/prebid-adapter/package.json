@@ -1,0 +1,15 @@
+{
+  "name": "tne-catalyst-prebid-adapter",
+  "version": "2.0.0",
+  "description": "TNE Catalyst Prebid.js bidder adapter with IAB AAMP / ARTF agentic support",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "test": "mocha 'test/spec/**/*_spec.js'"
+  },
+  "devDependencies": {
+    "chai": "^4.4.1",
+    "mocha": "^10.2.0",
+    "sinon": "^17.0.1"
+  }
+}

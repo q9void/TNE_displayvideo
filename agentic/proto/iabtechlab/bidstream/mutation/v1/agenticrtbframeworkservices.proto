@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package com.iabtechlab.bidstream.mutation.services.v1;
+
+option go_package = "github.com/thenexusengine/tne_springwire/agentic/gen/iabtechlab/bidstream/mutation/v1;mutationv1";
+
+// NOTE: Upstream import is "agenticrtbframework.proto"; we have rerooted to a
+// flatter layout. See agentic/proto/iabtechlab/README.md for the vendoring patch list.
+import "iabtechlab/bidstream/mutation/v1/agenticrtbframework.proto";
+
+service RTBExtensionPoint {
+  // GetMutations returns RTBResponse containing mutations to be applied at the predetermined auction lifecycle event
+  rpc GetMutations (com.iabtechlab.bidstream.mutation.v1.RTBRequest) returns (com.iabtechlab.bidstream.mutation.v1.RTBResponse);
+}

@@ -42,6 +42,33 @@ type ServerConfig struct {
 
 	// Paths (override for testing; defaults resolve relative to working directory)
 	BidderMappingPath string
+
+	// Agentic (IAB ARTF v1.0). nil ⇒ feature disabled. See agentic/.
+	Agentic *AgenticConfig
+}
+
+// AgenticConfig holds the IAB Agentic RTB Framework integration settings.
+// Populated only when AGENTIC_ENABLED=true at boot. See PRD §8.3.
+type AgenticConfig struct {
+	Enabled                 bool
+	AgentsPath              string
+	SchemaPath              string
+	TmaxMs                  int
+	AuctionSafetyMs         int
+	SellerID                string
+	APIKey                  string
+	PerAgentAPIKeys         map[string]string // agent_id → key
+	CircuitFailureThreshold int
+	CircuitSuccessThreshold int
+	CircuitTimeoutSeconds   int
+	MaxMutationsPerResponse int
+	MaxIDsPerPayload        int
+	DisableShadeIntent      bool
+	AllowInsecureGRPC       bool
+
+	// Phase 2 reserved
+	GRPCPort   int
+	MCPEnabled bool
 }
 
 // DatabaseConfig holds database connection configuration
@@ -108,7 +135,68 @@ func ParseConfig() *ServerConfig {
 		cfg.CORSOrigins = origins
 	}
 
+	// Parse Agentic (IAB ARTF) config. Default-off behind AGENTIC_ENABLED.
+	if getEnvBoolOrDefault("AGENTIC_ENABLED", false) {
+		cfg.Agentic = &AgenticConfig{
+			Enabled:                 true,
+			AgentsPath:              getEnvOrDefault("AGENTIC_AGENTS_PATH", "agentic/assets/agents.json"),
+			SchemaPath:              getEnvOrDefault("AGENTIC_SCHEMA_PATH", "agentic/assets/agents.schema.json"),
+			TmaxMs:                  getEnvIntOrDefault("AGENTIC_TMAX_MS", 30),
+			AuctionSafetyMs:         getEnvIntOrDefault("AGENTIC_SAFETY_MS", 50),
+			SellerID:                getEnvOrDefault("AGENTIC_SELLER_ID", "9131"),
+			APIKey:                  os.Getenv("AGENTIC_API_KEY"),
+			PerAgentAPIKeys:         parseAgenticPerAgentKeys(),
+			CircuitFailureThreshold: getEnvIntOrDefault("AGENTIC_CIRCUIT_FAILURE_THRESHOLD", 5),
+			CircuitSuccessThreshold: getEnvIntOrDefault("AGENTIC_CIRCUIT_SUCCESS_THRESHOLD", 2),
+			CircuitTimeoutSeconds:   getEnvIntOrDefault("AGENTIC_CIRCUIT_TIMEOUT_SECONDS", 30),
+			MaxMutationsPerResponse: getEnvIntOrDefault("AGENTIC_MAX_MUTATIONS_PER_RESPONSE", 64),
+			MaxIDsPerPayload:        getEnvIntOrDefault("AGENTIC_MAX_IDS_PER_PAYLOAD", 256),
+			DisableShadeIntent:      getEnvBoolOrDefault("AGENTIC_DISABLE_SHADE", true), // OQ3 default off
+			AllowInsecureGRPC:       getEnvBoolOrDefault("AGENTIC_ALLOW_INSECURE", false),
+			GRPCPort:                getEnvIntOrDefault("AGENTIC_GRPC_PORT", 0),
+			MCPEnabled:              getEnvBoolOrDefault("AGENTIC_MCP_ENABLED", false),
+		}
+	}
+
 	return cfg
+}
+
+// parseAgenticPerAgentKeys scans env for AGENTIC_API_KEY_<AGENT_ID> entries.
+// AGENT_ID is the env-var-safe form of the agent's id field (uppercased, with
+// dots/dashes replaced by underscores). Operators add a one-off env var per
+// vendor without code changes.
+func parseAgenticPerAgentKeys() map[string]string {
+	out := map[string]string{}
+	const prefix = "AGENTIC_API_KEY_"
+	for _, kv := range os.Environ() {
+		// kv looks like "AGENTIC_API_KEY_SEG_EXAMPLE_COM=secret".
+		eq := -1
+		for i := 0; i < len(kv); i++ {
+			if kv[i] == '=' {
+				eq = i
+				break
+			}
+		}
+		if eq < 0 {
+			continue
+		}
+		k, v := kv[:eq], kv[eq+1:]
+		if k == "AGENTIC_API_KEY" || !startsWith(k, prefix) {
+			continue
+		}
+		// Strip prefix; lowercase; convert _ to . to recover an agent_id-shaped
+		// lookup key. Operators must use the env-var form when setting.
+		raw := k[len(prefix):]
+		out[raw] = v
+	}
+	return out
+}
+
+func startsWith(s, p string) bool {
+	if len(s) < len(p) {
+		return false
+	}
+	return s[:len(p)] == p
 }
 
 // ToExchangeConfig converts ServerConfig to exchange.Config
@@ -297,6 +385,26 @@ func (c *ServerConfig) Validate() error {
 			if origin == "*" {
 				return fmt.Errorf("CORS wildcard '*' is not allowed in production - specify explicit origins")
 			}
+		}
+	}
+
+	// Validate Agentic config when enabled.
+	if c.Agentic != nil && c.Agentic.Enabled {
+		if c.Agentic.AgentsPath == "" {
+			return fmt.Errorf("AGENTIC_AGENTS_PATH is required when AGENTIC_ENABLED=true")
+		}
+		if c.Agentic.SchemaPath == "" {
+			return fmt.Errorf("AGENTIC_SCHEMA_PATH is required when AGENTIC_ENABLED=true")
+		}
+		if c.Agentic.SellerID == "" {
+			return fmt.Errorf("AGENTIC_SELLER_ID is required when AGENTIC_ENABLED=true")
+		}
+		if c.Agentic.TmaxMs < 5 || c.Agentic.TmaxMs > 500 {
+			return fmt.Errorf("AGENTIC_TMAX_MS must be between 5 and 500, got %d", c.Agentic.TmaxMs)
+		}
+		// In production, plain grpc:// must not be allowed.
+		if isProduction() && c.Agentic.AllowInsecureGRPC {
+			return fmt.Errorf("AGENTIC_ALLOW_INSECURE=true is not permitted in production")
 		}
 	}
 

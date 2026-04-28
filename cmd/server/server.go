@@ -11,19 +11,21 @@ import (
 	"os"
 	"time"
 
-	"github.com/thenexusengine/tne_springwire/internal/bidcache"
+	"github.com/thenexusengine/tne_springwire/agentic"
+	agenticEndpoints "github.com/thenexusengine/tne_springwire/agentic/endpoints"
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/appnexus"
 	// _ "github.com/thenexusengine/tne_springwire/internal/adapters/demo" // Disabled - no demo bids in production
 	"github.com/thenexusengine/tne_springwire/internal/adapters/kargo"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/pubmatic"
+	"github.com/thenexusengine/tne_springwire/internal/adapters/routing"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/rubicon"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/sovrn"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/triplelift"
-	"github.com/thenexusengine/tne_springwire/internal/adapters/routing"
 	"github.com/thenexusengine/tne_springwire/internal/analytics"
 	analyticsIDR "github.com/thenexusengine/tne_springwire/internal/analytics/idr"
 	analyticsPG "github.com/thenexusengine/tne_springwire/internal/analytics/postgres"
+	"github.com/thenexusengine/tne_springwire/internal/bidcache"
 	pbsconfig "github.com/thenexusengine/tne_springwire/internal/config"
 	"github.com/thenexusengine/tne_springwire/internal/endpoints"
 	"github.com/thenexusengine/tne_springwire/internal/exchange"
@@ -52,6 +54,10 @@ type Server struct {
 	redisClient       *redis.Client
 	currencyConverter *currency.Converter
 	routingLoader     *routing.Loader
+
+	// Agentic (IAB ARTF v1.0). Populated only when AGENTIC_ENABLED=true.
+	agenticRegistry *agentic.Registry
+	agenticClient   *agentic.Client
 }
 
 // NewServer creates a new PBS server instance
@@ -253,6 +259,52 @@ func (s *Server) initExchange() {
 	// Wire up metrics for margin tracking
 	s.exchange.SetMetrics(s.metrics)
 	log.Info().Msg("Metrics connected to exchange for margin tracking")
+
+	// Wire IAB ARTF agentic integration if enabled. The feature is fully
+	// gated behind AGENTIC_ENABLED — when off, this branch is skipped and
+	// no agentic code path runs.
+	if s.config.Agentic != nil && s.config.Agentic.Enabled {
+		reg, err := agentic.LoadRegistry(s.config.Agentic.AgentsPath, s.config.Agentic.SchemaPath)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Agentic enabled but agents.json failed to load")
+		}
+		// Cross-check seller_id between env and document.
+		if reg.SellerID() != s.config.Agentic.SellerID {
+			log.Warn().
+				Str("env_seller_id", s.config.Agentic.SellerID).
+				Str("doc_seller_id", reg.SellerID()).
+				Msg("AGENTIC_SELLER_ID does not match seller_id in agents.json")
+		}
+		stamper := agentic.OriginatorStamper{SellerID: s.config.Agentic.SellerID}
+		client, err := agentic.NewClient(reg, agentic.ClientConfig{
+			DefaultTmaxMs:           s.config.Agentic.TmaxMs,
+			AuctionSafetyMs:         s.config.Agentic.AuctionSafetyMs,
+			APIKey:                  s.config.Agentic.APIKey,
+			PerAgentAPIKeys:         s.config.Agentic.PerAgentAPIKeys,
+			CircuitFailureThreshold: s.config.Agentic.CircuitFailureThreshold,
+			CircuitSuccessThreshold: s.config.Agentic.CircuitSuccessThreshold,
+			CircuitTimeout:          time.Duration(s.config.Agentic.CircuitTimeoutSeconds) * time.Second,
+			AllowInsecure:           s.config.Agentic.AllowInsecureGRPC,
+		}, stamper)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Agentic client failed to dial")
+		}
+		applier := agentic.NewApplier(agentic.ApplierConfig{
+			MaxMutationsPerResponse: s.config.Agentic.MaxMutationsPerResponse,
+			MaxIDsPerPayload:        s.config.Agentic.MaxIDsPerPayload,
+			DisableShadeIntent:      s.config.Agentic.DisableShadeIntent,
+			ShadeMinFraction:        0.5,
+		})
+		s.exchange.WithAgentic(client, applier, stamper)
+		s.agenticRegistry = reg
+		s.agenticClient = client
+		log.Info().
+			Int("agents_count", reg.AgentCount()).
+			Str("seller_id", reg.SellerID()).
+			Int("tmax_ms", s.config.Agentic.TmaxMs).
+			Bool("shade_disabled", s.config.Agentic.DisableShadeIntent).
+			Msg("IAB ARTF agentic integration enabled")
+	}
 }
 
 // initRedis initializes Redis client
@@ -405,6 +457,23 @@ func (s *Server) initHandlers() {
 
 	log.Info().Msg("Sellers.json endpoints registered: /sellers.json, /.well-known/sellers.json")
 
+	// IAB AAMP/ARTF agents.json (agentic agent discovery, PRD §5.3 / §8.1).
+	// Returns 404 unless AGENTIC_ENABLED=true so external scrapers do not
+	// register us as an agentic SSP just because the route exists.
+	agenticEnabled := s.config.Agentic != nil && s.config.Agentic.Enabled
+	agentsJSONHandler := agenticEndpoints.NewAgentsJSONHandler(s.agenticRegistry, agenticEnabled)
+	mux.Handle("/agents.json", agentsJSONHandler)
+	mux.Handle("/.well-known/agents.json", agentsJSONHandler)
+	log.Info().Bool("enabled", agenticEnabled).Msg("Agents.json endpoints registered: /agents.json, /.well-known/agents.json")
+
+	// Read-only agentic admin endpoints (only when enabled).
+	if agenticEnabled {
+		agentsAdminHandler := agenticEndpoints.NewAgentsAdminHandler(s.agenticRegistry)
+		mux.Handle("/admin/agents", middleware.AdminAuth(agentsAdminHandler))
+		mux.Handle("/admin/agents/", middleware.AdminAuth(agentsAdminHandler))
+		log.Info().Msg("Agents admin endpoints registered: /admin/agents, /admin/agents/{id}")
+	}
+
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", metrics.Handler())
 
@@ -480,7 +549,7 @@ func (s *Server) buildHandler(mux *http.ServeMux) http.Handler {
 	// Initialize middleware
 	cors := middleware.NewCORS(middleware.DefaultCORSConfig())
 	security := middleware.NewSecurity(nil)
-	adminAuth := middleware.AdminAuth  // Admin API key authentication
+	adminAuth := middleware.AdminAuth // Admin API key authentication
 	publisherAuth := middleware.NewPublisherAuth(middleware.DefaultPublisherAuthConfig())
 	sizeLimiter := middleware.NewSizeLimiter(middleware.DefaultSizeLimitConfig())
 	gzipMiddleware := middleware.NewGzip(middleware.DefaultGzipConfig())
@@ -514,7 +583,7 @@ func (s *Server) buildHandler(mux *http.ServeMux) http.Handler {
 	handler = publisherAuth.Middleware(handler)
 	handler = sizeLimiter.Middleware(handler)
 	handler = loggingMiddleware(handler)
-	handler = adminAuth(handler)  // Admin endpoint authentication
+	handler = adminAuth(handler) // Admin endpoint authentication
 	handler = security.Middleware(handler)
 	handler = cors.Middleware(handler)
 

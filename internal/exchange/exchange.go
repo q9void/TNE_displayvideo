@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/thenexusengine/tne_springwire/agentic"
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/analytics"
 	"github.com/thenexusengine/tne_springwire/internal/fpd"
@@ -79,9 +80,9 @@ type Exchange struct {
 	eidFilter         *fpd.EIDFilter
 	metrics           MetricsRecorder
 	currencyConverter *currency.Converter
-	analytics         analytics.Module       // NEW: Analytics module for rich auction transaction data
-	mfProcessor       *MultiformatProcessor  // Multiformat bid selection
-	multibidProcessor *MultibidProcessor     // Task #52: Multibid processing
+	analytics         analytics.Module      // NEW: Analytics module for rich auction transaction data
+	mfProcessor       *MultiformatProcessor // Multiformat bid selection
+	multibidProcessor *MultibidProcessor    // Task #52: Multibid processing
 
 	// Per-bidder circuit breakers to prevent cascade failures
 	bidderBreakers   map[string]*idr.CircuitBreaker
@@ -90,6 +91,14 @@ type Exchange struct {
 	// configMu protects fpdProcessor, eidFilter, and config.FPD
 	// for safe concurrent access during runtime config updates
 	configMu sync.RWMutex
+
+	// Agentic integration (IAB ARTF v1.0). Nil ⇒ feature disabled; the
+	// Hook A and Hook B sites in RunAuction short-circuit when agenticEnabled
+	// is false. Wired by cmd/server/server.go via WithAgentic.
+	agenticClient  *agentic.Client
+	agenticApplier *agentic.Applier
+	agenticStamper agentic.OriginatorStamper
+	agenticEnabled bool
 }
 
 // AuctionType defines the type of auction to run
@@ -151,7 +160,7 @@ type Config struct {
 	CurrencyConv         bool
 	DefaultCurrency      string
 	CurrencyConverter    *currency.Converter // Currency conversion support
-	Analytics            analytics.Module     // NEW: Analytics module for rich auction transaction data
+	Analytics            analytics.Module    // NEW: Analytics module for rich auction transaction data
 	FPD                  *fpd.Config
 	CloneLimits          *CloneLimits       // P3-1: Configurable clone limits
 	MultiformatConfig    *MultiformatConfig // Multiformat bid selection config
@@ -165,20 +174,20 @@ type Config struct {
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		DefaultTimeout:        1000 * time.Millisecond,
-		MaxBidders:            50,
-		MaxConcurrentBidders:  10, // P0-4: Limit concurrent HTTP requests per auction
-		IDREnabled:            true,
-		IDRServiceURL:         "http://localhost:5050",
-		EventRecordEnabled:    true,
-		EventBufferSize:       100,
-		CurrencyConv:          false,
-		DefaultCurrency:       "USD",
-		FPD:                   fpd.DefaultConfig(),
-		CloneLimits:           DefaultCloneLimits(), // P3-1: Configurable clone limits
-		AuctionType:           FirstPriceAuction,
-		PriceIncrement:        0.01,
-		MinBidPrice:           0.0,
+		DefaultTimeout:       1000 * time.Millisecond,
+		MaxBidders:           50,
+		MaxConcurrentBidders: 10, // P0-4: Limit concurrent HTTP requests per auction
+		IDREnabled:           true,
+		IDRServiceURL:        "http://localhost:5050",
+		EventRecordEnabled:   true,
+		EventBufferSize:      100,
+		CurrencyConv:         false,
+		DefaultCurrency:      "USD",
+		FPD:                  fpd.DefaultConfig(),
+		CloneLimits:          DefaultCloneLimits(), // P3-1: Configurable clone limits
+		AuctionType:          FirstPriceAuction,
+		PriceIncrement:       0.01,
+		MinBidPrice:          0.0,
 	}
 }
 
@@ -282,7 +291,7 @@ func New(registry *adapters.Registry, config *Config) *Exchange {
 		eidFilter:         fpd.NewEIDFilter(fpdConfig),
 		bidderBreakers:    make(map[string]*idr.CircuitBreaker),
 		currencyConverter: config.CurrencyConverter,
-		analytics:         config.Analytics,         // NEW: Set analytics module from config
+		analytics:         config.Analytics, // NEW: Set analytics module from config
 		mfProcessor:       NewMultiformatProcessor(mfConfig),
 		multibidProcessor: NewMultibidProcessor(multibidConfig), // Task #52: Initialize multibid processor
 	}
@@ -308,6 +317,20 @@ func (e *Exchange) SetMetrics(m MetricsRecorder) {
 	e.configMu.Lock()
 	defer e.configMu.Unlock()
 	e.metrics = m
+}
+
+// WithAgentic wires the IAB ARTF v1.0 outbound integration onto an existing
+// Exchange. When invoked with non-nil client/applier, the two RunAuction
+// hooks (LIFECYCLE_PUBLISHER_BID_REQUEST pre-fanout, LIFECYCLE_DSP_BID_RESPONSE
+// post-fanout) are activated. Pass nil/nil to disable. Safe to call once
+// during boot; not goroutine-safe — intended to be called before RunAuction
+// is ever invoked.
+func (e *Exchange) WithAgentic(client *agentic.Client, applier *agentic.Applier, stamper agentic.OriginatorStamper) *Exchange {
+	e.agenticClient = client
+	e.agenticApplier = applier
+	e.agenticStamper = stamper
+	e.agenticEnabled = client != nil && applier != nil
+	return e
 }
 
 // Close shuts down the exchange and flushes pending events
@@ -336,10 +359,10 @@ func (e *Exchange) Close() error {
 // initBidderCircuitBreaker initializes a circuit breaker for a specific bidder
 func (e *Exchange) initBidderCircuitBreaker(bidderCode string) {
 	config := &idr.CircuitBreakerConfig{
-		FailureThreshold: 5,               // Open after 5 consecutive failures
-		SuccessThreshold: 2,              // Close after 2 successes in half-open
+		FailureThreshold: 5,                // Open after 5 consecutive failures
+		SuccessThreshold: 2,                // Close after 2 successes in half-open
 		Timeout:          30 * time.Second, // Wait 30s before testing recovery
-		MaxConcurrent:    100,            // Max concurrent requests per bidder
+		MaxConcurrent:    100,              // Max concurrent requests per bidder
 		OnStateChange: func(from, to string) {
 			logger.Log.Warn().
 				Str("bidder_code", bidderCode).
@@ -402,13 +425,13 @@ type AuctionResponse struct {
 
 // BidderResult contains results from a single bidder
 type BidderResult struct {
-	BidderCode string
-	Bids       []*adapters.TypedBid
-	Currency   string // Currency of the bids (after conversion)
-	Errors     []error
-	Latency    time.Duration
-	Selected   bool
-	Score      float64
+	BidderCode      string
+	Bids            []*adapters.TypedBid
+	Currency        string // Currency of the bids (after conversion)
+	Errors          []error
+	Latency         time.Duration
+	Selected        bool
+	Score           float64
 	TimedOut        bool   // P2-2: indicates if the bidder request timed out
 	LastStatusCode  int    // CP-5: HTTP status from the last SSP response (0 if no response)
 	RejectionReason string // CP-5: Value of X-Rejection-Reason response header if present
@@ -1530,7 +1553,6 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 		}
 	}
 
-
 	// CP-2: EID field mapping audit — detect UIDs orphaned in user.ext.eids
 	if req.BidRequest.User != nil {
 		// Index top-level EIDs by source
@@ -1591,6 +1613,12 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 				Msg("CP-2: EID mapping")
 		}
 	}
+
+	// Hook A — IAB ARTF LIFECYCLE_PUBLISHER_BID_REQUEST. Fans out to
+	// configured extension-point agents and applies their mutations to the
+	// in-flight BidRequest before bidder fanout. No-op when agentic is
+	// disabled. Auction never fails because of agent outcomes.
+	agenticHookA(ctx, e, req)
 
 	// Call bidders in parallel
 	results := e.callBiddersWithFPD(ctx, req.BidRequest, selectedBidders, timeout, bidderFPD)
@@ -1792,6 +1820,13 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 			})
 		}
 	}
+
+	// Hook B — IAB ARTF LIFECYCLE_DSP_BID_RESPONSE. Fans out to
+	// configured extension-point agents and applies BID_SHADE /
+	// ADJUST_DEAL_MARGIN mutations to the collected bids before winner
+	// selection. No-op when agentic is disabled. Auction never fails
+	// because of agent outcomes.
+	agenticHookB(ctx, e, req, validBids)
 
 	// Apply auction logic (first-price or second-price)
 	auctionedBids := e.runAuctionLogic(validBids, impFloors)
@@ -2212,7 +2247,7 @@ func (e *Exchange) buildAuctionObject(
 			// Format: "1YNN" where position 2 is opt-out flag
 			ccpaData = &analytics.CCPAData{
 				Applies:   true,
-				OptOut:    usPrivacy[2:3] == "Y",  // Position 2 (0-indexed)
+				OptOut:    usPrivacy[2:3] == "Y", // Position 2 (0-indexed)
 				USPrivacy: usPrivacy,
 			}
 		}
@@ -2697,30 +2732,30 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 func filterImpExtForBidder(impExt []byte, bidderCode string) []byte {
 	// All known bidder keys in imp.ext (must match adapter names as used in the ext object)
 	knownBidders := map[string]struct{}{
-		"33across":     {},
-		"adform":       {},
-		"appnexus":     {},
-		"beachfront":   {},
-		"conversant":   {},
-		"criteo":       {},
-		"gumgum":       {},
+		"33across":       {},
+		"adform":         {},
+		"appnexus":       {},
+		"beachfront":     {},
+		"conversant":     {},
+		"criteo":         {},
+		"gumgum":         {},
 		"improvedigital": {},
-		"ix":           {},
-		"kargo":        {},
-		"medianet":     {},
-		"onetag":       {},
-		"openx":        {},
-		"outbrain":     {},
-		"pubmatic":     {},
-		"rubicon":      {},
-		"sharethrough": {},
-		"smartadserver": {},
-		"sovrn":        {},
-		"spotx":        {},
-		"taboola":      {},
-		"teads":        {},
-		"triplelift":   {},
-		"unruly":       {},
+		"ix":             {},
+		"kargo":          {},
+		"medianet":       {},
+		"onetag":         {},
+		"openx":          {},
+		"outbrain":       {},
+		"pubmatic":       {},
+		"rubicon":        {},
+		"sharethrough":   {},
+		"smartadserver":  {},
+		"sovrn":          {},
+		"spotx":          {},
+		"taboola":        {},
+		"teads":          {},
+		"triplelift":     {},
+		"unruly":         {},
 	}
 
 	var ext map[string]json.RawMessage

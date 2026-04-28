@@ -115,7 +115,12 @@ jobs:
       - name: Run Gosec Security Scanner
         uses: securego/gosec@master
         with:
-          args: '-no-fail -fmt sarif -out results.sarif ./...'
+          # Generated protobuf code under agentic/gen/ uses unsafe.Pointer
+          # via google.golang.org/protobuf/runtime/protoimpl — standard for
+          # generated *.pb.go files and not auditable hand-written code.
+          # Excluding the directory matches the pattern in .golangci.yml
+          # which excludes *.pb.go from all linters.
+          args: '-no-fail -fmt sarif -out results.sarif -exclude-dir agentic/gen ./...'
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v4

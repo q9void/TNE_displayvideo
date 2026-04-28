@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://thenexusengine.com/schemas/agents.v1.json",
+  "title": "TNE Catalyst agents.json",
+  "description": "Schema for the agent registry served at /.well-known/agents.json. See PRD §7.4.",
+  "type": "object",
+  "required": ["version", "seller_id", "seller_domain", "agents"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema":       {"type": "string"},
+    "version":       {"type": "string", "enum": ["1.0"]},
+    "seller_id":     {"type": "string", "minLength": 1, "maxLength": 64},
+    "seller_domain": {"type": "string", "format": "hostname"},
+    "contact":       {"type": "string"},
+    "updated_at":    {"type": "string", "format": "date-time"},
+    "agents": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/agent"}
+    }
+  },
+  "definitions": {
+    "agent": {
+      "type": "object",
+      "required": ["id", "role", "endpoints", "lifecycles", "intents"],
+      "additionalProperties": true,
+      "properties": {
+        "id":           {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[a-zA-Z0-9._-]+$"},
+        "name":         {"type": "string"},
+        "role":         {"type": "string", "enum": ["segmentation", "floor", "shading", "margin", "metrics", "composite"]},
+        "vendor":       {"type": "string"},
+        "registry_ref": {"type": "string"},
+        "priority":     {"type": "integer", "minimum": 0, "maximum": 1000},
+        "tmax_ms":      {"type": "integer", "minimum": 1, "maximum": 500},
+        "essential":    {"type": "boolean"},
+        "endpoints": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["transport", "url", "auth"],
+            "additionalProperties": true,
+            "properties": {
+              "transport": {"type": "string", "enum": ["grpc", "grpcs", "mcp", "http"]},
+              "url":       {"type": "string"},
+              "auth":      {"type": "string", "enum": ["api_key_header", "mtls", "none"]}
+            }
+          }
+        },
+        "lifecycles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "enum": ["PUBLISHER_BID_REQUEST", "DSP_BID_RESPONSE"]}
+        },
+        "intents": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "enum": ["ACTIVATE_SEGMENTS", "ACTIVATE_DEALS", "SUPPRESS_DEALS", "ADJUST_DEAL_FLOOR", "ADJUST_DEAL_MARGIN", "BID_SHADE", "ADD_METRICS", "ADD_CIDS"]}
+        },
+        "requires": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "tcf_purposes": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 11}},
+            "precise_geo":  {"type": "boolean"}
+          }
+        },
+        "data_processing": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "categories":     {"type": "array", "items": {"type": "string"}},
+            "retention_days": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    }
+  }
+}
