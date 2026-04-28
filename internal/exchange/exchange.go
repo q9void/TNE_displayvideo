@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/thenexusengine/tne_springwire/agentic"
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/analytics"
 	"github.com/thenexusengine/tne_springwire/internal/fpd"
@@ -90,6 +91,14 @@ type Exchange struct {
 	// configMu protects fpdProcessor, eidFilter, and config.FPD
 	// for safe concurrent access during runtime config updates
 	configMu sync.RWMutex
+
+	// Agentic integration (IAB ARTF v1.0). Nil ⇒ feature disabled; the
+	// Hook A and Hook B sites in RunAuction short-circuit when agenticEnabled
+	// is false. Wired by cmd/server/server.go via WithAgentic.
+	agenticClient  *agentic.Client
+	agenticApplier *agentic.Applier
+	agenticStamper agentic.OriginatorStamper
+	agenticEnabled bool
 }
 
 // AuctionType defines the type of auction to run
@@ -308,6 +317,20 @@ func (e *Exchange) SetMetrics(m MetricsRecorder) {
 	e.configMu.Lock()
 	defer e.configMu.Unlock()
 	e.metrics = m
+}
+
+// WithAgentic wires the IAB ARTF v1.0 outbound integration onto an existing
+// Exchange. When invoked with non-nil client/applier, the two RunAuction
+// hooks (LIFECYCLE_PUBLISHER_BID_REQUEST pre-fanout, LIFECYCLE_DSP_BID_RESPONSE
+// post-fanout) are activated. Pass nil/nil to disable. Safe to call once
+// during boot; not goroutine-safe — intended to be called before RunAuction
+// is ever invoked.
+func (e *Exchange) WithAgentic(client *agentic.Client, applier *agentic.Applier, stamper agentic.OriginatorStamper) *Exchange {
+	e.agenticClient = client
+	e.agenticApplier = applier
+	e.agenticStamper = stamper
+	e.agenticEnabled = client != nil && applier != nil
+	return e
 }
 
 // Close shuts down the exchange and flushes pending events
@@ -1592,6 +1615,12 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 		}
 	}
 
+	// Hook A — IAB ARTF LIFECYCLE_PUBLISHER_BID_REQUEST. Fans out to
+	// configured extension-point agents and applies their mutations to the
+	// in-flight BidRequest before bidder fanout. No-op when agentic is
+	// disabled. Auction never fails because of agent outcomes.
+	agenticHookA(ctx, e, req)
+
 	// Call bidders in parallel
 	results := e.callBiddersWithFPD(ctx, req.BidRequest, selectedBidders, timeout, bidderFPD)
 
@@ -1792,6 +1821,13 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 			})
 		}
 	}
+
+	// Hook B — IAB ARTF LIFECYCLE_DSP_BID_RESPONSE. Fans out to
+	// configured extension-point agents and applies BID_SHADE /
+	// ADJUST_DEAL_MARGIN mutations to the collected bids before winner
+	// selection. No-op when agentic is disabled. Auction never fails
+	// because of agent outcomes.
+	agenticHookB(ctx, e, req, validBids)
 
 	// Apply auction logic (first-price or second-price)
 	auctionedBids := e.runAuctionLogic(validBids, impFloors)
