@@ -210,7 +210,14 @@ func (h *CatalystBidHandler) HandleBidRequest(w http.ResponseWriter, r *http.Req
 	log := logger.Log
 	startTime := time.Now()
 
-	// Respond to preflight immediately (CORS headers set by middleware)
+	// Set CORS headers defensively — middleware also sets these, but the
+	// handler must work standalone (tests that target the handler directly
+	// rely on this; production traffic gets the same headers either way).
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Respond to preflight immediately
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
 		return
