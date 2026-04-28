@@ -49,6 +49,7 @@ type Server struct {
 	rawDB             *sql.DB
 	db                *storage.BidderStore
 	publisher         *storage.PublisherStore
+	curator           *storage.CuratorStore // Curated-deals catalog (chunk 0.3)
 	idGraphStore      *storage.IDGraphStore
 	userSyncStore     *storage.UserSyncStore
 	redisClient       *redis.Client
@@ -150,6 +151,7 @@ func (s *Server) initDatabase() error {
 	s.rawDB = dbConn
 	s.db = storage.NewBidderStore(dbConn)
 	s.publisher = storage.NewPublisherStore(dbConn)
+	s.curator = storage.NewCuratorStore(dbConn) // curated-deals catalog
 
 	s.routingLoader = routing.NewLoader(s.publisher)
 	kargo.SetLoader(s.routingLoader)
@@ -259,6 +261,14 @@ func (s *Server) initExchange() {
 	// Wire up metrics for margin tracking
 	s.exchange.SetMetrics(s.metrics)
 	log.Info().Msg("Metrics connected to exchange for margin tracking")
+
+	// Wire curated-deals catalog. Nil-safe: when no DB is configured the
+	// catalog stays nil and hydration is a no-op (auction behaves identically
+	// to a build without curated-deals support).
+	if s.curator != nil {
+		s.exchange.WithCuratorCatalog(s.curator)
+		log.Info().Msg("Curated-deals catalog wired to exchange")
+	}
 
 	// Wire IAB ARTF agentic integration if enabled. The feature is fully
 	// gated behind AGENTIC_ENABLED — when off, this branch is skipped and
@@ -486,12 +496,15 @@ func (s *Server) initHandlers() {
 	dashboardHandler := endpoints.NewDashboardHandler()
 	metricsAPIHandler := endpoints.NewMetricsAPIHandler()
 	publisherAdminHandler := endpoints.NewPublisherAdminHandler(s.redisClient)
+	curatorAdminHandler := endpoints.NewCuratorAdminHandler(s.curator, s.rawDB)
 	sspAdminHandler := endpoints.NewSSPAdminHandler(s.publisher, "/admin/ssp-ids")
 	catalystAdminHandler := endpoints.NewOnboardingAdminHandler(s.publisher, s.redisClient, s.routingLoader, "/catalyst/admin", "assets")
 	mux.Handle("/admin/dashboard", dashboardHandler)
 	mux.Handle("/admin/metrics", metricsAPIHandler)
 	mux.Handle("/admin/publishers", publisherAdminHandler)
 	mux.Handle("/admin/publishers/", publisherAdminHandler)
+	mux.Handle("/admin/curators", middleware.AdminAuth(curatorAdminHandler))
+	mux.Handle("/admin/curators/", middleware.AdminAuth(curatorAdminHandler))
 	mux.Handle("/admin/ssp-ids", sspAdminHandler)
 	mux.Handle("/admin/ssp-ids/", sspAdminHandler)
 	mux.Handle("/catalyst/admin", catalystAdminHandler)
@@ -503,6 +516,9 @@ func (s *Server) initHandlers() {
 	log.Info().Msg("Admin tag generator registered: /admin/adtag/generator")
 	log.Info().Msg("Onboarding admin registered: /catalyst/admin")
 	log.Info().Msg("SSP ID manager registered: /admin/ssp-ids")
+	if s.curator != nil {
+		log.Info().Msg("Curator admin endpoints registered: /admin/curators, /admin/curators/{id}")
+	}
 
 	// Version endpoint (similar to Prebid Server)
 	mux.HandleFunc("/version", versionHandler)
