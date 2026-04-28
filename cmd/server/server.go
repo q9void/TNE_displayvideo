@@ -13,19 +13,19 @@ import (
 
 	"github.com/thenexusengine/tne_springwire/agentic"
 	agenticEndpoints "github.com/thenexusengine/tne_springwire/agentic/endpoints"
-	"github.com/thenexusengine/tne_springwire/internal/bidcache"
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/appnexus"
 	// _ "github.com/thenexusengine/tne_springwire/internal/adapters/demo" // Disabled - no demo bids in production
 	"github.com/thenexusengine/tne_springwire/internal/adapters/kargo"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/pubmatic"
+	"github.com/thenexusengine/tne_springwire/internal/adapters/routing"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/rubicon"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/sovrn"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/triplelift"
-	"github.com/thenexusengine/tne_springwire/internal/adapters/routing"
 	"github.com/thenexusengine/tne_springwire/internal/analytics"
 	analyticsIDR "github.com/thenexusengine/tne_springwire/internal/analytics/idr"
 	analyticsPG "github.com/thenexusengine/tne_springwire/internal/analytics/postgres"
+	"github.com/thenexusengine/tne_springwire/internal/bidcache"
 	pbsconfig "github.com/thenexusengine/tne_springwire/internal/config"
 	"github.com/thenexusengine/tne_springwire/internal/endpoints"
 	"github.com/thenexusengine/tne_springwire/internal/exchange"
@@ -549,7 +549,7 @@ func (s *Server) buildHandler(mux *http.ServeMux) http.Handler {
 	// Initialize middleware
 	cors := middleware.NewCORS(middleware.DefaultCORSConfig())
 	security := middleware.NewSecurity(nil)
-	adminAuth := middleware.AdminAuth  // Admin API key authentication
+	adminAuth := middleware.AdminAuth // Admin API key authentication
 	publisherAuth := middleware.NewPublisherAuth(middleware.DefaultPublisherAuthConfig())
 	sizeLimiter := middleware.NewSizeLimiter(middleware.DefaultSizeLimitConfig())
 	gzipMiddleware := middleware.NewGzip(middleware.DefaultGzipConfig())
@@ -583,7 +583,7 @@ func (s *Server) buildHandler(mux *http.ServeMux) http.Handler {
 	handler = publisherAuth.Middleware(handler)
 	handler = sizeLimiter.Middleware(handler)
 	handler = loggingMiddleware(handler)
-	handler = adminAuth(handler)  // Admin endpoint authentication
+	handler = adminAuth(handler) // Admin endpoint authentication
 	handler = security.Middleware(handler)
 	handler = cors.Middleware(handler)
 
