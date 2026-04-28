@@ -4,15 +4,17 @@ go 1.24.0
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
-	github.com/alicebob/miniredis/v2 v2.35.0
-	github.com/lib/pq v1.10.9
+	github.com/alicebob/miniredis/v2 v2.37.0
+	github.com/lib/pq v1.12.3
 	github.com/mssola/useragent v1.0.0
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/prometheus/client_golang v1.21.1
 	github.com/redis/go-redis/v9 v9.17.2
-	github.com/rs/zerolog v1.34.0
+	github.com/rs/zerolog v1.35.1
 	github.com/stretchr/testify v1.10.0
 	github.com/xeipuuv/gojsonschema v1.2.0
+	google.golang.org/grpc v1.80.0
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
@@ -23,8 +25,8 @@ require (
 	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
-	github.com/mattn/go-colorable v0.1.13 // indirect
-	github.com/mattn/go-isatty v0.0.19 // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/oschwald/maxminddb-golang v1.13.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
@@ -38,7 +40,5 @@ require (
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
-	google.golang.org/grpc v1.80.0 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

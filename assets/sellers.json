@@ -26,6 +26,12 @@
       "name": "GotDigital Reach, LLC",
       "domain": "gotsport.com",
       "seller_type": "PUBLISHER"
+    },
+    {
+      "seller_id": "NXS004",
+      "name": "Inline Technologies",
+      "domain": "getinline.io",
+      "seller_type": "PUBLISHER"
     }
   ]
 }

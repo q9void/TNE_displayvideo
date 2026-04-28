@@ -447,6 +447,10 @@ func TestServer_InitRedis_WithInvalidURL(t *testing.T) {
 }
 
 func TestConfigToExchangeConfig(t *testing.T) {
+	// EventRecordEnabled is wired from the IDR_EVENT_RECORD_ENABLED env var
+	// (see ToExchangeConfig in config.go). Set it for the duration of the test.
+	t.Setenv("IDR_EVENT_RECORD_ENABLED", "true")
+
 	cfg := &ServerConfig{
 		Timeout:                   2500 * time.Millisecond,
 		IDREnabled:                true,
@@ -1096,7 +1100,10 @@ func TestLoggingMiddleware_HeadersSet(t *testing.T) {
 		t.Skip("Test server not initialized")
 	}
 
-	req := httptest.NewRequest("GET", "/health", nil)
+	// /health (and other high-frequency paths) are intentionally skipped by
+	// the logging middleware (see noLogPaths in server.go), so they don't
+	// get an X-Request-ID. Use a path outside that allowlist.
+	req := httptest.NewRequest("GET", "/v1/bid", nil)
 	rr := httptest.NewRecorder()
 
 	testServer.httpServer.Handler.ServeHTTP(rr, req)
