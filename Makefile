@@ -1,4 +1,4 @@
-.PHONY: help test bench load-test load-baseline load-spike load-soak load-stress run build clean
+.PHONY: help test bench load-test load-baseline load-spike load-soak load-stress run build clean generate-protos install-proto-tools
 
 # Default target
 .DEFAULT_GOAL := help
@@ -95,6 +95,26 @@ install-k6: ## Install k6 (macOS only)
 docs: ## Generate documentation
 	godoc -http=:6060 &
 	@echo "Documentation server running at http://localhost:6060"
+
+# Agentic / ARTF protos
+install-proto-tools: ## Install protoc plugins for agentic codegen (devs only; CI does not run this)
+	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+generate-protos: ## Regenerate agentic/gen/ from agentic/proto/ (devs only; CI does not run this)
+	@command -v protoc >/dev/null 2>&1 || { echo "protoc v25+ required (edition 2023)"; exit 1; }
+	@command -v protoc-gen-go >/dev/null 2>&1 || { echo "run 'make install-proto-tools' first"; exit 1; }
+	@command -v protoc-gen-go-grpc >/dev/null 2>&1 || { echo "run 'make install-proto-tools' first"; exit 1; }
+	rm -rf agentic/gen
+	mkdir -p agentic/gen
+	protoc \
+	  --proto_path=agentic/proto \
+	  --go_out=agentic/gen --go_opt=paths=source_relative \
+	  --go-grpc_out=agentic/gen --go-grpc_opt=paths=source_relative \
+	  agentic/proto/iabtechlab/openrtb/v26/openrtb.proto \
+	  agentic/proto/iabtechlab/bidstream/mutation/v1/agenticrtbframework.proto \
+	  agentic/proto/iabtechlab/bidstream/mutation/v1/agenticrtbframeworkservices.proto
+	@echo "✅ Protos regenerated. Commit agentic/gen/ with the proto changes."
 
 # Pre-commit checks
 pre-commit: fmt vet test ## Run pre-commit checks
