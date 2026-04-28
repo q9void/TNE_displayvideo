@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/thenexusengine/tne_springwire/agentic"
+	"github.com/thenexusengine/tne_springwire/agentic/adcp"
 	agenticEndpoints "github.com/thenexusengine/tne_springwire/agentic/endpoints"
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/appnexus"
@@ -58,6 +59,11 @@ type Server struct {
 	// Agentic (IAB ARTF v1.0). Populated only when AGENTIC_ENABLED=true.
 	agenticRegistry *agentic.Registry
 	agenticClient   *agentic.Client
+
+	// AdCP (Ad Context Protocol). Populated only when ADCP_ENABLED=true.
+	// Peer to the Agentic stack — different protocol, different surface.
+	adcpRegistry *adcp.Registry
+	adcpClient   *adcp.Client
 }
 
 // NewServer creates a new PBS server instance
@@ -304,6 +310,45 @@ func (s *Server) initExchange() {
 			Int("tmax_ms", s.config.Agentic.TmaxMs).
 			Bool("shade_disabled", s.config.Agentic.DisableShadeIntent).
 			Msg("IAB ARTF agentic integration enabled")
+	}
+
+	// Wire AdCP (Ad Context Protocol) integration if enabled. Peer to the
+	// ARTF block above — independent flag, independent registry. Phase 1
+	// loads the registry and constructs the client; the client's invoke()
+	// returns ErrNotImplemented until Phase 2 ships the MCP transport,
+	// so enabling ADCP_ENABLED=true is safe in production.
+	if s.config.AdCP != nil && s.config.AdCP.Enabled {
+		reg, err := adcp.LoadRegistry(s.config.AdCP.AgentsPath, s.config.AdCP.SchemaPath)
+		if err != nil {
+			log.Fatal().Err(err).Msg("AdCP enabled but adcp_agents.json failed to load")
+		}
+		if reg.SellerID() != s.config.AdCP.SellerID {
+			log.Warn().
+				Str("env_seller_id", s.config.AdCP.SellerID).
+				Str("doc_seller_id", reg.SellerID()).
+				Msg("ADCP_SELLER_ID does not match seller_id in adcp_agents.json")
+		}
+		client, err := adcp.NewClient(reg, adcp.ClientConfig{
+			DefaultTmaxMs:           s.config.AdCP.TmaxMs,
+			AuctionSafetyMs:         s.config.AdCP.AuctionSafetyMs,
+			APIKey:                  s.config.AdCP.APIKey,
+			PerAgentAPIKeys:         s.config.AdCP.PerAgentAPIKeys,
+			CircuitFailureThreshold: s.config.AdCP.CircuitFailureThreshold,
+			CircuitSuccessThreshold: s.config.AdCP.CircuitSuccessThreshold,
+			CircuitTimeout:          time.Duration(s.config.AdCP.CircuitTimeoutSeconds) * time.Second,
+			MaxSignalsPerResponse:   s.config.AdCP.MaxSignalsPerResponse,
+			AllowInsecure:           s.config.AdCP.AllowInsecureHTTP,
+		})
+		if err != nil {
+			log.Fatal().Err(err).Msg("AdCP client failed to construct")
+		}
+		s.adcpRegistry = reg
+		s.adcpClient = client
+		log.Info().
+			Int("agents_count", reg.AgentCount()).
+			Str("seller_id", reg.SellerID()).
+			Int("tmax_ms", s.config.AdCP.TmaxMs).
+			Msg("AdCP integration enabled (Phase 1 scaffold — invoke=stub)")
 	}
 }
 

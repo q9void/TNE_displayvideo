@@ -45,6 +45,29 @@ type ServerConfig struct {
 
 	// Agentic (IAB ARTF v1.0). nil ⇒ feature disabled. See agentic/.
 	Agentic *AgenticConfig
+
+	// AdCP (Ad Context Protocol). nil ⇒ feature disabled. See agentic/adcp/.
+	// Peer to Agentic — different protocol (MCP/JSON over HTTPS) and a
+	// different capability surface. The two flags are independent.
+	AdCP *AdCPConfig
+}
+
+// AdCPConfig holds the Ad Context Protocol integration settings.
+// Populated only when ADCP_ENABLED=true at boot. See agentic/adcp/README.md.
+type AdCPConfig struct {
+	Enabled                 bool
+	AgentsPath              string
+	SchemaPath              string
+	TmaxMs                  int
+	AuctionSafetyMs         int
+	SellerID                string
+	APIKey                  string
+	PerAgentAPIKeys         map[string]string // agent_id → key
+	CircuitFailureThreshold int
+	CircuitSuccessThreshold int
+	CircuitTimeoutSeconds   int
+	MaxSignalsPerResponse   int
+	AllowInsecureHTTP       bool
 }
 
 // AgenticConfig holds the IAB Agentic RTB Framework integration settings.
@@ -158,7 +181,53 @@ func ParseConfig() *ServerConfig {
 		}
 	}
 
+	// Parse AdCP (Ad Context Protocol) config. Default-off behind ADCP_ENABLED.
+	if getEnvBoolOrDefault("ADCP_ENABLED", false) {
+		cfg.AdCP = &AdCPConfig{
+			Enabled:                 true,
+			AgentsPath:              getEnvOrDefault("ADCP_AGENTS_PATH", "agentic/adcp/assets/adcp_agents.json"),
+			SchemaPath:              getEnvOrDefault("ADCP_SCHEMA_PATH", "agentic/adcp/assets/adcp_agents.schema.json"),
+			TmaxMs:                  getEnvIntOrDefault("ADCP_TMAX_MS", 30),
+			AuctionSafetyMs:         getEnvIntOrDefault("ADCP_SAFETY_MS", 50),
+			SellerID:                getEnvOrDefault("ADCP_SELLER_ID", "9131"),
+			APIKey:                  os.Getenv("ADCP_API_KEY"),
+			PerAgentAPIKeys:         parseADCPPerAgentKeys(),
+			CircuitFailureThreshold: getEnvIntOrDefault("ADCP_CIRCUIT_FAILURE_THRESHOLD", 5),
+			CircuitSuccessThreshold: getEnvIntOrDefault("ADCP_CIRCUIT_SUCCESS_THRESHOLD", 2),
+			CircuitTimeoutSeconds:   getEnvIntOrDefault("ADCP_CIRCUIT_TIMEOUT_SECONDS", 30),
+			MaxSignalsPerResponse:   getEnvIntOrDefault("ADCP_MAX_SIGNALS_PER_RESPONSE", 256),
+			AllowInsecureHTTP:       getEnvBoolOrDefault("ADCP_ALLOW_INSECURE", false),
+		}
+	}
+
 	return cfg
+}
+
+// parseADCPPerAgentKeys scans env for ADCP_API_KEY_<AGENT_ID> entries.
+// Mirrors parseAgenticPerAgentKeys — operators add a one-off env var per
+// vendor without code changes.
+func parseADCPPerAgentKeys() map[string]string {
+	out := map[string]string{}
+	const prefix = "ADCP_API_KEY_"
+	for _, kv := range os.Environ() {
+		eq := -1
+		for i := 0; i < len(kv); i++ {
+			if kv[i] == '=' {
+				eq = i
+				break
+			}
+		}
+		if eq < 0 {
+			continue
+		}
+		k, v := kv[:eq], kv[eq+1:]
+		if k == "ADCP_API_KEY" || !startsWith(k, prefix) {
+			continue
+		}
+		raw := k[len(prefix):]
+		out[raw] = v
+	}
+	return out
 }
 
 // parseAgenticPerAgentKeys scans env for AGENTIC_API_KEY_<AGENT_ID> entries.
@@ -405,6 +474,25 @@ func (c *ServerConfig) Validate() error {
 		// In production, plain grpc:// must not be allowed.
 		if isProduction() && c.Agentic.AllowInsecureGRPC {
 			return fmt.Errorf("AGENTIC_ALLOW_INSECURE=true is not permitted in production")
+		}
+	}
+
+	// Validate AdCP config when enabled.
+	if c.AdCP != nil && c.AdCP.Enabled {
+		if c.AdCP.AgentsPath == "" {
+			return fmt.Errorf("ADCP_AGENTS_PATH is required when ADCP_ENABLED=true")
+		}
+		if c.AdCP.SchemaPath == "" {
+			return fmt.Errorf("ADCP_SCHEMA_PATH is required when ADCP_ENABLED=true")
+		}
+		if c.AdCP.SellerID == "" {
+			return fmt.Errorf("ADCP_SELLER_ID is required when ADCP_ENABLED=true")
+		}
+		if c.AdCP.TmaxMs < 5 || c.AdCP.TmaxMs > 500 {
+			return fmt.Errorf("ADCP_TMAX_MS must be between 5 and 500, got %d", c.AdCP.TmaxMs)
+		}
+		if isProduction() && c.AdCP.AllowInsecureHTTP {
+			return fmt.Errorf("ADCP_ALLOW_INSECURE=true is not permitted in production")
 		}
 	}
 
