@@ -47,6 +47,23 @@ func (m *MultiModule) LogVideoObject(ctx context.Context, video *VideoObject) er
 	return nil
 }
 
+// AckSignalReceipts broadcasts ack updates to all modules.
+func (m *MultiModule) AckSignalReceipts(ctx context.Context, acks []SignalReceiptAck) error {
+	if len(acks) == 0 {
+		return nil
+	}
+	for _, module := range m.modules {
+		if err := module.AckSignalReceipts(ctx, acks); err != nil {
+			logger.Log.Warn().
+				Err(err).
+				Str("module", fmt.Sprintf("%T", module)).
+				Int("acks", len(acks)).
+				Msg("Analytics module failed to ack signal receipts")
+		}
+	}
+	return nil
+}
+
 // LogSignalReceipts broadcasts curated-deal signal receipts to all modules.
 func (m *MultiModule) LogSignalReceipts(ctx context.Context, receipts []SignalReceipt) error {
 	if len(receipts) == 0 {

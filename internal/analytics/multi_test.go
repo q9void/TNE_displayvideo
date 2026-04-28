@@ -31,6 +31,10 @@ func (m *mockModule) LogSignalReceipts(_ context.Context, _ []SignalReceipt) err
 	return m.logErr
 }
 
+func (m *mockModule) AckSignalReceipts(_ context.Context, _ []SignalReceiptAck) error {
+	return m.logErr
+}
+
 func (m *mockModule) Shutdown() error {
 	return m.shutdownErr
 }

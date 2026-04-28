@@ -131,6 +131,11 @@ func (a *Adapter) LogSignalReceipts(_ context.Context, _ []analytics.SignalRecei
 	return nil
 }
 
+// AckSignalReceipts is a no-op for the IDR service adapter.
+func (a *Adapter) AckSignalReceipts(_ context.Context, _ []analytics.SignalReceiptAck) error {
+	return nil
+}
+
 // Shutdown flushes any buffered events
 func (a *Adapter) Shutdown() error {
 	// Flush any buffered events via client

@@ -187,6 +187,58 @@ func CuratorContextFromCtx(ctx context.Context) *CuratorContext {
 //     our catalog yet. Phase 1.2 tightens this to enforce publisher
 //     allow-lists.
 //   - Catalog lookup error: warning logged, the deal is treated as unmatched.
+// hydrateCuratedDealsFor wraps hydrateCuratedDeals with a publisher allow-list
+// check. When publisherDBID > 0 and the curator catalog reports the publisher
+// is NOT allow-listed for a given curator, that curator's deals are dropped
+// from the hydrated set (the inbound deal entry remains in pmp.deals so
+// downstream code can still see it; it just won't get curator overlay,
+// signal passthrough, or schain attribution).
+func (e *Exchange) hydrateCuratedDealsFor(
+	ctx context.Context,
+	req *openrtb.BidRequest,
+	publisherDBID int,
+) *CuratorContext {
+	cc := e.hydrateCuratedDeals(ctx, req)
+	if e.curatorCatalog == nil || publisherDBID <= 0 || len(cc.DealsByID) == 0 {
+		return cc
+	}
+
+	// Drop curator deals whose curator isn't allow-listed for this publisher.
+	for dealID, deal := range cc.DealsByID {
+		ok, err := e.curatorCatalog.PublisherAllowedForCurator(ctx, publisherDBID, deal.CuratorID)
+		if err != nil {
+			logger.Log.Warn().
+				Err(err).
+				Str("deal_id", dealID).
+				Str("curator_id", deal.CuratorID).
+				Int("publisher_db_id", publisherDBID).
+				Msg("publisher allow-list check failed; keeping deal hydrated (fail-open)")
+			continue
+		}
+		if !ok {
+			logger.Log.Info().
+				Str("deal_id", dealID).
+				Str("curator_id", deal.CuratorID).
+				Int("publisher_db_id", publisherDBID).
+				Msg("publisher not allow-listed for curator; deal will not receive curator overlay")
+			delete(cc.DealsByID, dealID)
+		}
+	}
+	// If all of a curator's deals were dropped, remove the curator from the
+	// schain attribution set too — they didn't actually contribute to this
+	// auction's permitted set.
+	stillReferenced := make(map[string]struct{}, len(cc.DealsByID))
+	for _, deal := range cc.DealsByID {
+		stillReferenced[deal.CuratorID] = struct{}{}
+	}
+	for curatorID := range cc.CuratorsByID {
+		if _, ok := stillReferenced[curatorID]; !ok {
+			delete(cc.CuratorsByID, curatorID)
+		}
+	}
+	return cc
+}
+
 func (e *Exchange) hydrateCuratedDeals(ctx context.Context, req *openrtb.BidRequest) *CuratorContext {
 	cc := &CuratorContext{
 		DealsByID:    make(map[string]*storage.CuratorDeal),
@@ -251,6 +303,165 @@ func (e *Exchange) hydrateCuratedDeals(ctx context.Context, req *openrtb.BidRequ
 			Msg("curated deals hydrated")
 	}
 	return cc
+}
+
+// collectSignalReceiptAcks scans bidder results for `bid.ext.signal_receipt`
+// (any truthy presence) and returns one ack per (bidder, deal_id) pair.
+// Used to mark previously-recorded signal receipts as acknowledged in the
+// audit table so curators can prove the DSP actually got the payload.
+//
+// Looks at bid.Ext only — no spec change required from adapters. Adapters
+// that already pass through bid.ext verbatim (the default) will support
+// acks transparently when their DSPs include the field.
+func collectSignalReceiptAcks(auctionID string, results map[string]*BidderResult) []analytics.SignalReceiptAck {
+	if len(results) == 0 {
+		return nil
+	}
+	now := time.Now()
+	var acks []analytics.SignalReceiptAck
+	for bidderCode, br := range results {
+		if br == nil {
+			continue
+		}
+		seenDeals := make(map[string]struct{}, len(br.Bids))
+		for _, tb := range br.Bids {
+			if tb == nil || tb.Bid == nil || tb.Bid.DealID == "" || len(tb.Bid.Ext) == 0 {
+				continue
+			}
+			if !hasSignalReceiptAck(tb.Bid.Ext) {
+				continue
+			}
+			if _, dup := seenDeals[tb.Bid.DealID]; dup {
+				continue
+			}
+			seenDeals[tb.Bid.DealID] = struct{}{}
+			acks = append(acks, analytics.SignalReceiptAck{
+				AuctionID:  auctionID,
+				BidderCode: bidderCode,
+				DealID:     tb.Bid.DealID,
+				AckedAt:    now,
+			})
+		}
+	}
+	return acks
+}
+
+// hasSignalReceiptAck looks for any truthy "signal_receipt" key in a bid's
+// ext blob. Accepts bool true, string "1"/"true"/"yes", or any non-null
+// object — the precise shape is up to the adapter/DSP. Absent or false is
+// treated as no-ack.
+func hasSignalReceiptAck(ext []byte) bool {
+	if len(ext) == 0 {
+		return false
+	}
+	type ackProbe struct {
+		SignalReceipt json.RawMessage `json:"signal_receipt"`
+	}
+	var probe ackProbe
+	if err := json.Unmarshal(ext, &probe); err != nil {
+		return false
+	}
+	if len(probe.SignalReceipt) == 0 {
+		return false
+	}
+	s := string(probe.SignalReceipt)
+	if s == "false" || s == "null" || s == `""` || s == "0" {
+		return false
+	}
+	return true
+}
+
+// filterBiddersForCuratedDeals restricts the selected-bidder slice when the
+// auction contains a private-marketplace deal (any imp.pmp.private_auction=1).
+//
+// In strict private-marketplace mode every accepted bidder must either:
+//   - Have a curator_seats entry whose seat_id appears in the deal's wseat
+//     for the deal's curator, OR
+//   - Be on the deal's wseat directly when no curator catalog mapping exists
+//     (graceful fallback for upstream-SSP curators not yet onboarded here).
+//
+// Bidders not on any deal's permitted seat list are dropped. Returns the
+// input unchanged when there are no PMP deals or no impression marks
+// private_auction=1 — open auctions are unaffected.
+//
+// Catalog argument MAY be nil (curated-deals support disabled); in that case
+// we fall back to wseat-only matching.
+func filterBiddersForCuratedDeals(
+	ctx context.Context,
+	imps []openrtb.Imp,
+	bidders []string,
+	cc *CuratorContext,
+	catalog CuratorCatalog,
+) []string {
+	// Determine whether ANY imp is a strict PMP. If none, leave the bidder
+	// list alone — curators can still ride open auctions.
+	strict := false
+	for _, imp := range imps {
+		if imp.PMP != nil && imp.PMP.PrivateAuction == 1 && len(imp.PMP.Deals) > 0 {
+			strict = true
+			break
+		}
+	}
+	if !strict {
+		return bidders
+	}
+
+	// Build the union of permitted bidders from all PMP deals.
+	permitted := make(map[string]struct{}, len(bidders))
+	for _, imp := range imps {
+		if imp.PMP == nil || imp.PMP.PrivateAuction != 1 {
+			continue
+		}
+		for _, d := range imp.PMP.Deals {
+			// Direct wseat match → permit any bidder whose adapter code
+			// appears verbatim. Used by upstream curators who pass
+			// adapter codes (e.g. "rubicon") in wseat.
+			for _, w := range d.WSeat {
+				permitted[w] = struct{}{}
+			}
+			// Catalog-mediated match: deal hydrated → join with curator_seats.
+			if cc == nil || catalog == nil {
+				continue
+			}
+			catDeal, ok := cc.DealsByID[d.ID]
+			if !ok {
+				continue
+			}
+			for _, b := range bidders {
+				seats, err := catalog.SeatsForCurator(ctx, catDeal.CuratorID, b)
+				if err != nil || len(seats) == 0 {
+					continue
+				}
+				seatSet := make(map[string]struct{}, len(seats))
+				for _, s := range seats {
+					seatSet[s] = struct{}{}
+				}
+				for _, w := range catDeal.WSeat {
+					if _, ok := seatSet[w]; ok {
+						permitted[b] = struct{}{}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	out := make([]string, 0, len(bidders))
+	for _, b := range bidders {
+		if _, ok := permitted[b]; ok {
+			out = append(out, b)
+		}
+	}
+	if len(out) == 0 {
+		// Defensive: if no bidder was permitted, log loud and return the
+		// input unchanged. Better to attempt the auction than to silently
+		// no-bid.
+		logger.Log.Warn().
+			Int("bidders_in", len(bidders)).
+			Msg("curator fanout filter: PMP strict mode but no permitted bidders; falling back to all bidders")
+		return bidders
+	}
+	return out
 }
 
 // recordSignalReceipts builds one analytics.SignalReceipt per hydrated deal

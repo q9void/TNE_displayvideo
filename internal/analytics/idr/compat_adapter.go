@@ -116,6 +116,11 @@ func (a *CompatAdapter) LogSignalReceipts(_ context.Context, _ []analytics.Signa
 	return nil
 }
 
+// AckSignalReceipts is a no-op for the legacy IDR compat adapter.
+func (a *CompatAdapter) AckSignalReceipts(_ context.Context, _ []analytics.SignalReceiptAck) error {
+	return nil
+}
+
 func (a *CompatAdapter) Shutdown() error {
 	return a.recorder.Close()
 }

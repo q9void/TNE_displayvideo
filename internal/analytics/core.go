@@ -17,7 +17,21 @@ type Module interface {
 	// /admin/curators/{id}/signal-receipts audit. Best-effort — analytics
 	// failures must not fail the auction.
 	LogSignalReceipts(ctx context.Context, receipts []SignalReceipt) error
+	// AckSignalReceipts marks previously-recorded receipts as acknowledged
+	// when the bidder echoes bid.ext.signal_receipt back in its response.
+	// Idempotent — repeated calls update acknowledged_at to the latest.
+	AckSignalReceipts(ctx context.Context, acks []SignalReceiptAck) error
 	Shutdown() error
+}
+
+// SignalReceiptAck identifies a (auction, bidder, deal) triple to mark as
+// acknowledged. The bidder side opts in by setting bid.ext.signal_receipt
+// (any truthy value) on responses for curated-deal bids.
+type SignalReceiptAck struct {
+	AuctionID  string
+	BidderCode string
+	DealID     string
+	AckedAt    time.Time
 }
 
 // AuctionObject contains complete auction transaction data

@@ -428,6 +428,12 @@ type AuctionRequest struct {
 	Timeout    time.Duration
 	Account    string
 	Debug      bool
+	// PublisherDBID is the publishers_new.id integer for the resolved
+	// publisher, when known. Populated by the inbound endpoint after
+	// account/domain → publisher resolution. Zero value disables the
+	// per-publisher curator allow-list check (curator catalog stays
+	// permissive — useful in tests and for lazy onboarding).
+	PublisherDBID int
 }
 
 // AuctionResponse contains auction results
@@ -1544,23 +1550,30 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 
 	selectedBidders = filterBiddersWithImpExt(req.BidRequest.Imp, selectedBidders)
 
+	// Hydrate curated deals from the catalog. Walks imp.pmp.deals[] and
+	// overlays missing wseat / bidfloor / etc. from curator_deals; collects
+	// the curators participating in this auction so downstream stages
+	// (fanout filter, clone signal-passthrough, schain augmentation,
+	// analytics) can attribute revenue and prove signals reached the right
+	// DSPs. MUST run before eidFilter so the original EID set is
+	// snapshotted into the curator context for selective re-attachment on
+	// permitted bidders.
+	curatorCtx := e.hydrateCuratedDealsFor(ctx, req.BidRequest, req.PublisherDBID)
+	ctx = WithCuratorContext(ctx, curatorCtx)
+
+	// Strict-PMP filter: when any impression marks private_auction=1, restrict
+	// fanout to bidders permitted on the deal's wseat (directly or via the
+	// curator catalog's curator_seats join). No-op for open auctions.
+	selectedBidders = filterBiddersForCuratedDeals(
+		ctx, req.BidRequest.Imp, selectedBidders, curatorCtx, e.curatorCatalog,
+	)
+
 	response.DebugInfo.SelectedBidders = selectedBidders
 
 	logger.Log.Debug().
 		Strs("selected_bidders", selectedBidders).
 		Int("count", len(selectedBidders)).
 		Msg("Bidders selected for auction")
-
-	// Hydrate curated deals from the catalog. Walks imp.pmp.deals[] and
-	// overlays missing wseat / bidfloor / etc. from curator_deals; collects
-	// the curators participating in this auction so downstream stages
-	// (clone signal-passthrough, schain augmentation, analytics) can
-	// attribute revenue and prove signals reached the right DSPs.
-	//
-	// MUST run before eidFilter so the original EID set is snapshotted into
-	// the curator context for selective re-attachment on permitted bidders.
-	curatorCtx := e.hydrateCuratedDeals(ctx, req.BidRequest)
-	ctx = WithCuratorContext(ctx, curatorCtx)
 
 	// Process FPD and filter EIDs (using snapshotted processor/filter for consistency)
 	var bidderFPD fpd.BidderFPD
@@ -2039,6 +2052,19 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 						Str("auction_id", req.BidRequest.ID).
 						Int("receipts", len(receipts)).
 						Msg("Failed to log curator signal receipts")
+				}
+			}
+
+			// Collect bidder acks from bid.ext.signal_receipt and forward
+			// to analytics so admins can see which DSPs actually received
+			// the signal payload they were sent.
+			if acks := collectSignalReceiptAcks(req.BidRequest.ID, response.BidderResults); len(acks) > 0 {
+				if err := e.analytics.AckSignalReceipts(ctx, acks); err != nil {
+					logger.Log.Warn().
+						Err(err).
+						Str("auction_id", req.BidRequest.ID).
+						Int("acks", len(acks)).
+						Msg("Failed to ack curator signal receipts")
 				}
 			}
 		}

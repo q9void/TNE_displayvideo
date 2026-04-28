@@ -47,6 +47,36 @@ func (a *Adapter) LogSignalReceipts(_ context.Context, receipts []analytics.Sign
 	return nil
 }
 
+// AckSignalReceipts marks rows in signal_receipts as acknowledged when the
+// bidder echoes bid.ext.signal_receipt back. Idempotent: repeated acks
+// update acknowledged_at to the latest timestamp.
+func (a *Adapter) AckSignalReceipts(_ context.Context, acks []analytics.SignalReceiptAck) error {
+	if len(acks) == 0 || a.db == nil {
+		return nil
+	}
+	go a.persistAcks(acks)
+	return nil
+}
+
+func (a *Adapter) persistAcks(acks []analytics.SignalReceiptAck) {
+	for _, ack := range acks {
+		_, err := a.db.Exec(`
+			UPDATE signal_receipts
+			SET acknowledged_at = $4
+			WHERE auction_id = $1 AND bidder_code = $2 AND deal_id = $3`,
+			ack.AuctionID, ack.BidderCode, ack.DealID, ack.AckedAt,
+		)
+		if err != nil {
+			logger.Log.Warn().
+				Err(err).
+				Str("auction_id", ack.AuctionID).
+				Str("bidder_code", ack.BidderCode).
+				Str("deal_id", ack.DealID).
+				Msg("postgres analytics: failed to ack signal_receipt")
+		}
+	}
+}
+
 func (a *Adapter) persistReceipts(receipts []analytics.SignalReceipt) {
 	for _, r := range receipts {
 		schainJSON := []byte("null")

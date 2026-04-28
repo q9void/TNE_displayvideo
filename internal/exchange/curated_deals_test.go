@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"testing"
 
+	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
 	"github.com/thenexusengine/tne_springwire/internal/storage"
 )
@@ -26,8 +27,23 @@ func (f *fakeCatalog) LoadCurator(_ context.Context, id string) (*storage.Curato
 func (f *fakeCatalog) SeatsForCurator(_ context.Context, curatorID, bidderCode string) ([]string, error) {
 	return f.seats[curatorID+"|"+bidderCode], nil
 }
-func (f *fakeCatalog) PublisherAllowedForCurator(_ context.Context, _ int, _ string) (bool, error) {
-	return true, nil
+func (f *fakeCatalog) PublisherAllowedForCurator(_ context.Context, pub int, cur string) (bool, error) {
+	if f.allowList == nil {
+		return true, nil
+	}
+	return f.allowList[cur+"|"+intKey(pub)], nil
+}
+
+func intKey(v int) string {
+	if v == 0 {
+		return "0"
+	}
+	digits := make([]byte, 0, 6)
+	for v > 0 {
+		digits = append([]byte{byte('0' + v%10)}, digits...)
+		v /= 10
+	}
+	return string(digits)
 }
 
 func TestHydrateCuratedDeals_OverlaysMissingFields(t *testing.T) {
@@ -260,6 +276,169 @@ func TestPrependCuratorSChainNodes_SkipsCuratorsMissingASI(t *testing.T) {
 	prependCuratorSChainNodes(req, curators, 10)
 	if got := len(req.Source.SChain.Nodes); got != 1 || req.Source.SChain.Nodes[0].ASI != "c2.example" {
 		t.Fatalf("expected only c2 appended, got %+v", req.Source.SChain.Nodes)
+	}
+}
+
+func TestFilterBiddersForCuratedDeals_OpenAuctionUnchanged(t *testing.T) {
+	// PrivateAuction=0 → never restrict fanout.
+	imps := []openrtb.Imp{{
+		PMP: &openrtb.PMP{PrivateAuction: 0, Deals: []openrtb.Deal{{ID: "D"}}},
+	}}
+	got := filterBiddersForCuratedDeals(context.Background(), imps,
+		[]string{"rubicon", "pubmatic"}, nil, nil)
+	if len(got) != 2 {
+		t.Fatalf("expected unchanged, got %v", got)
+	}
+}
+
+func TestFilterBiddersForCuratedDeals_StrictPMP_DirectWSeat(t *testing.T) {
+	// Inbound deal carries wseat with adapter codes — no catalog needed.
+	imps := []openrtb.Imp{{
+		PMP: &openrtb.PMP{PrivateAuction: 1, Deals: []openrtb.Deal{{
+			ID: "D1", WSeat: []string{"rubicon"},
+		}}},
+	}}
+	got := filterBiddersForCuratedDeals(context.Background(), imps,
+		[]string{"rubicon", "pubmatic"}, nil, nil)
+	if len(got) != 1 || got[0] != "rubicon" {
+		t.Fatalf("expected only rubicon permitted, got %v", got)
+	}
+}
+
+func TestFilterBiddersForCuratedDeals_StrictPMP_CatalogJoin(t *testing.T) {
+	// Inbound deal has no wseat; catalog has curator_seats(c1,rubicon,seat-c1-rub)
+	// and the hydrated deal lists wseat=[seat-c1-rub] → rubicon permitted.
+	cat := &fakeCatalog{
+		seats: map[string][]string{
+			"c1|rubicon": {"seat-c1-rub"},
+		},
+	}
+	cc := &CuratorContext{
+		DealsByID: map[string]*storage.CuratorDeal{
+			"D1": {DealID: "D1", CuratorID: "c1", WSeat: []string{"seat-c1-rub"}},
+		},
+	}
+	imps := []openrtb.Imp{{
+		PMP: &openrtb.PMP{PrivateAuction: 1, Deals: []openrtb.Deal{{ID: "D1"}}},
+	}}
+	got := filterBiddersForCuratedDeals(context.Background(), imps,
+		[]string{"rubicon", "pubmatic", "kargo"}, cc, cat)
+	if len(got) != 1 || got[0] != "rubicon" {
+		t.Fatalf("expected only rubicon permitted via catalog, got %v", got)
+	}
+}
+
+func TestFilterBiddersForCuratedDeals_NoPermittedFallsBack(t *testing.T) {
+	// Strict PMP but no bidder is permitted — defensively keep all bidders
+	// rather than silent no-bid.
+	imps := []openrtb.Imp{{
+		PMP: &openrtb.PMP{PrivateAuction: 1, Deals: []openrtb.Deal{{ID: "D"}}},
+	}}
+	got := filterBiddersForCuratedDeals(context.Background(), imps,
+		[]string{"rubicon", "pubmatic"}, nil, nil)
+	if len(got) != 2 {
+		t.Fatalf("expected fallback to all bidders, got %v", got)
+	}
+}
+
+func TestHydrateCuratedDealsFor_DropsDisallowedPublisher(t *testing.T) {
+	cat := &fakeCatalog{
+		deals: map[string]*storage.CuratorDeal{
+			"D1": {DealID: "D1", CuratorID: "c1", Active: true},
+		},
+		curators: map[string]*storage.Curator{
+			"c1": {ID: "c1", SChainASI: "c1.example", SChainSID: "sid-1"},
+		},
+		allowList: map[string]bool{
+			"c1|42": true,  // publisher 42 allowed
+			"c1|99": false, // publisher 99 explicitly denied (or absent in real DB)
+		},
+	}
+	ex := &Exchange{curatorCatalog: cat}
+	req := &openrtb.BidRequest{
+		ID:  "a",
+		Imp: []openrtb.Imp{{ID: "i", PMP: &openrtb.PMP{Deals: []openrtb.Deal{{ID: "D1"}}}}},
+	}
+
+	allowed := ex.hydrateCuratedDealsFor(context.Background(), req, 42)
+	if !allowed.HasDeal("D1") {
+		t.Fatalf("publisher 42 should see D1 hydrated, got %#v", allowed.DealsByID)
+	}
+
+	denied := ex.hydrateCuratedDealsFor(context.Background(), req, 99)
+	if denied.HasDeal("D1") {
+		t.Fatalf("publisher 99 should NOT see D1 hydrated; allow-list blocked")
+	}
+	if len(denied.CuratorsByID) != 0 {
+		t.Errorf("curator c1 should be removed when its only deal was dropped")
+	}
+}
+
+func TestHydrateCuratedDealsFor_ZeroPublisherIDIsPermissive(t *testing.T) {
+	cat := &fakeCatalog{
+		deals: map[string]*storage.CuratorDeal{
+			"D1": {DealID: "D1", CuratorID: "c1", Active: true},
+		},
+		curators:  map[string]*storage.Curator{"c1": {ID: "c1"}},
+		allowList: map[string]bool{}, // empty → if checked, would deny
+	}
+	ex := &Exchange{curatorCatalog: cat}
+	req := &openrtb.BidRequest{
+		ID:  "a",
+		Imp: []openrtb.Imp{{ID: "i", PMP: &openrtb.PMP{Deals: []openrtb.Deal{{ID: "D1"}}}}},
+	}
+	cc := ex.hydrateCuratedDealsFor(context.Background(), req, 0)
+	if !cc.HasDeal("D1") {
+		t.Fatalf("PublisherDBID=0 should bypass allow-list check")
+	}
+}
+
+func TestCollectSignalReceiptAcks_TrueIsAck(t *testing.T) {
+	results := map[string]*BidderResult{
+		"rubicon": {
+			BidderCode: "rubicon",
+			Bids: []*adapters.TypedBid{{
+				Bid: &openrtb.Bid{
+					DealID: "D1",
+					Ext:    []byte(`{"signal_receipt":true}`),
+				},
+			}},
+		},
+	}
+	acks := collectSignalReceiptAcks("auct-1", results)
+	if len(acks) != 1 {
+		t.Fatalf("expected 1 ack, got %d", len(acks))
+	}
+	if acks[0].DealID != "D1" || acks[0].BidderCode != "rubicon" {
+		t.Errorf("unexpected ack: %+v", acks[0])
+	}
+}
+
+func TestCollectSignalReceiptAcks_FalseAndAbsentIgnored(t *testing.T) {
+	results := map[string]*BidderResult{
+		"rubicon": {Bids: []*adapters.TypedBid{
+			{Bid: &openrtb.Bid{DealID: "D1", Ext: []byte(`{"signal_receipt":false}`)}},
+			{Bid: &openrtb.Bid{DealID: "D2"}}, // no ext at all
+			{Bid: &openrtb.Bid{DealID: "D3", Ext: []byte(`{"other":"thing"}`)}},
+		}},
+	}
+	acks := collectSignalReceiptAcks("a", results)
+	if len(acks) != 0 {
+		t.Fatalf("expected 0 acks, got %d (%+v)", len(acks), acks)
+	}
+}
+
+func TestCollectSignalReceiptAcks_DedupesPerDeal(t *testing.T) {
+	// Two bids on the same deal should produce only one ack.
+	results := map[string]*BidderResult{
+		"rubicon": {Bids: []*adapters.TypedBid{
+			{Bid: &openrtb.Bid{DealID: "D1", Ext: []byte(`{"signal_receipt":1}`)}},
+			{Bid: &openrtb.Bid{DealID: "D1", Ext: []byte(`{"signal_receipt":"yes"}`)}},
+		}},
+	}
+	acks := collectSignalReceiptAcks("a", results)
+	if len(acks) != 1 {
+		t.Fatalf("expected dedupe to 1, got %d", len(acks))
 	}
 }
 
