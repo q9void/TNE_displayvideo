@@ -40,14 +40,20 @@ func agenticHookA(ctx context.Context, e *Exchange, req *AuctionRequest) {
 	logAgenticDecisions(req.BidRequest.ID, agentic.LifecyclePublisherBidRequest, out, dr.AgentStats)
 
 	// Stamp the outbound envelope BIDDERS will see (full envelope with
-	// agentsCalled). Idempotent vs WrapAsRTBRequest's stamp.
-	_ = agentic.WriteOutboundEnvelope(req.BidRequest,
+	// agentsCalled). Idempotent vs WrapAsRTBRequest's stamp. Failure here
+	// only affects the ext.aamp envelope on the outbound bid request — the
+	// auction proceeds with the agent mutations already applied.
+	if err := agentic.WriteOutboundEnvelope(req.BidRequest,
 		e.agenticStamper.SellerID,
 		agentic.LifecyclePublisherBidRequest,
 		true,
 		dr.AgentIDs(),
 		len(out.Decisions),
-	)
+	); err != nil {
+		logger.Log.Warn().Err(err).
+			Str("auction_id", req.BidRequest.ID).
+			Msg("agentic.hookA: ext.aamp envelope write failed")
+	}
 }
 
 // agenticHookB fires the LIFECYCLE_DSP_BID_RESPONSE extension point fan-out

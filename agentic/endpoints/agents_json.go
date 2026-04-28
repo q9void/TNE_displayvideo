@@ -46,5 +46,8 @@ func (h *AgentsJSONHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	// 1h cache — shorter than sellers.json since agent rosters change more often.
 	w.Header().Set("Cache-Control", "public, max-age=3600")
-	_, _ = w.Write(h.reg.DocumentBytes())
+	if _, err := w.Write(h.reg.DocumentBytes()); err != nil {
+		// Client disconnect; nothing actionable.
+		return
+	}
 }

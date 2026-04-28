@@ -22,11 +22,11 @@ import (
 // internal/openrtb.BidRequest.
 //
 // The test mirrors what Hook A does in production:
-//   1. Stand up a fake RTBExtensionPoint that returns ACTIVATE_SEGMENTS.
-//   2. Build a Client + Applier + Stamper.
-//   3. Wrap the BidRequest, Dispatch, Apply.
-//   4. Assert the in-flight BidRequest has the segments injected and that
-//      decisions/stats are populated correctly.
+//  1. Stand up a fake RTBExtensionPoint that returns ACTIVATE_SEGMENTS.
+//  2. Build a Client + Applier + Stamper.
+//  3. Wrap the BidRequest, Dispatch, Apply.
+//  4. Assert the in-flight BidRequest has the segments injected and that
+//     decisions/stats are populated correctly.
 func TestIntegration_endToEnd(t *testing.T) {
 	mut := &pb.Mutation{
 		Intent: pb.Intent_ACTIVATE_SEGMENTS.Enum(),
@@ -57,8 +57,8 @@ func TestIntegration_endToEnd(t *testing.T) {
 	// Build an in-flight BidRequest that an exchange would have constructed
 	// from a real /openrtb2/auction call.
 	bidReq := &openrtb.BidRequest{
-		ID: "auction-end-to-end",
-		Imp: []openrtb.Imp{{ID: "imp-1"}},
+		ID:   "auction-end-to-end",
+		Imp:  []openrtb.Imp{{ID: "imp-1"}},
 		User: &openrtb.User{ID: "u-42"},
 	}
 	pbReq := WrapAsRTBRequest(bidReq, LifecyclePublisherBidRequest, 30)

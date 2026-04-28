@@ -9,12 +9,12 @@ import (
 // Envelope is the structured shape we read/write into BidRequest.ext.aamp.
 // JSON tags match the wire shape documented in PRD §7.3.
 type Envelope struct {
-	Version          string             `json:"version"`
-	Originator       *EnvelopeOrig      `json:"originator,omitempty"`
-	Lifecycle        string             `json:"lifecycle,omitempty"`
-	AgentConsent     bool               `json:"agentConsent"`
-	AgentsCalled     []string           `json:"agentsCalled,omitempty"`
-	MutationsApplied int                `json:"mutationsApplied,omitempty"`
+	Version           string             `json:"version"`
+	Originator        *EnvelopeOrig      `json:"originator,omitempty"`
+	Lifecycle         string             `json:"lifecycle,omitempty"`
+	AgentConsent      bool               `json:"agentConsent"`
+	AgentsCalled      []string           `json:"agentsCalled,omitempty"`
+	MutationsApplied  int                `json:"mutationsApplied,omitempty"`
 	PublisherEnvelope *PublisherEnvelope `json:"publisherEnvelope,omitempty"`
 
 	// Fields below originate from the page-side prebid adapter and flow IN.

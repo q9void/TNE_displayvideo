@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"sync"
-
 	"github.com/xeipuuv/gojsonschema"
 )
 
@@ -14,19 +12,19 @@ import (
 // declaration from agents.json. The original JSON stays available via
 // Registry.DocumentBytes() for HTTP serving so we never re-marshal.
 type AgentEndpoint struct {
-	ID             string             `json:"id"`
-	Name           string             `json:"name,omitempty"`
-	Role           string             `json:"role"`
-	Vendor         string             `json:"vendor,omitempty"`
-	RegistryRef    string             `json:"registry_ref,omitempty"`
-	Priority       int32              `json:"priority,omitempty"`
-	TmaxMs         int32              `json:"tmax_ms,omitempty"`
-	Essential      bool               `json:"essential,omitempty"`
-	Endpoints      []AgentTransport   `json:"endpoints"`
-	Lifecycles     []string           `json:"lifecycles"`
-	Intents        []string           `json:"intents"`
-	Requires       AgentRequires      `json:"requires,omitempty"`
-	DataProcessing AgentDataProcess   `json:"data_processing,omitempty"`
+	ID             string           `json:"id"`
+	Name           string           `json:"name,omitempty"`
+	Role           string           `json:"role"`
+	Vendor         string           `json:"vendor,omitempty"`
+	RegistryRef    string           `json:"registry_ref,omitempty"`
+	Priority       int32            `json:"priority,omitempty"`
+	TmaxMs         int32            `json:"tmax_ms,omitempty"`
+	Essential      bool             `json:"essential,omitempty"`
+	Endpoints      []AgentTransport `json:"endpoints"`
+	Lifecycles     []string         `json:"lifecycles"`
+	Intents        []string         `json:"intents"`
+	Requires       AgentRequires    `json:"requires,omitempty"`
+	DataProcessing AgentDataProcess `json:"data_processing,omitempty"`
 }
 
 // AgentTransport describes how to reach the agent. Phase 1 uses grpc / grpcs.
@@ -81,12 +79,15 @@ func (a AgentEndpoint) PrimaryTransport() (AgentTransport, bool) {
 
 // Registry is the in-process, immutable view of agents.json. Constructed
 // once at boot via LoadRegistry; safe for concurrent reads thereafter.
+//
+// Phase 2 will add hot-reload via SIGHUP, which re-introduces a sync.RWMutex
+// on this struct. We deliberately do not pre-allocate the mutex now to keep
+// lint clean.
 type Registry struct {
 	doc       []byte
 	parsed    registryDoc
 	agents    []AgentEndpoint // sorted by Priority asc (deterministic last-writer-wins)
 	byLifecyc map[Lifecycle][]AgentEndpoint
-	mu        sync.RWMutex // reserved for Phase 2 hot-reload; unused in Phase 1
 }
 
 type registryDoc struct {
@@ -107,11 +108,16 @@ type registryDoc struct {
 // load is not supported. On invalid JSON, ditto. The Phase 1 default
 // agents.json with `agents: []` validates and produces an empty registry.
 func LoadRegistry(docPath, schemaPath string) (*Registry, error) {
-	doc, err := os.ReadFile(docPath)
+	// docPath and schemaPath come from server config (env-var-driven, validated
+	// at boot in cmd/server/config.go::Validate). Both are read-only loads of
+	// JSON documents, never executed. gosec G304 is a known false positive
+	// when the variable source is trusted; suppress with a doc-anchored
+	// annotation rather than refactoring.
+	doc, err := os.ReadFile(docPath) // #nosec G304 -- path comes from validated server config
 	if err != nil {
 		return nil, fmt.Errorf("agentic: read agents.json %q: %w", docPath, err)
 	}
-	schemaBytes, err := os.ReadFile(schemaPath)
+	schemaBytes, err := os.ReadFile(schemaPath) // #nosec G304 -- path comes from validated server config
 	if err != nil {
 		return nil, fmt.Errorf("agentic: read schema %q: %w", schemaPath, err)
 	}

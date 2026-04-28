@@ -46,7 +46,9 @@ func (h *AgentsAdminHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/admin/agents")
 	id = strings.TrimPrefix(id, "/")
 	if id == "" {
-		_ = json.NewEncoder(w).Encode(adminAgentsList{Agents: h.reg.AllAgents()})
+		if err := json.NewEncoder(w).Encode(adminAgentsList{Agents: h.reg.AllAgents()}); err != nil {
+			http.Error(w, "encode failed", http.StatusInternalServerError)
+		}
 		return
 	}
 	agent, ok := h.reg.AgentByID(id)
@@ -54,5 +56,7 @@ func (h *AgentsAdminHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(adminAgentsGet{Agent: agent})
+	if err := json.NewEncoder(w).Encode(adminAgentsGet{Agent: agent}); err != nil {
+		http.Error(w, "encode failed", http.StatusInternalServerError)
+	}
 }

@@ -92,9 +92,9 @@ type MarginAdjustment struct {
 // records for downstream stages (margin/shade/segment counters).
 type ApplyOutput struct {
 	Decisions          []ApplyDecision
-	MarginAdjustments  []MarginAdjustment // consumed by exchange before applyBidMultiplier
-	BidShadingDeltas   map[string]float64 // bid.id → original_price - final_price
-	SegmentsActivated  int                // total segments added across all mutations
+	MarginAdjustments  []MarginAdjustment        // consumed by exchange before applyBidMultiplier
+	BidShadingDeltas   map[string]float64        // bid.id → original_price - final_price
+	SegmentsActivated  int                       // total segments added across all mutations
 	AgentMutationCount map[string]map[string]int // agent_id → intent → count, for bid.ext.aamp
 }
 

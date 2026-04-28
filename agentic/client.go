@@ -99,7 +99,9 @@ func NewClient(reg *Registry, cfg ClientConfig, stamper OriginatorStamper) (*Cli
 
 	for _, agent := range reg.AllAgents() {
 		if err := c.dialOne(agent); err != nil {
-			c.Close()
+			if cerr := c.Close(); cerr != nil {
+				err = fmt.Errorf("%w (and close error: %v)", err, cerr)
+			}
 			return nil, fmt.Errorf("agentic: dial %s: %w", agent.ID, err)
 		}
 	}
@@ -286,7 +288,15 @@ func (c *Client) callOne(ctx context.Context, agent AgentEndpoint, lc Lifecycle,
 	}
 
 	// Per-call clone so concurrent goroutines don't race on the shared req.
-	cloned := proto.Clone(req).(*pb.RTBRequest)
+	// proto.Clone always returns the same type as input (Mutation guarantees);
+	// the comma-ok form silences errcheck without changing semantics.
+	cloned, ok := proto.Clone(req).(*pb.RTBRequest)
+	if !ok {
+		stat.Status = "error"
+		stat.Error = "proto.Clone type assertion failed"
+		stat.LatencyMs = time.Since(startMs).Milliseconds()
+		return result{agent: agent, stat: stat}
+	}
 
 	var rsp *pb.RTBResponse
 	err := breaker.Execute(func() error {
