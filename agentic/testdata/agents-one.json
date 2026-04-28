@@ -1,0 +1,26 @@
+{
+  "$schema": "https://thenexusengine.com/schemas/agents.v1.json",
+  "version": "1.0",
+  "seller_id": "9131",
+  "seller_domain": "thenexusengine.com",
+  "agents": [
+    {
+      "id": "seg.example.com",
+      "name": "Example Segmentation Agent",
+      "role": "segmentation",
+      "vendor": "Example Inc",
+      "priority": 100,
+      "tmax_ms": 25,
+      "essential": false,
+      "endpoints": [
+        {
+          "transport": "grpc",
+          "url": "127.0.0.1:50051",
+          "auth": "api_key_header"
+        }
+      ],
+      "lifecycles": ["PUBLISHER_BID_REQUEST"],
+      "intents": ["ACTIVATE_SEGMENTS", "ADD_CIDS"]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://thenexusengine.com/schemas/agents.v1.json",
+  "version": "1.0",
+  "seller_id": "9131",
+  "seller_domain": "thenexusengine.com",
+  "agents": [
+    {
+      "id": "shade.example.com",
+      "role": "shading",
+      "priority": 200,
+      "tmax_ms": 20,
+      "endpoints": [{"transport": "grpc", "url": "127.0.0.1:50061", "auth": "api_key_header"}],
+      "lifecycles": ["DSP_BID_RESPONSE"],
+      "intents": ["BID_SHADE"]
+    },
+    {
+      "id": "seg.example.com",
+      "role": "segmentation",
+      "priority": 100,
+      "tmax_ms": 25,
+      "endpoints": [{"transport": "grpc", "url": "127.0.0.1:50051", "auth": "api_key_header"}],
+      "lifecycles": ["PUBLISHER_BID_REQUEST"],
+      "intents": ["ACTIVATE_SEGMENTS"]
+    }
+  ]
+}
