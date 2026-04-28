@@ -58,6 +58,12 @@ type AgenticConfig struct {
 	SellerID                string
 	APIKey                  string
 	PerAgentAPIKeys         map[string]string // agent_id → key
+	// CuratorBindings maps agent_id → curator_id. When set, the applier
+	// validates ACTIVATE_DEALS payloads from those agents against the
+	// curator catalog (storage.CuratorStore.DealIsCuratedBy). Source:
+	// AGENTIC_CURATOR_BINDINGS env var, comma-separated "agent:curator"
+	// pairs, e.g. "acme-agent:curator-acme,beta-agent:curator-beta".
+	CuratorBindings map[string]string
 	CircuitFailureThreshold int
 	CircuitSuccessThreshold int
 	CircuitTimeoutSeconds   int
@@ -146,6 +152,7 @@ func ParseConfig() *ServerConfig {
 			SellerID:                getEnvOrDefault("AGENTIC_SELLER_ID", "9131"),
 			APIKey:                  os.Getenv("AGENTIC_API_KEY"),
 			PerAgentAPIKeys:         parseAgenticPerAgentKeys(),
+			CuratorBindings:         parseCuratorBindings(getEnvOrDefault("AGENTIC_CURATOR_BINDINGS", "")),
 			CircuitFailureThreshold: getEnvIntOrDefault("AGENTIC_CIRCUIT_FAILURE_THRESHOLD", 5),
 			CircuitSuccessThreshold: getEnvIntOrDefault("AGENTIC_CIRCUIT_SUCCESS_THRESHOLD", 2),
 			CircuitTimeoutSeconds:   getEnvIntOrDefault("AGENTIC_CIRCUIT_TIMEOUT_SECONDS", 30),
@@ -159,6 +166,52 @@ func ParseConfig() *ServerConfig {
 	}
 
 	return cfg
+}
+
+// parseCuratorBindings parses a CSV "agent_id:curator_id,..." string into a
+// map. Whitespace around tokens is trimmed; malformed entries are skipped
+// silently (operators prefer a partial bind to a panic at boot).
+func parseCuratorBindings(s string) map[string]string {
+	if s == "" {
+		return nil
+	}
+	out := map[string]string{}
+	start := 0
+	for i := 0; i <= len(s); i++ {
+		if i == len(s) || s[i] == ',' {
+			tok := trimSpaceASCII(s[start:i])
+			start = i + 1
+			colon := -1
+			for j := 0; j < len(tok); j++ {
+				if tok[j] == ':' {
+					colon = j
+					break
+				}
+			}
+			if colon <= 0 || colon == len(tok)-1 {
+				continue
+			}
+			agent := trimSpaceASCII(tok[:colon])
+			curator := trimSpaceASCII(tok[colon+1:])
+			if agent != "" && curator != "" {
+				out[agent] = curator
+			}
+		}
+	}
+	return out
+}
+
+// trimSpaceASCII trims leading/trailing ASCII whitespace without a
+// strings.TrimSpace dependency (config.go is import-light by convention).
+func trimSpaceASCII(s string) string {
+	i, j := 0, len(s)
+	for i < j && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	for j > i && (s[j-1] == ' ' || s[j-1] == '\t') {
+		j--
+	}
+	return s[i:j]
 }
 
 // parseAgenticPerAgentKeys scans env for AGENTIC_API_KEY_<AGENT_ID> entries.

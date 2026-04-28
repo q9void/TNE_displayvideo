@@ -2181,6 +2181,11 @@ func (m *mockMetrics) RecordBidderCircuitFailure(bidder string)   {}
 func (m *mockMetrics) RecordBidderCircuitSuccess(bidder string)   {}
 func (m *mockMetrics) RecordBidderCircuitRejected(bidder string)  {}
 func (m *mockMetrics) RecordBidderCircuitStateChange(bidder, fromState, toState string) {}
+func (m *mockMetrics) RecordCuratorDealHydrated(curatorID string)                       {}
+func (m *mockMetrics) RecordCuratorDealDropped(curatorID, reason string)                {}
+func (m *mockMetrics) RecordCuratorReceipt(curatorID, bidder string)                    {}
+func (m *mockMetrics) RecordCuratorAck(bidder string)                                   {}
+func (m *mockMetrics) RecordCuratorStrictPMPFilter()                                    {}
 
 func TestFlattenHeaders(t *testing.T) {
 	h := http.Header{}

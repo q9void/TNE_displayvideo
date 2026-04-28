@@ -28,6 +28,7 @@ import (
 
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
+	"github.com/thenexusengine/tne_springwire/pkg/logger"
 )
 
 // defaultEndpoint is a placeholder. Real DV360 buyers use their per-seat URL
@@ -132,6 +133,30 @@ func bidTypeFor(b *openrtb.Bid) adapters.BidType {
 		return adapters.BidTypeVideo
 	}
 	return adapters.BidTypeBanner
+}
+
+// Info returns adapter capability metadata used by the registry. Default-on
+// (Enabled=true) — but in practice the adapter only sees traffic when a
+// curator's wseat resolves to a "dv360" curator_seats row, so the strict-PMP
+// fanout filter keeps it out of regular open auctions.
+func Info() adapters.BidderInfo {
+	return adapters.BidderInfo{
+		Enabled:     true,
+		GVLVendorID: 0, // DV360 is a buyer; no GVL vendor mapping needed for our path
+		Endpoint:    defaultEndpoint,
+		Maintainer:  &adapters.MaintainerInfo{Email: "engineering@thenexusengine.com"},
+		Capabilities: &adapters.CapabilitiesInfo{
+			Site: &adapters.PlatformInfo{MediaTypes: []adapters.BidType{adapters.BidTypeBanner, adapters.BidTypeVideo}},
+			App:  &adapters.PlatformInfo{MediaTypes: []adapters.BidType{adapters.BidTypeBanner, adapters.BidTypeVideo}},
+		},
+		DemandType: adapters.DemandTypePlatform,
+	}
+}
+
+func init() {
+	if err := adapters.RegisterAdapter("dv360", New(""), Info()); err != nil {
+		logger.Log.Error().Err(err).Str("adapter", "dv360").Msg("failed to register adapter")
+	}
 }
 
 func containsCI(s, sub string) bool {

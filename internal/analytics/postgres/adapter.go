@@ -246,23 +246,38 @@ func insertBidderEvents(tx *sql.Tx, a *analytics.AuctionObject) error {
 			}
 		}
 
-		// First curated-deal bid (if any) drives the deal_id/curator_id/seat
-		// attribution on this bidder_events row. A bidder can return multiple
-		// bids per auction; the row is per-bidder so we pick the first deal.
+		// Curated-deal attribution: prefer the per-bidder summary recorded on
+		// BidderResult (populated by applyReceiptsToBidderResults from the
+		// auction's signal_receipt buffer). Fall back to the first bid's
+		// DealID for resilience.
 		var dealID, curatorID, seat *string
-		for _, b := range result.Bids {
-			if b.DealID != "" {
-				v := b.DealID
-				dealID = &v
-				if b.CuratorID != "" {
-					cv := b.CuratorID
-					curatorID = &cv
+		if result.DealID != "" {
+			v := result.DealID
+			dealID = &v
+		}
+		if result.CuratorID != "" {
+			v := result.CuratorID
+			curatorID = &v
+		}
+		if result.Seat != "" {
+			v := result.Seat
+			seat = &v
+		}
+		if dealID == nil {
+			for _, b := range result.Bids {
+				if b.DealID != "" {
+					v := b.DealID
+					dealID = &v
+					if b.CuratorID != "" {
+						cv := b.CuratorID
+						curatorID = &cv
+					}
+					if b.Seat != "" {
+						sv := b.Seat
+						seat = &sv
+					}
+					break
 				}
-				if b.Seat != "" {
-					sv := b.Seat
-					seat = &sv
-				}
-				break
 			}
 		}
 
@@ -274,8 +289,9 @@ func insertBidderEvents(tx *sql.Tx, a *analytics.AuctionObject) error {
 				timed_out, had_error, no_bid_reason,
 				country, device_type, media_type,
 				ad_unit, sizes,
-				deal_id, curator_id, seat
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+				deal_id, curator_id, seat,
+				signal_sources
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
 			a.AuctionID,
 			bidder,
 			result.Latency.Milliseconds(),
@@ -295,6 +311,7 @@ func insertBidderEvents(tx *sql.Tx, a *analytics.AuctionObject) error {
 			dealID,
 			curatorID,
 			seat,
+			pq.Array(result.SignalSources),
 		)
 		if err != nil {
 			return err

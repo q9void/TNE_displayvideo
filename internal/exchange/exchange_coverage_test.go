@@ -971,3 +971,8 @@ func (m *mockMetricsRecorder) RecordBidderCircuitFailure(bidder string)         
 func (m *mockMetricsRecorder) RecordBidderCircuitSuccess(bidder string)                 {}
 func (m *mockMetricsRecorder) RecordBidderCircuitRejected(bidder string)                {}
 func (m *mockMetricsRecorder) RecordBidderCircuitStateChange(bidder, from, to string) {}
+func (m *mockMetricsRecorder) RecordCuratorDealHydrated(curatorID string)              {}
+func (m *mockMetricsRecorder) RecordCuratorDealDropped(curatorID, reason string)       {}
+func (m *mockMetricsRecorder) RecordCuratorReceipt(curatorID, bidder string)           {}
+func (m *mockMetricsRecorder) RecordCuratorAck(bidder string)                          {}
+func (m *mockMetricsRecorder) RecordCuratorStrictPMPFilter()                           {}

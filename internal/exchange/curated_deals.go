@@ -222,6 +222,9 @@ func (e *Exchange) hydrateCuratedDealsFor(
 				Int("publisher_db_id", publisherDBID).
 				Msg("publisher not allow-listed for curator; deal will not receive curator overlay")
 			delete(cc.DealsByID, dealID)
+			if e.metrics != nil {
+				e.metrics.RecordCuratorDealDropped(deal.CuratorID, "publisher_not_allow_listed")
+			}
 		}
 	}
 	// If all of a curator's deals were dropped, remove the curator from the
@@ -277,6 +280,9 @@ func (e *Exchange) hydrateCuratedDeals(ctx context.Context, req *openrtb.BidRequ
 			}
 			cc.DealsByID[d.ID] = catDeal
 			overlayDeal(d, catDeal)
+			if e.metrics != nil {
+				e.metrics.RecordCuratorDealHydrated(catDeal.CuratorID)
+			}
 
 			// Deduplicate curator load across multiple deals from the same curator.
 			if _, seen := cc.CuratorsByID[catDeal.CuratorID]; !seen {
@@ -303,6 +309,62 @@ func (e *Exchange) hydrateCuratedDeals(ctx context.Context, req *openrtb.BidRequ
 			Msg("curated deals hydrated")
 	}
 	return cc
+}
+
+// applyReceiptsToBidderResults rolls up the per-deal SignalReceipt slice into
+// per-bidder summaries on auctionObj.BidderResults. The first deal-tagged
+// receipt for a bidder wins for DealID/CuratorID/Seat attribution; the
+// SignalSources slice unions all distinct "eid:<src>", "seg:<tag>" and
+// "schain:<asi>" tokens seen across all of that bidder's receipts.
+//
+// This is the path that fills bidder_events.signal_sources at INSERT time —
+// without it, the column stays empty even though the audit table is full.
+func applyReceiptsToBidderResults(auctionObj *analytics.AuctionObject, receipts []analytics.SignalReceipt) {
+	if auctionObj == nil || len(receipts) == 0 || len(auctionObj.BidderResults) == 0 {
+		return
+	}
+	type agg struct {
+		dealID    string
+		curatorID string
+		seat      string
+		seen      map[string]struct{}
+	}
+	byBidder := make(map[string]*agg, len(auctionObj.BidderResults))
+	for i := range receipts {
+		r := receipts[i]
+		a, ok := byBidder[r.BidderCode]
+		if !ok {
+			a = &agg{seen: make(map[string]struct{}, 8)}
+			a.dealID = r.DealID
+			a.curatorID = r.CuratorID
+			a.seat = r.Seat
+			byBidder[r.BidderCode] = a
+		}
+		for _, src := range r.EIDsSent {
+			a.seen["eid:"+src] = struct{}{}
+		}
+		for _, seg := range r.SegmentsSent {
+			a.seen["seg:"+seg] = struct{}{}
+		}
+		for _, n := range r.SChainNodesSent {
+			if n.ASI != "" {
+				a.seen["schain:"+n.ASI] = struct{}{}
+			}
+		}
+	}
+	for code, a := range byBidder {
+		br, ok := auctionObj.BidderResults[code]
+		if !ok || br == nil {
+			continue
+		}
+		br.DealID = a.dealID
+		br.CuratorID = a.curatorID
+		br.Seat = a.seat
+		br.SignalSources = make([]string, 0, len(a.seen))
+		for src := range a.seen {
+			br.SignalSources = append(br.SignalSources, src)
+		}
+	}
 }
 
 // collectSignalReceiptAcks scans bidder results for `bid.ext.signal_receipt`

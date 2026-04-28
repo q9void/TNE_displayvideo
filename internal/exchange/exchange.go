@@ -68,6 +68,13 @@ type MetricsRecorder interface {
 	RecordBidderCircuitSuccess(bidder string)
 	RecordBidderCircuitRejected(bidder string)
 	RecordBidderCircuitStateChange(bidder, fromState, toState string)
+
+	// Curated-deals metrics
+	RecordCuratorDealHydrated(curatorID string)
+	RecordCuratorDealDropped(curatorID, reason string)
+	RecordCuratorReceipt(curatorID, bidder string)
+	RecordCuratorAck(bidder string)
+	RecordCuratorStrictPMPFilter()
 }
 
 // Exchange orchestrates the auction process
@@ -1564,9 +1571,14 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 	// Strict-PMP filter: when any impression marks private_auction=1, restrict
 	// fanout to bidders permitted on the deal's wseat (directly or via the
 	// curator catalog's curator_seats join). No-op for open auctions.
+	prevSelected := len(selectedBidders)
 	selectedBidders = filterBiddersForCuratedDeals(
 		ctx, req.BidRequest.Imp, selectedBidders, curatorCtx, e.curatorCatalog,
 	)
+	if e.metrics != nil && len(selectedBidders) != prevSelected {
+		// Filter actually fired (changed the slice) — count the auction.
+		e.metrics.RecordCuratorStrictPMPFilter()
+	}
 
 	response.DebugInfo.SelectedBidders = selectedBidders
 
@@ -2023,7 +2035,13 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 			startTime,
 		)
 
-		// Curated-deals attribution on the auction-level summary.
+		// Curated-deals attribution on the auction-level summary, plus
+		// per-bidder signal-source enrichment built from the in-flight
+		// receipt buffer. Drain receipts FIRST so the per-bidder rollup
+		// can stamp BidderResult.SignalSources before LogAuctionObject
+		// runs (the postgres adapter writes them in the same INSERT as
+		// the rest of bidder_events).
+		var receipts []analytics.SignalReceipt
 		if cc := CuratorContextFromCtx(ctx); cc != nil {
 			auctionObj.CuratorIDs = cc.CuratorIDs()
 			for _, imp := range req.BidRequest.Imp {
@@ -2031,6 +2049,8 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 					auctionObj.DealCount += len(imp.PMP.Deals)
 				}
 			}
+			receipts = cc.DrainSignalReceipts()
+			applyReceiptsToBidderResults(auctionObj, receipts)
 		}
 
 		// Non-blocking analytics call - errors logged internally by analytics module
@@ -2041,30 +2061,37 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 				Msg("Failed to log auction analytics")
 		}
 
-		// Drain and persist signal receipts collected during fanout. One row
-		// per (auction, bidder, deal) — the source of truth for the
-		// /admin/curators/{id}/signal-receipts audit endpoint.
-		if cc := CuratorContextFromCtx(ctx); cc != nil {
-			if receipts := cc.DrainSignalReceipts(); len(receipts) > 0 {
-				if err := e.analytics.LogSignalReceipts(ctx, receipts); err != nil {
-					logger.Log.Warn().
-						Err(err).
-						Str("auction_id", req.BidRequest.ID).
-						Int("receipts", len(receipts)).
-						Msg("Failed to log curator signal receipts")
+		// Persist signal receipts to the audit table (source of truth for
+		// /admin/curators/{id}/signal-receipts). Independent of the
+		// per-bidder rollup above; this preserves per-deal granularity.
+		if len(receipts) > 0 {
+			if err := e.analytics.LogSignalReceipts(ctx, receipts); err != nil {
+				logger.Log.Warn().
+					Err(err).
+					Str("auction_id", req.BidRequest.ID).
+					Int("receipts", len(receipts)).
+					Msg("Failed to log curator signal receipts")
+			}
+			if e.metrics != nil {
+				for i := range receipts {
+					e.metrics.RecordCuratorReceipt(receipts[i].CuratorID, receipts[i].BidderCode)
 				}
 			}
-
-			// Collect bidder acks from bid.ext.signal_receipt and forward
-			// to analytics so admins can see which DSPs actually received
-			// the signal payload they were sent.
-			if acks := collectSignalReceiptAcks(req.BidRequest.ID, response.BidderResults); len(acks) > 0 {
-				if err := e.analytics.AckSignalReceipts(ctx, acks); err != nil {
-					logger.Log.Warn().
-						Err(err).
-						Str("auction_id", req.BidRequest.ID).
-						Int("acks", len(acks)).
-						Msg("Failed to ack curator signal receipts")
+		}
+		// Collect bidder acks from bid.ext.signal_receipt and forward to
+		// analytics so admins can see which DSPs actually received the
+		// signal payload they were sent. Independent of receipt drain.
+		if acks := collectSignalReceiptAcks(req.BidRequest.ID, response.BidderResults); len(acks) > 0 {
+			if err := e.analytics.AckSignalReceipts(ctx, acks); err != nil {
+				logger.Log.Warn().
+					Err(err).
+					Str("auction_id", req.BidRequest.ID).
+					Int("acks", len(acks)).
+					Msg("Failed to ack curator signal receipts")
+			}
+			if e.metrics != nil {
+				for i := range acks {
+					e.metrics.RecordCuratorAck(acks[i].BidderCode)
 				}
 			}
 		}

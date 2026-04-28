@@ -105,6 +105,15 @@ type BidderResult struct {
 	TimedOut    bool
 	NoBidReason string // OpenRTB NBR code
 	Errors      []string
+	// Curated-deals attribution (from curator context):
+	DealID    string   // First curated deal_id this bidder was permitted on (if any)
+	CuratorID string   // Resolved curator for that deal
+	Seat      string   // Buyer seat at this bidder for the curator
+	// SignalSources lists what was forwarded to this bidder for the
+	// permitted curated deal(s), expressed as "eid:<source>",
+	// "seg:iab<segtax>:<segment>", or "schain:<asi>". Persisted to
+	// bidder_events.signal_sources.
+	SignalSources []string
 }
 
 // BidDetails contains individual bid information

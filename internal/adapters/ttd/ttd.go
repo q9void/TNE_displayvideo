@@ -21,6 +21,7 @@ import (
 
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
+	"github.com/thenexusengine/tne_springwire/pkg/logger"
 )
 
 // defaultEndpoint is a placeholder. Real TTD bidders use seat-specific URLs
@@ -77,6 +78,28 @@ func (a *Adapter) MakeRequests(req *openrtb.BidRequest, _ *adapters.ExtraRequest
 		Body:    body,
 		Headers: hdr,
 	}}, nil
+}
+
+// Info returns adapter capability metadata used by the registry. Default-on
+// but, like DV360, only enters fanout when a curator routes a deal to it.
+func Info() adapters.BidderInfo {
+	return adapters.BidderInfo{
+		Enabled:     true,
+		GVLVendorID: 21, // TheTradeDesk's published GVL ID (Phase 2; verify before prod)
+		Endpoint:    defaultEndpoint,
+		Maintainer:  &adapters.MaintainerInfo{Email: "engineering@thenexusengine.com"},
+		Capabilities: &adapters.CapabilitiesInfo{
+			Site: &adapters.PlatformInfo{MediaTypes: []adapters.BidType{adapters.BidTypeBanner, adapters.BidTypeVideo}},
+			App:  &adapters.PlatformInfo{MediaTypes: []adapters.BidType{adapters.BidTypeBanner, adapters.BidTypeVideo}},
+		},
+		DemandType: adapters.DemandTypePlatform,
+	}
+}
+
+func init() {
+	if err := adapters.RegisterAdapter("ttd", New(""), Info()); err != nil {
+		logger.Log.Error().Err(err).Str("adapter", "ttd").Msg("failed to register adapter")
+	}
 }
 
 // MakeBids parses a standard OpenRTB BidResponse from TTD.

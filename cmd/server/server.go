@@ -16,12 +16,14 @@ import (
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/appnexus"
 	// _ "github.com/thenexusengine/tne_springwire/internal/adapters/demo" // Disabled - no demo bids in production
+	_ "github.com/thenexusengine/tne_springwire/internal/adapters/dv360" // Curated-deals direct-to-DSP path (chunk 2.3)
 	"github.com/thenexusengine/tne_springwire/internal/adapters/kargo"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/pubmatic"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/routing"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/rubicon"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/sovrn"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/triplelift"
+	_ "github.com/thenexusengine/tne_springwire/internal/adapters/ttd" // Curated-deals direct-to-DSP path (chunk 2.4)
 	"github.com/thenexusengine/tne_springwire/internal/analytics"
 	analyticsIDR "github.com/thenexusengine/tne_springwire/internal/analytics/idr"
 	analyticsPG "github.com/thenexusengine/tne_springwire/internal/analytics/postgres"
@@ -299,12 +301,22 @@ func (s *Server) initExchange() {
 		if err != nil {
 			log.Fatal().Err(err).Msg("Agentic client failed to dial")
 		}
-		applier := agentic.NewApplier(agentic.ApplierConfig{
+		applierCfg := agentic.ApplierConfig{
 			MaxMutationsPerResponse: s.config.Agentic.MaxMutationsPerResponse,
 			MaxIDsPerPayload:        s.config.Agentic.MaxIDsPerPayload,
 			DisableShadeIntent:      s.config.Agentic.DisableShadeIntent,
 			ShadeMinFraction:        0.5,
-		})
+		}
+		// Wire curator bindings + validator so curator-bound agents only
+		// activate deals that exist in their catalog (chunk 2.1).
+		if len(s.config.Agentic.CuratorBindings) > 0 && s.curator != nil {
+			applierCfg.CuratorBindings = s.config.Agentic.CuratorBindings
+			applierCfg.CuratorValidator = s.curator
+			log.Info().
+				Int("bound_agents", len(s.config.Agentic.CuratorBindings)).
+				Msg("Agentic curator bindings active — ACTIVATE_DEALS payloads will be catalog-validated")
+		}
+		applier := agentic.NewApplier(applierCfg)
 		s.exchange.WithAgentic(client, applier, stamper)
 		s.agenticRegistry = reg
 		s.agenticClient = client

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
+	"github.com/thenexusengine/tne_springwire/internal/analytics"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
 	"github.com/thenexusengine/tne_springwire/internal/storage"
 )
@@ -439,6 +440,45 @@ func TestCollectSignalReceiptAcks_DedupesPerDeal(t *testing.T) {
 	acks := collectSignalReceiptAcks("a", results)
 	if len(acks) != 1 {
 		t.Fatalf("expected dedupe to 1, got %d", len(acks))
+	}
+}
+
+func TestApplyReceiptsToBidderResults_RollsUpPerBidder(t *testing.T) {
+	auctionObj := &analytics.AuctionObject{
+		BidderResults: map[string]*analytics.BidderResult{
+			"rubicon":  {BidderCode: "rubicon"},
+			"pubmatic": {BidderCode: "pubmatic"}, // no receipts → must remain empty
+		},
+	}
+	receipts := []analytics.SignalReceipt{
+		{
+			AuctionID: "a", BidderCode: "rubicon", DealID: "D1", CuratorID: "c1", Seat: "seat-c1-rub",
+			EIDsSent:        []string{"audigent.com", "liveramp.com"},
+			SegmentsSent:    []string{"iab4:9001"},
+			SChainNodesSent: []analytics.SChainNodeSent{{ASI: "c1.example"}},
+		},
+		{
+			AuctionID: "a", BidderCode: "rubicon", DealID: "D2", CuratorID: "c1", Seat: "seat-c1-rub",
+			EIDsSent: []string{"audigent.com"}, // duplicates dedupe
+		},
+	}
+	applyReceiptsToBidderResults(auctionObj, receipts)
+
+	got := auctionObj.BidderResults["rubicon"]
+	if got.DealID != "D1" || got.CuratorID != "c1" || got.Seat != "seat-c1-rub" {
+		t.Fatalf("attribution wrong: %+v", got)
+	}
+	tags := map[string]bool{}
+	for _, s := range got.SignalSources {
+		tags[s] = true
+	}
+	for _, want := range []string{"eid:audigent.com", "eid:liveramp.com", "seg:iab4:9001", "schain:c1.example"} {
+		if !tags[want] {
+			t.Errorf("missing %q in %v", want, got.SignalSources)
+		}
+	}
+	if other := auctionObj.BidderResults["pubmatic"]; len(other.SignalSources) != 0 {
+		t.Errorf("pubmatic had no receipts; signal_sources should stay nil: %v", other.SignalSources)
 	}
 }
 

@@ -60,6 +60,13 @@ type Metrics struct {
 	PlatformMarginTotal  *prometheus.CounterVec   // Platform revenue (difference)
 	MarginPercentage     *prometheus.HistogramVec // Margin % distribution
 	FloorAdjustments     *prometheus.CounterVec   // Floor price adjustments
+
+	// Curated-deals metrics
+	CuratorDealsHydrated *prometheus.CounterVec // Deals overlaid from catalog, by curator_id
+	CuratorDealsDropped  *prometheus.CounterVec // Deals dropped (publisher allow-list miss), by curator_id
+	CuratorReceiptsTotal *prometheus.CounterVec // signal_receipt rows recorded, by curator_id, bidder
+	CuratorAcksTotal     *prometheus.CounterVec // bid.ext.signal_receipt acks observed, by bidder
+	CuratorBiddersFanout prometheus.Counter     // strict-PMP filter invocations
 }
 
 // NewMetrics creates and registers all Prometheus metrics
@@ -347,6 +354,32 @@ func NewMetrics(namespace string) *Metrics {
 		),
 	}
 
+	// Curated-deals metrics
+	m.CuratorDealsHydrated = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Namespace: namespace, Name: "curator_deals_hydrated_total",
+			Help: "Curated deals hydrated from catalog, by curator"},
+		[]string{"curator_id"},
+	)
+	m.CuratorDealsDropped = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Namespace: namespace, Name: "curator_deals_dropped_total",
+			Help: "Curated deals dropped, by curator and reason"},
+		[]string{"curator_id", "reason"},
+	)
+	m.CuratorReceiptsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Namespace: namespace, Name: "curator_signal_receipts_total",
+			Help: "signal_receipts rows recorded, by curator and bidder"},
+		[]string{"curator_id", "bidder"},
+	)
+	m.CuratorAcksTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{Namespace: namespace, Name: "curator_signal_acks_total",
+			Help: "bid.ext.signal_receipt acks observed, by bidder"},
+		[]string{"bidder"},
+	)
+	m.CuratorBiddersFanout = prometheus.NewCounter(
+		prometheus.CounterOpts{Namespace: namespace, Name: "curator_strict_pmp_filter_total",
+			Help: "Number of auctions where the strict-PMP fanout filter ran"},
+	)
+
 	// Register all metrics
 	prometheus.MustRegister(
 		m.RequestsTotal,
@@ -381,6 +414,11 @@ func NewMetrics(namespace string) *Metrics {
 		m.PlatformMarginTotal,
 		m.MarginPercentage,
 		m.FloorAdjustments,
+		m.CuratorDealsHydrated,
+		m.CuratorDealsDropped,
+		m.CuratorReceiptsTotal,
+		m.CuratorAcksTotal,
+		m.CuratorBiddersFanout,
 	)
 
 	return m
@@ -616,4 +654,44 @@ func (m *Metrics) RecordBidderCircuitRejected(bidder string) {
 // RecordBidderCircuitStateChange records a state change in the circuit breaker
 func (m *Metrics) RecordBidderCircuitStateChange(bidder, fromState, toState string) {
 	m.BidderCircuitStateChanges.WithLabelValues(bidder, fromState, toState).Inc()
+}
+
+// RecordCuratorDealHydrated counts a curated deal whose catalog row matched
+// the inbound deal_id and was overlaid onto the request.
+func (m *Metrics) RecordCuratorDealHydrated(curatorID string) {
+	if curatorID == "" {
+		return
+	}
+	m.CuratorDealsHydrated.WithLabelValues(curatorID).Inc()
+}
+
+// RecordCuratorDealDropped counts a curated deal that hydration refused —
+// e.g. publisher not allow-listed, curator inactive, etc.
+func (m *Metrics) RecordCuratorDealDropped(curatorID, reason string) {
+	if curatorID == "" {
+		curatorID = "unknown"
+	}
+	m.CuratorDealsDropped.WithLabelValues(curatorID, reason).Inc()
+}
+
+// RecordCuratorReceipt counts one signal_receipts row written.
+func (m *Metrics) RecordCuratorReceipt(curatorID, bidder string) {
+	if curatorID == "" || bidder == "" {
+		return
+	}
+	m.CuratorReceiptsTotal.WithLabelValues(curatorID, bidder).Inc()
+}
+
+// RecordCuratorAck counts one bid.ext.signal_receipt ack observed from bidder.
+func (m *Metrics) RecordCuratorAck(bidder string) {
+	if bidder == "" {
+		return
+	}
+	m.CuratorAcksTotal.WithLabelValues(bidder).Inc()
+}
+
+// RecordCuratorStrictPMPFilter counts an auction in which the strict-PMP
+// fanout filter ran (any imp had private_auction=1).
+func (m *Metrics) RecordCuratorStrictPMPFilter() {
+	m.CuratorBiddersFanout.Inc()
 }
