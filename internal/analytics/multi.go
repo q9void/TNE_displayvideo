@@ -47,6 +47,28 @@ func (m *MultiModule) LogVideoObject(ctx context.Context, video *VideoObject) er
 	return nil
 }
 
+// LogSignalReceipts broadcasts curated-deal signal receipts to all modules.
+func (m *MultiModule) LogSignalReceipts(ctx context.Context, receipts []SignalReceipt) error {
+	if len(receipts) == 0 {
+		return nil
+	}
+	for _, module := range m.modules {
+		if err := module.LogSignalReceipts(ctx, receipts); err != nil {
+			auctionID := ""
+			if len(receipts) > 0 {
+				auctionID = receipts[0].AuctionID
+			}
+			logger.Log.Warn().
+				Err(err).
+				Str("module", fmt.Sprintf("%T", module)).
+				Str("auction_id", auctionID).
+				Int("receipts", len(receipts)).
+				Msg("Analytics module failed to log signal receipts")
+		}
+	}
+	return nil
+}
+
 // Shutdown gracefully shuts down all modules
 // Collects all errors and returns them
 func (m *MultiModule) Shutdown() error {

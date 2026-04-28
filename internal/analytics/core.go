@@ -11,6 +11,12 @@ import (
 type Module interface {
 	LogAuctionObject(ctx context.Context, auction *AuctionObject) error
 	LogVideoObject(ctx context.Context, video *VideoObject) error
+	// LogSignalReceipts persists one row per (bidder, deal) describing the
+	// signals (EIDs, segments, schain) actually serialized to that DSP for
+	// a curated deal. Source of truth for the
+	// /admin/curators/{id}/signal-receipts audit. Best-effort — analytics
+	// failures must not fail the auction.
+	LogSignalReceipts(ctx context.Context, receipts []SignalReceipt) error
 	Shutdown() error
 }
 
@@ -42,6 +48,10 @@ type AuctionObject struct {
 	BidderResults map[string]*BidderResult
 	WinningBids   []WinningBid
 	TotalBids     int
+
+	// Curated deals
+	DealCount  int      // Total imp.pmp.deals[] entries seen
+	CuratorIDs []string // Distinct curators participating in this auction
 
 	// Auction outcome
 	AuctionDuration time.Duration
@@ -96,6 +106,10 @@ type BidDetails struct {
 	BelowFloor      bool
 	Rejected        bool
 	RejectionReason string
+	// Curated deals attribution
+	DealID    string // OpenRTB Bid.dealid when present
+	CuratorID string // Resolved curator for this deal_id
+	Seat      string // Buyer seat reported by the bidder
 }
 
 // WinningBid represents a bid that won the auction
@@ -111,6 +125,36 @@ type WinningBid struct {
 	CreativeID    string
 	DemandType    string
 	ClearPrice    float64 // second-price auction
+	// Curated deals attribution
+	DealID    string
+	CuratorID string
+	Seat      string
+}
+
+// SignalReceipt is a forensic record of the signals (EIDs, segments, schain
+// nodes) that were forwarded to a specific DSP for a specific curated deal
+// in an auction. One row per (auction, bidder, deal). Persisted by analytics
+// implementations to the signal_receipts table; surfaced to admins via the
+// /admin/curators/{id}/signal-receipts endpoint.
+type SignalReceipt struct {
+	AuctionID       string
+	BidderCode      string
+	DealID          string
+	CuratorID       string
+	Seat            string
+	EIDsSent        []string // EID source domains forwarded (e.g. "audigent.com")
+	SegmentsSent   []string // "iab<segtax>:<segment_id>" tags
+	SChainNodesSent []SChainNodeSent
+	SentAt          time.Time
+}
+
+// SChainNodeSent is the subset of openrtb.SupplyChainNode we capture for
+// audit. Kept separate from openrtb to avoid an analytics → openrtb dep.
+type SChainNodeSent struct {
+	ASI string
+	SID string
+	HP  int
+	RID string
 }
 
 // ValidationError represents a bid validation failure

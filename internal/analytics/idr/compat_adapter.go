@@ -110,6 +110,12 @@ func (a *CompatAdapter) LogVideoObject(ctx context.Context, video *analytics.Vid
 	return nil
 }
 
+// LogSignalReceipts is a no-op — curated-deal signal receipts are persisted
+// by the postgres analytics adapter, not the legacy IDR event recorder.
+func (a *CompatAdapter) LogSignalReceipts(_ context.Context, _ []analytics.SignalReceipt) error {
+	return nil
+}
+
 func (a *CompatAdapter) Shutdown() error {
 	return a.recorder.Close()
 }

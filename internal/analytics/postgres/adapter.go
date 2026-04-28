@@ -4,7 +4,10 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
+
+	"github.com/lib/pq"
 
 	"github.com/thenexusengine/tne_springwire/internal/analytics"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
@@ -32,6 +35,43 @@ func (a *Adapter) LogAuctionObject(ctx context.Context, auction *analytics.Aucti
 // LogVideoObject is a no-op — video events are not persisted by this adapter.
 func (a *Adapter) LogVideoObject(_ context.Context, _ *analytics.VideoObject) error {
 	return nil
+}
+
+// LogSignalReceipts persists curated-deal signal receipts to signal_receipts.
+// Runs asynchronously; per-row failures are logged but never block the caller.
+func (a *Adapter) LogSignalReceipts(_ context.Context, receipts []analytics.SignalReceipt) error {
+	if len(receipts) == 0 || a.db == nil {
+		return nil
+	}
+	go a.persistReceipts(receipts)
+	return nil
+}
+
+func (a *Adapter) persistReceipts(receipts []analytics.SignalReceipt) {
+	for _, r := range receipts {
+		schainJSON := []byte("null")
+		if len(r.SChainNodesSent) > 0 {
+			if b, err := json.Marshal(r.SChainNodesSent); err == nil {
+				schainJSON = b
+			}
+		}
+		_, err := a.db.Exec(`
+			INSERT INTO signal_receipts (
+				auction_id, bidder_code, deal_id, curator_id, seat,
+				eids_sent, segments_sent, schain_nodes_sent, sent_at
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+			r.AuctionID, r.BidderCode, r.DealID, r.CuratorID, r.Seat,
+			pq.Array(r.EIDsSent), pq.Array(r.SegmentsSent),
+			schainJSON, r.SentAt,
+		)
+		if err != nil {
+			logger.Log.Warn().
+				Err(err).
+				Str("auction_id", r.AuctionID).
+				Str("deal_id", r.DealID).
+				Msg("postgres analytics: failed to insert signal_receipt")
+		}
+	}
 }
 
 // Shutdown is a no-op — the shared *sql.DB pool is managed by the caller.
@@ -108,8 +148,9 @@ func insertAuctionEvent(tx *sql.Tx, a *analytics.AuctionObject) error {
 			total_bids, winning_bids, duration_ms, status,
 			bid_multiplier, total_revenue, total_payout,
 			device_country, device_type, impression_count,
-			consent_ok, validation_errors, ad_unit
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+			consent_ok, validation_errors, ad_unit,
+			deal_count, curator_ids
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
 		a.AuctionID,
 		a.RequestID,
 		a.PublisherID,
@@ -130,6 +171,8 @@ func insertAuctionEvent(tx *sql.Tx, a *analytics.AuctionObject) error {
 		a.ConsentOK,
 		len(a.ValidationErrors),
 		adUnit,
+		a.DealCount,
+		pq.Array(a.CuratorIDs),
 	)
 	return err
 }
@@ -173,6 +216,26 @@ func insertBidderEvents(tx *sql.Tx, a *analytics.AuctionObject) error {
 			}
 		}
 
+		// First curated-deal bid (if any) drives the deal_id/curator_id/seat
+		// attribution on this bidder_events row. A bidder can return multiple
+		// bids per auction; the row is per-bidder so we pick the first deal.
+		var dealID, curatorID, seat *string
+		for _, b := range result.Bids {
+			if b.DealID != "" {
+				v := b.DealID
+				dealID = &v
+				if b.CuratorID != "" {
+					cv := b.CuratorID
+					curatorID = &cv
+				}
+				if b.Seat != "" {
+					sv := b.Seat
+					seat = &sv
+				}
+				break
+			}
+		}
+
 		_, err := tx.Exec(`
 			INSERT INTO bidder_events (
 				auction_id, bidder_code,
@@ -180,8 +243,9 @@ func insertBidderEvents(tx *sql.Tx, a *analytics.AuctionObject) error {
 				first_bid_cpm, floor_price, below_floor,
 				timed_out, had_error, no_bid_reason,
 				country, device_type, media_type,
-				ad_unit, sizes
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+				ad_unit, sizes,
+				deal_id, curator_id, seat
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
 			a.AuctionID,
 			bidder,
 			result.Latency.Milliseconds(),
@@ -198,6 +262,9 @@ func insertBidderEvents(tx *sql.Tx, a *analytics.AuctionObject) error {
 			mediaType,
 			adUnit,
 			strings.Join(firstImpSizes(a), ","),
+			dealID,
+			curatorID,
+			seat,
 		)
 		if err != nil {
 			return err
@@ -354,12 +421,25 @@ func insertRequestEvent(tx *sql.Tx, a *analytics.AuctionObject) error {
 
 func insertWinEvents(tx *sql.Tx, a *analytics.AuctionObject) error {
 	for _, win := range a.WinningBids {
+		var dealID, curatorID, seat *string
+		if win.DealID != "" {
+			v := win.DealID
+			dealID = &v
+		}
+		if win.CuratorID != "" {
+			v := win.CuratorID
+			curatorID = &v
+		}
+		if win.Seat != "" {
+			v := win.Seat
+			seat = &v
+		}
 		_, err := tx.Exec(`
 			INSERT INTO win_events (
 				auction_id, bid_id, imp_id, bidder_code,
 				original_cpm, adjusted_cpm, platform_cut, clear_price,
-				demand_type
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+				demand_type, deal_id, curator_id, seat
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 			a.AuctionID,
 			win.BidID,
 			win.ImpID,
@@ -369,6 +449,9 @@ func insertWinEvents(tx *sql.Tx, a *analytics.AuctionObject) error {
 			win.PlatformCut,
 			win.ClearPrice,
 			win.DemandType,
+			dealID,
+			curatorID,
+			seat,
 		)
 		if err != nil {
 			return err

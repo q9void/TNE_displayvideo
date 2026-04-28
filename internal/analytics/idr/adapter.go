@@ -124,6 +124,13 @@ func (a *Adapter) LogVideoObject(ctx context.Context, video *analytics.VideoObje
 	return nil
 }
 
+// LogSignalReceipts is a no-op for the IDR service adapter — curated-deal
+// signal receipts are persisted by the postgres adapter for now. Future work
+// (Phase 2+) may forward a summary event to IDR for ML feature extraction.
+func (a *Adapter) LogSignalReceipts(_ context.Context, _ []analytics.SignalReceipt) error {
+	return nil
+}
+
 // Shutdown flushes any buffered events
 func (a *Adapter) Shutdown() error {
 	// Flush any buffered events via client

@@ -34,12 +34,17 @@ CREATE TABLE IF NOT EXISTS auction_events (
     consent_ok BOOLEAN DEFAULT TRUE,
     validation_errors INTEGER DEFAULT 0,
 
+    -- Curated deals
+    deal_count INTEGER DEFAULT 0,
+    curator_ids TEXT[] DEFAULT '{}'::TEXT[],
+
     created_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_auction_events_auction_id ON auction_events(auction_id);
 CREATE INDEX IF NOT EXISTS idx_auction_events_publisher_id ON auction_events(publisher_id);
 CREATE INDEX IF NOT EXISTS idx_auction_events_timestamp ON auction_events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_auction_events_curator_ids ON auction_events USING GIN(curator_ids);
 
 -- Per-bidder events (for ML training)
 CREATE TABLE IF NOT EXISTS bidder_events (
@@ -65,12 +70,20 @@ CREATE TABLE IF NOT EXISTS bidder_events (
     device_type VARCHAR(50),
     media_type VARCHAR(50),
 
+    -- Curated deals
+    deal_id TEXT,
+    curator_id TEXT,
+    seat TEXT,
+    signal_sources TEXT[] DEFAULT '{}'::TEXT[],
+
     created_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_bidder_events_auction_id ON bidder_events(auction_id);
 CREATE INDEX IF NOT EXISTS idx_bidder_events_bidder_code ON bidder_events(bidder_code);
 CREATE INDEX IF NOT EXISTS idx_bidder_events_created_at ON bidder_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_bidder_events_deal_id ON bidder_events(deal_id) WHERE deal_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bidder_events_curator_id ON bidder_events(curator_id) WHERE curator_id IS NOT NULL;
 
 -- Win events (for revenue tracking)
 CREATE TABLE IF NOT EXISTS win_events (
@@ -88,12 +101,37 @@ CREATE TABLE IF NOT EXISTS win_events (
 
     -- Metadata
     demand_type VARCHAR(50),
+    deal_id TEXT,
+    curator_id TEXT,
+    seat TEXT,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_win_events_auction_id ON win_events(auction_id);
 CREATE INDEX IF NOT EXISTS idx_win_events_bidder_code ON win_events(bidder_code);
 CREATE INDEX IF NOT EXISTS idx_win_events_created_at ON win_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_win_events_deal_id ON win_events(deal_id) WHERE deal_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_win_events_curator_id ON win_events(curator_id) WHERE curator_id IS NOT NULL;
+
+-- Forensic record of signals forwarded to each DSP for a curated deal
+CREATE TABLE IF NOT EXISTS signal_receipts (
+    id BIGSERIAL PRIMARY KEY,
+    auction_id VARCHAR(255) NOT NULL,
+    bidder_code VARCHAR(100) NOT NULL,
+    deal_id TEXT NOT NULL,
+    curator_id TEXT,
+    seat TEXT,
+    eids_sent TEXT[] DEFAULT '{}'::TEXT[],
+    segments_sent TEXT[] DEFAULT '{}'::TEXT[],
+    schain_nodes_sent JSONB,
+    acknowledged_at TIMESTAMP,
+    sent_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_signal_receipts_auction ON signal_receipts(auction_id);
+CREATE INDEX IF NOT EXISTS idx_signal_receipts_curator ON signal_receipts(curator_id) WHERE curator_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_signal_receipts_deal ON signal_receipts(deal_id);
+CREATE INDEX IF NOT EXISTS idx_signal_receipts_sent_at ON signal_receipts(sent_at);
 
 -- Identity / EID events (one row per auction, one column per ID source)
 CREATE TABLE IF NOT EXISTS identity_events (

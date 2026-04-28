@@ -20,6 +20,7 @@ import (
 	"github.com/thenexusengine/tne_springwire/internal/hooks"
 	"github.com/thenexusengine/tne_springwire/internal/middleware"
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
+	"github.com/thenexusengine/tne_springwire/internal/storage"
 	"github.com/thenexusengine/tne_springwire/pkg/currency"
 	"github.com/thenexusengine/tne_springwire/pkg/idr"
 	"github.com/thenexusengine/tne_springwire/pkg/logger"
@@ -99,6 +100,11 @@ type Exchange struct {
 	agenticApplier *agentic.Applier
 	agenticStamper agentic.OriginatorStamper
 	agenticEnabled bool
+
+	// Curator catalog (curated deals support). Nil ⇒ hydration is a no-op
+	// and the auction behaves identically to pre-curated-deals builds.
+	// Wired by cmd/server/server.go via WithCuratorCatalog.
+	curatorCatalog CuratorCatalog
 }
 
 // AuctionType defines the type of auction to run
@@ -330,6 +336,15 @@ func (e *Exchange) WithAgentic(client *agentic.Client, applier *agentic.Applier,
 	e.agenticApplier = applier
 	e.agenticStamper = stamper
 	e.agenticEnabled = client != nil && applier != nil
+	return e
+}
+
+// WithCuratorCatalog wires the curator catalog used for curated-deal hydration.
+// Pass nil to disable curated-deals support entirely (the auction then behaves
+// identically to a build without curated deals). Safe to call once during boot;
+// not goroutine-safe — intended to be called before RunAuction is ever invoked.
+func (e *Exchange) WithCuratorCatalog(c CuratorCatalog) *Exchange {
+	e.curatorCatalog = c
 	return e
 }
 
@@ -1536,6 +1551,17 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 		Int("count", len(selectedBidders)).
 		Msg("Bidders selected for auction")
 
+	// Hydrate curated deals from the catalog. Walks imp.pmp.deals[] and
+	// overlays missing wseat / bidfloor / etc. from curator_deals; collects
+	// the curators participating in this auction so downstream stages
+	// (clone signal-passthrough, schain augmentation, analytics) can
+	// attribute revenue and prove signals reached the right DSPs.
+	//
+	// MUST run before eidFilter so the original EID set is snapshotted into
+	// the curator context for selective re-attachment on permitted bidders.
+	curatorCtx := e.hydrateCuratedDeals(ctx, req.BidRequest)
+	ctx = WithCuratorContext(ctx, curatorCtx)
+
 	// Process FPD and filter EIDs (using snapshotted processor/filter for consistency)
 	var bidderFPD fpd.BidderFPD
 	if fpdProcessor != nil {
@@ -1984,12 +2010,37 @@ func (e *Exchange) RunAuction(ctx context.Context, req *AuctionRequest) (*Auctio
 			startTime,
 		)
 
+		// Curated-deals attribution on the auction-level summary.
+		if cc := CuratorContextFromCtx(ctx); cc != nil {
+			auctionObj.CuratorIDs = cc.CuratorIDs()
+			for _, imp := range req.BidRequest.Imp {
+				if imp.PMP != nil {
+					auctionObj.DealCount += len(imp.PMP.Deals)
+				}
+			}
+		}
+
 		// Non-blocking analytics call - errors logged internally by analytics module
 		if err := e.analytics.LogAuctionObject(ctx, auctionObj); err != nil {
 			logger.Log.Warn().
 				Err(err).
 				Str("auction_id", req.BidRequest.ID).
 				Msg("Failed to log auction analytics")
+		}
+
+		// Drain and persist signal receipts collected during fanout. One row
+		// per (auction, bidder, deal) — the source of truth for the
+		// /admin/curators/{id}/signal-receipts audit endpoint.
+		if cc := CuratorContextFromCtx(ctx); cc != nil {
+			if receipts := cc.DrainSignalReceipts(); len(receipts) > 0 {
+				if err := e.analytics.LogSignalReceipts(ctx, receipts); err != nil {
+					logger.Log.Warn().
+						Err(err).
+						Str("auction_id", req.BidRequest.ID).
+						Int("receipts", len(receipts)).
+						Msg("Failed to log curator signal receipts")
+				}
+			}
 		}
 	}
 
@@ -2443,7 +2494,7 @@ func (e *Exchange) callBiddersWithFPD(ctx context.Context, req *openrtb.BidReque
 
 				// Clone request and apply bidder-specific FPD
 				publisherID := middleware.PublisherIDFromContext(ctx)
-				bidderReq := e.cloneRequestWithFPD(req, code, bidderFPD, publisherID)
+				bidderReq := e.cloneRequestWithFPDCtx(ctx, req, code, bidderFPD, publisherID)
 
 				result := e.callBidder(ctx, bidderReq, code, awi.Adapter, timeout)
 
@@ -2723,6 +2774,76 @@ func (e *Exchange) cloneRequestWithFPD(req *openrtb.BidRequest, bidderCode strin
 	e.augmentSChain(&clone, bidderCode, publisherID)
 
 	return &clone
+}
+
+// cloneRequestWithFPDCtx is the curated-deals-aware variant of
+// cloneRequestWithFPD. It produces the standard per-bidder clone, then layers
+// signal-passthrough on top: when this bidder is permitted on a hydrated
+// curated deal (via curator_seats ∩ deal.wseat), the inbound EID set captured
+// before the global allow-list filter is re-attached to clone.User.EIDs.
+//
+// The User pointer is deep-copied before mutation so other bidders' clones
+// are not affected. Falls through to the base clone when no curator context
+// is on ctx (curated deals disabled or no PMP deals in this auction).
+func (e *Exchange) cloneRequestWithFPDCtx(
+	ctx context.Context,
+	req *openrtb.BidRequest,
+	bidderCode string,
+	bidderFPD fpd.BidderFPD,
+	publisherID string,
+) *openrtb.BidRequest {
+	clone := e.cloneRequestWithFPD(req, bidderCode, bidderFPD, publisherID)
+
+	cc := CuratorContextFromCtx(ctx)
+	if cc == nil {
+		return clone
+	}
+
+	// Prepend curator schain nodes on every clone so DSPs can attribute the
+	// signal source regardless of whether THIS bidder is the curator's
+	// permitted seat. Independent of signal-passthrough — the schain
+	// always reflects who facilitated the deal.
+	if len(cc.CuratorsByID) > 0 {
+		curators := make([]*storage.Curator, 0, len(cc.CuratorsByID))
+		for _, c := range cc.CuratorsByID {
+			curators = append(curators, c)
+		}
+		prependCuratorSChainNodes(clone, curators, e.config.CloneLimits.MaxSChainNodes)
+	}
+
+	permitted := cc.IsBidderPermitted(ctx, e.curatorCatalog, bidderCode)
+
+	if !permitted || len(cc.OriginalUserEIDs) == 0 {
+		// Even when not restoring EIDs, record receipts for permitted deals
+		// so the schain attribution audit captures what was sent.
+		if permitted {
+			recordSignalReceipts(cc, clone, e.curatorCatalog, bidderCode, req.ID)
+		}
+		return clone
+	}
+
+	// Permitted seat: re-attach the unfiltered EID set. Deep-copy User so
+	// the slice replacement does not bleed into other bidders' clones.
+	if clone.User == nil {
+		userCopy := openrtb.User{}
+		clone.User = &userCopy
+	} else {
+		userCopy := *clone.User
+		clone.User = &userCopy
+	}
+	clone.User.EIDs = append(make([]openrtb.EID, 0, len(cc.OriginalUserEIDs)), cc.OriginalUserEIDs...)
+
+	logger.Log.Debug().
+		Str("bidder_code", bidderCode).
+		Str("auction_id", req.ID).
+		Int("eids_restored", len(clone.User.EIDs)).
+		Msg("curator signal passthrough: EIDs restored for permitted seat")
+
+	// Record forensic signal receipts (one per permitted deal). Drained
+	// post-fanout in RunAuction and forwarded to analytics.LogSignalReceipts.
+	recordSignalReceipts(cc, clone, e.curatorCatalog, bidderCode, req.ID)
+
+	return clone
 }
 
 // filterImpExtForBidder strips all known SSP keys from imp.ext except the one

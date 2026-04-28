@@ -11,6 +11,7 @@ import (
 type mockModule struct {
 	auctionCalls int
 	videoCalls   int
+	receiptCalls int
 	shutdownErr  error
 	logErr       error
 }
@@ -22,6 +23,11 @@ func (m *mockModule) LogAuctionObject(ctx context.Context, auction *AuctionObjec
 
 func (m *mockModule) LogVideoObject(ctx context.Context, video *VideoObject) error {
 	m.videoCalls++
+	return m.logErr
+}
+
+func (m *mockModule) LogSignalReceipts(_ context.Context, _ []SignalReceipt) error {
+	m.receiptCalls++
 	return m.logErr
 }
 
