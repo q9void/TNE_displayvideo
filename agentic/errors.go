@@ -11,7 +11,7 @@ var (
 	ErrTmax = errors.New("agentic: tmax exceeded")
 
 	// ErrCircuitOpen indicates the per-agent circuit breaker is open and the
-	// call was skipped without dialling.
+	// call was skipped without dialing.
 	ErrCircuitOpen = errors.New("agentic: circuit breaker open")
 
 	// ErrUnsupportedIntent indicates the mutation carries an Intent not in

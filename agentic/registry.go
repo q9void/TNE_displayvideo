@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+
 	"github.com/xeipuuv/gojsonschema"
 )
 

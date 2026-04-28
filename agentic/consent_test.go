@@ -49,7 +49,7 @@ func TestDeriveAgentConsent_CCPAOptOut_Blocks(t *testing.T) {
 
 func TestDeriveAgentConsent_BareContext_PermissiveDefault(t *testing.T) {
 	// Tests that bypass middleware end up here. Default permissive matches
-	// existing bidder-path behaviour.
+	// existing bidder-path behavior.
 	req := &openrtb.BidRequest{}
 	assert.True(t, DeriveAgentConsent(context.Background(), req))
 }

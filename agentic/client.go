@@ -46,7 +46,7 @@ type ClientConfig struct {
 	// MaxRecvMsgBytes caps inbound gRPC message size. Default 4 MiB.
 	MaxRecvMsgBytes int
 
-	// AllowInsecure permits dialling plain "grpc://" / "host:port" endpoints
+	// AllowInsecure permits dialing plain "grpc://" / "host:port" endpoints
 	// without TLS. Production should always set this false; it is true in
 	// tests and dev. Defaults to false.
 	AllowInsecure bool
@@ -100,7 +100,7 @@ func NewClient(reg *Registry, cfg ClientConfig, stamper OriginatorStamper) (*Cli
 	for _, agent := range reg.AllAgents() {
 		if err := c.dialOne(agent); err != nil {
 			if cerr := c.Close(); cerr != nil {
-				err = fmt.Errorf("%w (and close error: %v)", err, cerr)
+				err = fmt.Errorf("%w (and close error: %w)", err, cerr)
 			}
 			return nil, fmt.Errorf("agentic: dial %s: %w", agent.ID, err)
 		}
@@ -219,7 +219,7 @@ func (c *Client) Dispatch(ctx context.Context, req *pb.RTBRequest, lc Lifecycle)
 		}(agent)
 	}
 
-	// Hard wait — even if individual ctx aren't cancelled, we don't await
+	// Hard wait — even if individual ctx aren't canceled, we don't await
 	// past the master deadline.
 	master := time.NewTimer(time.Duration(deadlineMs) * time.Millisecond)
 	defer master.Stop()
@@ -269,7 +269,7 @@ func (c *Client) callOne(ctx context.Context, agent AgentEndpoint, lc Lifecycle,
 
 	if !hasStub || !hasBr {
 		stat.Status = "error"
-		stat.Error = "agent not dialled"
+		stat.Error = "agent not dialed"
 		stat.LatencyMs = time.Since(startMs).Milliseconds()
 		return result{agent: agent, stat: stat}
 	}

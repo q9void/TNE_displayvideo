@@ -181,7 +181,7 @@ func TestDispatch_panicInOurCode_recovered(t *testing.T) {
 	// Use the AgentEndpoint with no stub — callOne will short-circuit cleanly,
 	// not panic, but the recover() guard is the safety net we still want
 	// covered by a unit. We'll reach inside and remove the stub after dial
-	// to force an "agent not dialled" path.
+	// to force an "agent not dialed" path.
 	b := &FakeAgentBehaviour{}
 	addr, stop := StartFakeAgent(t, b)
 	defer stop()
@@ -195,7 +195,7 @@ func TestDispatch_panicInOurCode_recovered(t *testing.T) {
 	out := c.Dispatch(context.Background(), &pb.RTBRequest{Id: proto.String("a")}, LifecyclePublisherBidRequest)
 	require.Len(t, out.AgentStats, 1)
 	assert.Equal(t, "error", out.AgentStats[0].Status)
-	assert.Contains(t, out.AgentStats[0].Error, "not dialled")
+	assert.Contains(t, out.AgentStats[0].Error, "not dialed")
 }
 
 func TestDispatch_concurrent_safe(t *testing.T) {

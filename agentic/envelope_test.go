@@ -44,7 +44,7 @@ func TestWriteAgentEnvelope_excludesAgentsCalled(t *testing.T) {
 	env, err := ReadInboundEnvelope(req)
 	require.NoError(t, err)
 	require.NotNil(t, env)
-	// Confidentiality: agents must NOT see who else has been dialled.
+	// Confidentiality: agents must NOT see who else has been dialed.
 	assert.Empty(t, env.AgentsCalled, "agent envelope must not carry agentsCalled")
 	assert.Equal(t, "DSP_BID_RESPONSE", env.Lifecycle)
 }

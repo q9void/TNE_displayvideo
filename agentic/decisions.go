@@ -45,7 +45,7 @@ type MutationOrigin struct {
 // DispatchResult is what the Client returns from a Dispatch call. The
 // Mutations slice is the merged, deterministically-ordered output across
 // all agents that responded within tmax. AgentStats is one entry per
-// dialled agent (success or failure). Truncated indicates at least one
+// dialed agent (success or failure). Truncated indicates at least one
 // agent missed tmax.
 type DispatchResult struct {
 	Mutations    []*pb.Mutation

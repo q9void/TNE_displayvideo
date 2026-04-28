@@ -24,7 +24,7 @@ import (
 //
 // The caller is responsible for the soft/hard distinction at the agent
 // level — DeriveAgentConsent returns the union of both decisions, and the
-// Client applies essentials-only behaviour in the soft case based on the
+// Client applies essentials-only behavior in the soft case based on the
 // AgentEndpoint.Essential flag.
 func DeriveAgentConsent(ctx context.Context, req *openrtb.BidRequest) bool {
 	if req == nil {
@@ -36,7 +36,7 @@ func DeriveAgentConsent(ctx context.Context, req *openrtb.BidRequest) bool {
 	}
 	// Soft check via existing privacy middleware. When the middleware
 	// hasn't run (e.g. in tests using a bare context), ShouldCollectPII
-	// defaults true, which is the right behaviour for tests that bypass
+	// defaults true, which is the right behavior for tests that bypass
 	// the middleware path entirely.
 	return middleware.ShouldCollectPII(ctx)
 }

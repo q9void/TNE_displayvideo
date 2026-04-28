@@ -10,7 +10,7 @@ import (
 	"github.com/thenexusengine/tne_springwire/internal/openrtb"
 )
 
-// ApplierConfig governs the applier's behaviour. All fields have sensible
+// ApplierConfig governs the applier's behavior. All fields have sensible
 // zero values per Phase 1 defaults; pass an explicit ApplierConfig to
 // NewApplier when you want to override them.
 type ApplierConfig struct {
@@ -100,7 +100,7 @@ type ApplyOutput struct {
 
 // Apply mutates req or rsp in place per the incoming mutations. origins must
 // be a parallel slice (origins[i] describes the agent that produced muts[i]).
-// Returns an ApplyOutput summarising every decision.
+// Returns an ApplyOutput summarizing every decision.
 //
 // The mutation slice is sorted in place by (intent, priority, agent_id) for
 // deterministic iteration. Conflicts on the same (intent, path) tuple use

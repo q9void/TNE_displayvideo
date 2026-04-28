@@ -98,7 +98,7 @@ func writeExt(w *extWrap) (json.RawMessage, error) {
 // Soft cap (4 KB): drops PageContext first, then IntentHints. Hard cap
 // (8 KB): drops the entire aamp block, returning the unmodified ext (PRD
 // R6.2.3 mirror). Returns nil error on size-cap drops — they are not
-// errors, they are documented behaviour.
+// errors, they are documented behavior.
 func WriteOutboundEnvelope(req *openrtb.BidRequest, sellerID string, lc Lifecycle, consent bool, agentsCalled []string, mutationsApplied int) error {
 	if req == nil {
 		return nil
@@ -117,7 +117,7 @@ func WriteOutboundEnvelope(req *openrtb.BidRequest, sellerID string, lc Lifecycl
 // WriteAgentEnvelope writes the minimal ext.aamp envelope onto a BidRequest
 // destined for an extension-point agent. AgentsCalled is omitted on
 // purpose (PRD §5.4 confidentiality — agents must not see who else has been
-// dialled this auction).
+// dialed this auction).
 func WriteAgentEnvelope(req *openrtb.BidRequest, sellerID string, lc Lifecycle, consent bool) error {
 	if req == nil {
 		return nil
@@ -147,11 +147,11 @@ func setEnvelopeWithSizeCaps(req *openrtb.BidRequest, env Envelope) error {
 	if len(body) > envelopeHardCapBytes {
 		// Re-marshal without aamp.
 		wrap.AAMP = nil
-		out, err := writeExt(wrap)
-		if err != nil {
-			return err
+		stripped, werr := writeExt(wrap)
+		if werr != nil {
+			return werr
 		}
-		req.Ext = out
+		req.Ext = stripped
 		return nil
 	}
 	// Soft cap — drop pageContext first, then intentHints. (Outbound envelopes

@@ -137,7 +137,7 @@ func TestIntegration_tmaxBudget_dropsLateAgent(t *testing.T) {
 }
 
 // TestIntegration_COPPABlocksDispatch confirms the consent layer hard-blocks
-// COPPA traffic before any agent is dialled. (Hook A invokes
+// COPPA traffic before any agent is dialed. (Hook A invokes
 // DeriveAgentConsent before Dispatch; here we exercise the same gate at
 // the integration level.)
 func TestIntegration_COPPABlocksDispatch(t *testing.T) {
@@ -167,10 +167,10 @@ func TestIntegration_COPPABlocksDispatch(t *testing.T) {
 
 	// Confirm the fake was never called (no dispatch happened in this gate
 	// path — Hook A returns early before calling Dispatch).
-	assert.Equal(t, int32(0), b.Calls.Load(), "fake agent must not be dialled when COPPA blocks")
+	assert.Equal(t, int32(0), b.Calls.Load(), "fake agent must not be dialed when COPPA blocks")
 }
 
-// TestIntegration_disabledShade_rejected confirms the OQ3 default behaviour:
+// TestIntegration_disabledShade_rejected confirms the OQ3 default behavior:
 // the shading code path is present but rejected by the applier when
 // DisableShadeIntent=true.
 func TestIntegration_disabledShade_rejected(t *testing.T) {
