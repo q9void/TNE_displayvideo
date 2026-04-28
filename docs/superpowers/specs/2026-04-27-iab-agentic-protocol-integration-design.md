@@ -43,7 +43,7 @@ For TNE Catalyst, the strategic question is no longer *"should we be agentic?"* 
 ### 2.1 Goals (Phase 1 — this cycle)
 
 - **G1.** Speak ARTF v1.0 on the wire: emit `Originator{type=TYPE_SSP, id=<seller_id>}` and a structured `BidRequest.ext.aamp` envelope on every outbound bid request and every extension-point call.
-- **G2.** Implement an outbound `RTBExtensionPoint` gRPC client (`internal/agentic/client.go`) with strict tmax budgeting (default 30 ms), parallel fan-out to N configured agents, no retries, and circuit-breaker integration mirroring the existing bidder breaker.
+- **G2.** Implement an outbound `RTBExtensionPoint` gRPC client (`agentic/client.go`) with strict tmax budgeting (default 30 ms), parallel fan-out to N configured agents, no retries, and circuit-breaker integration mirroring the existing bidder breaker.
 - **G3.** Apply mutations safely. Honor seven intents (`ACTIVATE_SEGMENTS`, `ACTIVATE_DEALS`, `SUPPRESS_DEALS`, `ADJUST_DEAL_FLOOR`, `ADJUST_DEAL_MARGIN`, `BID_SHADE`, `ADD_METRICS`); reject anything else; cap mutations per request; log every applied/rejected decision.
 - **G4.** Hook two lifecycle points in `internal/exchange/exchange.go`:
   - `LIFECYCLE_PUBLISHER_BID_REQUEST` — pre-fanout, before `callBiddersWithFPD` (line ~2302)
@@ -56,7 +56,7 @@ For TNE Catalyst, the strategic question is no longer *"should we be agentic?"* 
 
 ### 2.2 Stretch goals (this cycle if time permits)
 
-- **S1.** Prebid.js adapter scaffold under `web/prebid-adapter/` — JS module + README + smoke tests, *not* published to the prebid.js org repo.
+- **S1.** Prebid.js adapter scaffold under `agentic/prebid-adapter/` — JS module + README + smoke tests, *not* published to the prebid.js org repo.
 - **S2.** `agents.json` admin CRUD (read-only list view in the existing onboarding admin SPA).
 
 ### 2.3 Non-Goals
@@ -170,12 +170,12 @@ service RTBExtensionPoint {
 
 ### 5.1 Outbound Extension-Point Client (Phase 1)
 
-A new package `internal/agentic/` contains an `ExtensionPointClient` that dials configured agents via ARTF gRPC and returns a flat `[]Mutation` per call.
+A new package `agentic/` contains an `ExtensionPointClient` that dials configured agents via ARTF gRPC and returns a flat `[]Mutation` per call.
 
 **Public interface:**
 
 ```go
-// internal/agentic/client.go
+// agentic/client.go
 package agentic
 
 type Client interface {
@@ -212,7 +212,7 @@ Out of Phase 1 scope. Section retained for forward-compat:
 
 ### 5.3 `/.well-known/agents.json`
 
-A new HTTP handler `internal/endpoints/agents_json.go` serves a static JSON document declaring the agents this SSP delegates to. Mirrors the `sellers.json` handler at `internal/endpoints/sellers_json.go`:
+A new HTTP handler `agentic/endpoints/agents_json.go` serves a static JSON document declaring the agents this SSP delegates to. Mirrors the `sellers.json` handler at `internal/endpoints/sellers_json.go`:
 
 - Routes registered in `cmd/server/server.go` adjacent to the existing sellers.json registrations (currently lines ~403–406):
   - `GET /agents.json`
@@ -220,9 +220,9 @@ A new HTTP handler `internal/endpoints/agents_json.go` serves a static JSON docu
 - `Content-Type: application/json; charset=utf-8`
 - `Cache-Control: public, max-age=3600` (1h — shorter than sellers.json since agent rosters change more often)
 - CORS: `Access-Control-Allow-Origin: *`
-- Document loaded from disk path `assets/agents.json` (override via `AGENTIC_AGENTS_PATH`).
+- Document loaded from disk path `agentic/assets/agents.json` (override via `AGENTIC_AGENTS_PATH`).
 
-**Document is the source of truth for the in-process allow-list.** On boot, `cmd/server/server.go` reads `assets/agents.json`, validates against the schema (§7.4), and constructs the `agentic.AgentRegistry`. The same file is then served unchanged.
+**Document is the source of truth for the in-process allow-list.** On boot, `cmd/server/server.go` reads `agentic/assets/agents.json`, validates against the schema (§7.4), and constructs the `agentic.AgentRegistry`. The same file is then served unchanged.
 
 ### 5.4 OpenRTB `Originator` + AAMP Extensions
 
@@ -260,7 +260,7 @@ Notes:
 
 ### 5.5 Mutation Application Engine
 
-`internal/agentic/applier.go` exposes a single function:
+`agentic/applier.go` exposes a single function:
 
 ```go
 // Apply mutates req in-place (PUBLISHER_BID_REQUEST lifecycle)
@@ -301,7 +301,7 @@ func (a *Applier) Apply(
 
 ### 5.6 Per-Publisher / Global Agent Config
 
-**Phase 1 = global allow-list.** The agent roster lives in `assets/agents.json` and is loaded once at boot. No per-publisher override at runtime.
+**Phase 1 = global allow-list.** The agent roster lives in `agentic/assets/agents.json` and is loaded once at boot. No per-publisher override at runtime.
 
 **Reserved for Phase 2.** A nullable `agentic_override` JSONB column on `publishers_new` (added in a Phase 2 migration, not Phase 1) will allow a publisher to opt specific agents in/out:
 
@@ -518,10 +518,10 @@ pbjs.setConfig({
 
 ### 6.7 Where the code lives
 
-**Phase 1 scaffold:** `web/prebid-adapter/` directory in this repo containing:
+**Phase 1 scaffold:** `agentic/prebid-adapter/` directory in this repo containing:
 
 ```
-web/prebid-adapter/
+agentic/prebid-adapter/
   README.md
   package.json                       # private:true, no publish
   src/
@@ -551,12 +551,57 @@ Not published to the prebid.js org repo this cycle. Contribution upstream is a s
 
 ## 7. Data Shapes
 
-### 7.1 Vendored Protos
+### 7.0 Directory Layout — All New Code Under `agentic/`
 
-We vendor the IAB protos verbatim under `proto/iabtechlab/`:
+All net-new code clusters under a single `agentic/` umbrella at repo root. Modifications to existing files (`internal/exchange/exchange.go`, `cmd/server/server.go`, `cmd/server/config.go`, `go.mod`) are unavoidable integration points and stay where they are. Everything else is new and lives here:
 
 ```
-proto/iabtechlab/
+agentic/                                       # umbrella for all new code
+  README.md                                     # package overview + agent onboarding
+  doc.go                                        # Go package doc comment
+  client.go applier.go registry.go              # core Go package (one import path)
+  originator.go envelope.go consent.go
+  decisions.go errors.go
+  client_test.go applier_test.go ...            # unit tests + fake_agent_test.go
+  proto/
+    iabtechlab/                                 # vendored protos (read-only)
+      bidstream/mutation/v1/*.proto
+      openrtb/v2.6/openrtb.proto
+    tne/v1/                                     # our own extension protos (reserved)
+  gen/
+    iabtechlab/                                 # generated Go (committed)
+      bidstream/mutation/v1/*.pb.go
+      bidstream/mutation/v1/*_grpc.pb.go
+      openrtb/v2.6/openrtb.pb.go
+  endpoints/                                    # HTTP handlers sub-package
+    agents_json.go
+    agents_admin.go
+    agents_json_test.go
+  assets/                                       # static files served by endpoints
+    agents.json
+    agents.schema.json
+  prebid-adapter/                               # JS scaffold (separate concern, not Go)
+    README.md package.json
+    src/ test/ examples/
+  docs/                                         # onboarding docs for agent vendors
+    README.md
+    agent-vendor-onboarding.md
+```
+
+**Go import paths:**
+- `github.com/thenexusengine/tne_springwire/agentic` — the core package
+- `github.com/thenexusengine/tne_springwire/agentic/endpoints` — HTTP handlers
+- `github.com/thenexusengine/tne_springwire/agentic/gen/iabtechlab/bidstream/mutation/v1` — generated protos (aliased `pb` in callers)
+- `github.com/thenexusengine/tne_springwire/agentic/gen/iabtechlab/openrtb/v2.6` — generated OpenRTB protos
+
+**Why one umbrella:** the agentic feature is independently shippable, vendorable, and revertable. Clustering keeps the blast radius of "git revert agentic/" minimal — only the three integration files outside the umbrella need separate touch.
+
+### 7.1 Vendored Protos
+
+We vendor the IAB protos verbatim under `agentic/proto/iabtechlab/`:
+
+```
+agentic/proto/iabtechlab/
   README.md                                            (provenance + commit SHA)
   bidstream/mutation/v1/
     agenticrtbframework.proto                          (vendored from IABTechLab/agentic-rtb-framework)
@@ -566,19 +611,19 @@ proto/iabtechlab/
 ```
 
 **Pinning policy:**
-- `proto/iabtechlab/README.md` records the upstream repo URL, commit SHA, and date pulled.
+- `agentic/proto/iabtechlab/README.md` records the upstream repo URL, commit SHA, and date pulled.
 - Refresh procedure documented but manual — a script `scripts/refresh-agentic-protos.sh` is **out of scope** Phase 1.
-- We do not modify the upstream protos. If we need to extend, we use the reserved `Ext` extension range (`extensions 500 to max`) in our own proto file under `proto/tne/agentic/v1/`.
+- We do not modify the upstream protos. If we need to extend, we use the reserved `Ext` extension range (`extensions 500 to max`) in our own proto file under `agentic/proto/tne/v1/`.
 
 **Go code generation:**
-- Generated code lands in `pkg/pb/iabtechlab/...` (matching the existing `pkg/pb/` convention referenced in the upstream repo's layout).
+- Generated code lands in `agentic/gen/iabtechlab/...` (matching the existing `pkg/pb/` convention referenced in the upstream repo's layout).
 - Generated files `*.pb.go` and `*_grpc.pb.go` are committed to the repo (no `go generate` at build time). This matches the existing repo policy (no codegen in CI).
 - A `Makefile` target `make generate-protos` documents the regeneration command. Devs run it locally; CI does not.
 
-### 7.2 Go Types (`internal/agentic/`)
+### 7.2 Go Types (`agentic/`)
 
 ```
-internal/agentic/
+agentic/
   client.go            # ExtensionPointClient: gRPC fan-out + tmax + circuit breaker
   applier.go           # Applier: per-intent mutation handlers
   registry.go          # AgentRegistry: load+validate agents.json
@@ -689,7 +734,7 @@ const (
 
 ### 7.4 `agents.json` Schema
 
-**Path:** `assets/agents.json` on disk; served at `/.well-known/agents.json` and `/agents.json`.
+**Path:** `agentic/assets/agents.json` on disk; served at `/.well-known/agents.json` and `/agents.json`.
 
 **Schema** (validated at boot via `gojsonschema` — already in `go.mod`):
 
@@ -752,7 +797,7 @@ const (
 | `agents[].requires` | no | Pre-call gating signals. |
 | `agents[].data_processing` | no | Disclosure for the publisher / IAB registry. |
 
-**JSON Schema** stored alongside the document at `assets/agents.schema.json` and loaded at boot.
+**JSON Schema** stored alongside the document at `agentic/assets/agents.schema.json` and loaded at boot.
 
 ---
 
@@ -784,8 +829,8 @@ Added to `cmd/server/config.go`:
 | Env var | Default | Meaning |
 |---|---|---|
 | `AGENTIC_ENABLED` | `false` | Master kill switch. When false, agentic code path is skipped entirely. |
-| `AGENTIC_AGENTS_PATH` | `assets/agents.json` | Path to agent registry document. |
-| `AGENTIC_SCHEMA_PATH` | `assets/agents.schema.json` | Path to JSON schema. |
+| `AGENTIC_AGENTS_PATH` | `agentic/assets/agents.json` | Path to agent registry document. |
+| `AGENTIC_SCHEMA_PATH` | `agentic/assets/agents.schema.json` | Path to JSON schema. |
 | `AGENTIC_TMAX_MS` | `30` | Global hard cap on agent fanout (per lifecycle). |
 | `AGENTIC_SELLER_ID` | `9131` | Value emitted as `Originator.id`. |
 | `AGENTIC_API_KEY` | `""` | Outbound `x-aamp-key` gRPC metadata header value. Per-agent override via env `AGENTIC_API_KEY_<AGENT_ID>`. |
@@ -977,7 +1022,7 @@ The auction **never fails** because of an agent failure. Agents are strictly bes
 | `privacyMiddleware` (server.go:323) | Unchanged. Runs before auction handler — agentic code reads its output. |
 | `bidder_field_rules` (per `2026-03-30-bid-request-composer-design.md`) | Independent. Composer runs after agentic Hook A so agent-injected segments flow through to bidders. |
 | Telemetry checkpoints (per `2026-03-13-bid-telemetry-ssp-audit-design.md`) | New checkpoints `CP-AGENTIC-1` and `CP-AGENTIC-2` slot into the existing report card. |
-| `assets/sellers.json` handler | `assets/agents.json` handler is a parallel implementation; they share no code but live side-by-side. |
+| `assets/sellers.json` handler | `agentic/assets/agents.json` handler is a parallel implementation; they share no code but live side-by-side. |
 
 ---
 
@@ -986,17 +1031,17 @@ The auction **never fails** because of an agent failure. Agents are strictly bes
 ### 10.1 Phase 1 — Outbound, Read-Mostly (this cycle, ~2 weeks)
 
 **Scope:**
-- ARTF protos vendored under `proto/iabtechlab/`
-- `internal/agentic/` package: `Client`, `Applier`, `Registry`, `OriginatorStamper`, `Envelope`, `Consent`
+- ARTF protos vendored under `agentic/proto/iabtechlab/`
+- `agentic/` package: `Client`, `Applier`, `Registry`, `OriginatorStamper`, `Envelope`, `Consent`
 - Hook A and Hook B wired into `exchange.RunAuction`
 - `/.well-known/agents.json` + `/agents.json` HTTP handlers
-- `assets/agents.json` + `assets/agents.schema.json` shipped
+- `agentic/assets/agents.json` + `agentic/assets/agents.schema.json` shipped
 - `ServerConfig.Agentic` + env vars per §8.3
 - Read-only `/admin/agents` + `/admin/agents/{id}`
 - Per-mutation structured logging + new Prometheus metrics
 - Unit tests on every intent applier + circuit breaker integration test
 - Integration test: full auction against in-process fake agent gRPC server
-- README section + new `docs/integrations/agentic/` directory documenting how to register an agent
+- README section + new `agentic/docs/` directory documenting how to register an agent
 
 **Out of scope:**
 - Inbound gRPC server (Phase 2)
@@ -1016,7 +1061,7 @@ The auction **never fails** because of an agent failure. Agents are strictly bes
 
 #### 10.1.s1 Stretch — Prebid Adapter Scaffold (Phase 1)
 
-`web/prebid-adapter/` directory created per §6.7. Adapter compiles, unit tests pass on `tneCatalystAgenticEnvelope` and `agenticConsent`. Not yet shipped to publishers. **Stretch:** drop if Phase 1 server work runs long.
+`agentic/prebid-adapter/` directory created per §6.7. Adapter compiles, unit tests pass on `tneCatalystAgenticEnvelope` and `agenticConsent`. Not yet shipped to publishers. **Stretch:** drop if Phase 1 server work runs long.
 
 ### 10.2 Phase 2 — Inbound Seller-Agent + Prebid Adapter Public Beta (~4 weeks after Phase 1)
 
@@ -1061,7 +1106,7 @@ Phase 1 is reversible by env var: setting `AGENTIC_ENABLED=false` and SIGHUP'ing
 
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|------|---|---|---|
-| R1 | ARTF v1.0 field numbers renumber before final | Med | Med | Vendor protos at pinned SHA; isolate proto-touching code in `internal/agentic/`; refresh-on-spec-change is one-package change |
+| R1 | ARTF v1.0 field numbers renumber before final | Med | Med | Vendor protos at pinned SHA; isolate proto-touching code in `agentic/`; refresh-on-spec-change is one-package change |
 | R2 | A slow agent stretches auction tmax | High | High | Hard tmax cap (R5.1.2); circuit breaker (R5.1.4); dispatch never blocks bidder fanout; cancellation propagates |
 | R3 | Agent returns adversarial mutations (e.g. floors to $0) | Med | High | Whitelist intents (R5.5.1); path validation (R5.5.4); bounds clamping (R5.5.9, R5.5.10); per-mutation audit |
 | R4 | Consent model for agent processing not codified | High | Med | Derive from existing TCF/GPP middleware; document our mapping; ready to swap when IAB freezes |
@@ -1089,7 +1134,7 @@ Phase 1 is reversible by env var: setting `AGENTIC_ENABLED=false` and SIGHUP'ing
 - **D4.** `AGENTIC_ENABLED=false` default.
 - **D5.** API key in gRPC metadata for outbound auth.
 - **D6.** Add `google.golang.org/grpc` + promote `google.golang.org/protobuf` to direct dep.
-- **D7.** Prebid adapter scaffold in `web/prebid-adapter/`; not published.
+- **D7.** Prebid adapter scaffold in `agentic/prebid-adapter/`; not published.
 - **D8.** Push branch when done; no PR opened.
 
 ---
@@ -1207,11 +1252,11 @@ Date pulled: **2026-04-27**
 
 | Vendored to | Source path |
 |---|---|
-| `proto/iabtechlab/bidstream/mutation/v1/agenticrtbframework.proto` | `proto/agenticrtbframework.proto` |
-| `proto/iabtechlab/bidstream/mutation/v1/agenticrtbframeworkservices.proto` | `agenticrtbframeworkservices.proto` |
-| `proto/iabtechlab/openrtb/v2.6/openrtb.proto` | `proto/com/iabtechlab/openrtb/v2.6/openrtb.proto` (transitive) |
+| `agentic/proto/iabtechlab/bidstream/mutation/v1/agenticrtbframework.proto` | `proto/agenticrtbframework.proto` |
+| `agentic/proto/iabtechlab/bidstream/mutation/v1/agenticrtbframeworkservices.proto` | `agenticrtbframeworkservices.proto` |
+| `agentic/proto/iabtechlab/openrtb/v2.6/openrtb.proto` | `proto/com/iabtechlab/openrtb/v2.6/openrtb.proto` (transitive) |
 
-Provenance recorded in `proto/iabtechlab/README.md` with SHA + date.
+Provenance recorded in `agentic/proto/iabtechlab/README.md` with SHA + date.
 
 ### 15.3 Glossary
 
