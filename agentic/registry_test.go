@@ -98,6 +98,50 @@ func TestLoadRegistry_DocumentBytes_unchanged(t *testing.T) {
 	assert.Contains(t, string(body), `"seg.example.com"`)
 }
 
+func TestLoadRegistry_v2DocPopulatesCapabilities(t *testing.T) {
+	reg, err := LoadRegistry(filepath.Join("assets", "agents.json"), schemaRel)
+	require.NoError(t, err)
+	assert.Equal(t, "2.0", reg.Version())
+
+	caps := reg.Capabilities()
+	assert.Equal(t, "2.1", caps.OpenDirectVersion)
+	assert.Equal(t, "1.0", caps.AdCOMVersion)
+	assert.Equal(t, "3.0", caps.ContentTaxonomyVersion)
+	assert.Contains(t, caps.IntentsInbound, "ACTIVATE_SEGMENTS")
+	assert.Contains(t, caps.IntentsInbound, "BID_SHADE")
+	assert.Contains(t, caps.Lifecycles, "PUBLISHER_BID_REQUEST")
+	assert.Contains(t, caps.DealTypesAccepted, "programmatic_pmp")
+	assert.Equal(t, "thenexusengine.com", reg.SellerDomain())
+}
+
+func TestLoadRegistry_v1DocStillWorks(t *testing.T) {
+	// Phase 1 fixture remains valid against the v2 schema.
+	reg, err := LoadRegistry(filepath.Join("testdata", "agents-one.json"), schemaRel)
+	require.NoError(t, err)
+	assert.Equal(t, "1.0", reg.Version())
+	caps := reg.Capabilities()
+	// v1.0 documents have no capabilities block — accessor returns zero value.
+	assert.Empty(t, caps.IntentsInbound)
+	assert.Empty(t, caps.OpenDirectVersion)
+	// MediaKits / ProductCatalogs likewise empty.
+	assert.Empty(t, reg.MediaKits())
+	assert.Empty(t, reg.ProductCatalogs())
+}
+
+func TestLoadRegistry_v2EmptyCapabilities(t *testing.T) {
+	doc := []byte(`{
+		"$schema": "https://thenexusengine.com/schemas/agents.v2.json",
+		"version": "2.0",
+		"seller_id": "9131",
+		"seller_domain": "thenexusengine.com",
+		"agents": []
+	}`)
+	reg, err := LoadRegistryFromBytes(doc)
+	require.NoError(t, err)
+	assert.Equal(t, "2.0", reg.Version())
+	assert.Empty(t, reg.Capabilities().IntentsInbound)
+}
+
 // LoadRegistry_inMemory_test is a test helper that writes a doc to a temp
 // file and runs LoadRegistry against it, exercising the same schema path.
 func LoadRegistry_inMemory_test(t *testing.T, body []byte) (*Registry, error) {
