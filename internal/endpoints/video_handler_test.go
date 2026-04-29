@@ -846,3 +846,44 @@ func TestGenerateRequestID(t *testing.T) {
 		t.Errorf("expected ID to start with 'video-', got %s", id1)
 	}
 }
+
+func TestBuildAuctionURL_ForwardsAllParams(t *testing.T) {
+	h := &VideoHandler{trackingBaseURL: "https://ads.example.com"}
+
+	q := url.Values{
+		"pub":         []string{"bein"},
+		"w":           []string{"1920"},
+		"h":           []string{"1080"},
+		"bidfloor":    []string{"5.00"},
+		"custom_sig":  []string{"abc"},
+		"id":          []string{"client-supplied"},
+		"protocols":   []string{"2", "3"},
+	}
+
+	got, err := url.Parse(h.buildAuctionURL(q, "wrapper-id-1"))
+	if err != nil {
+		t.Fatalf("buildAuctionURL produced unparseable URL: %v", err)
+	}
+
+	if got.Scheme+"://"+got.Host+got.Path != "https://ads.example.com/video/vast" {
+		t.Errorf("unexpected base URL: %s", got.String())
+	}
+
+	gotQ := got.Query()
+
+	if gotQ.Get("pub") != "bein" {
+		t.Errorf("pub not forwarded; got %q want %q", gotQ.Get("pub"), "bein")
+	}
+	if gotQ.Get("custom_sig") != "abc" {
+		t.Errorf("custom_sig not forwarded; got %q", gotQ.Get("custom_sig"))
+	}
+	if gotQ.Get("bidfloor") != "5.00" {
+		t.Errorf("bidfloor not forwarded; got %q", gotQ.Get("bidfloor"))
+	}
+	if gotQ.Get("id") != "wrapper-id-1" {
+		t.Errorf("id should be overridden by wrapper request ID; got %q", gotQ.Get("id"))
+	}
+	if vals := gotQ["protocols"]; len(vals) != 2 || vals[0] != "2" || vals[1] != "3" {
+		t.Errorf("repeated protocols param not preserved; got %v", vals)
+	}
+}
