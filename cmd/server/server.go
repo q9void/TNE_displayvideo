@@ -324,26 +324,29 @@ func (s *Server) initExchange() {
 // outbound Applier and Registry so Phase 1 and Phase 2A share a single
 // source of truth for capabilities and mutation whitelisting.
 //
-// Phase 2A ships dev-only DevAuthenticator. Production mTLS authenticator
-// lands in Phase 2A.1.
+// Two auth modes:
+//   - AllowDevNoMTLS=true (dev/staging): DevAuthenticator with empty allow-list.
+//   - AllowDevNoMTLS=false (production): MTLSAuthenticator with CA-verified
+//     handshake, per-buyer SPKI pinning, and IAB Tools Portal Registry
+//     cross-check. cmd/server/config.go::Validate gates the prod path on
+//     ENVIRONMENT=production.
 func (s *Server) initAgenticInbound(reg *agentic.Registry, applier *agentic.Applier, stamper agentic.OriginatorStamper) error {
 	log := logger.Log
 
-	if !s.config.Agentic.AllowDevNoMTLS {
-		// Production mTLS path is Phase 2A.1; refuse to start in this build.
-		return fmt.Errorf("inbound: production mTLS authenticator not yet implemented (Phase 2A.1); set AGENTIC_INBOUND_ALLOW_DEV_NO_MTLS=true for dev/staging")
+	auth, err := s.buildInboundAuthenticator()
+	if err != nil {
+		return err
 	}
 
-	// DevAuthenticator: empty allow-list at boot. Ops onboard curators
-	// via runtime DevAuthenticator.Add OR via the Phase 2A.1 mTLS path.
-	auth := inbound.NewDevAuthenticator(nil)
-
 	srv, err := inbound.NewServer(inbound.ServerConfig{
-		Enabled:         true,
-		GRPCPort:        s.config.Agentic.InboundGRPCPort,
-		AllowDevNoMTLS:  s.config.Agentic.AllowDevNoMTLS,
-		QPSPerAgent:     s.config.Agentic.InboundQPSPerAgent,
-		QPSPerPublisher: s.config.Agentic.InboundQPSPerPub,
+		Enabled:            true,
+		GRPCPort:           s.config.Agentic.InboundGRPCPort,
+		MTLSCAPath:         s.config.Agentic.MTLSCAPath,
+		MTLSServerCertPath: s.config.Agentic.MTLSServerCertPath,
+		MTLSServerKeyPath:  s.config.Agentic.MTLSServerKeyPath,
+		AllowDevNoMTLS:     s.config.Agentic.AllowDevNoMTLS,
+		QPSPerAgent:        s.config.Agentic.InboundQPSPerAgent,
+		QPSPerPublisher:    s.config.Agentic.InboundQPSPerPub,
 	}, applier, reg, auth, stamper)
 	if err != nil {
 		return fmt.Errorf("inbound.NewServer: %w", err)
@@ -354,11 +357,93 @@ func (s *Server) initAgenticInbound(reg *agentic.Registry, applier *agentic.Appl
 			log.Error().Err(err).Msg("agentic inbound server stopped")
 		}
 	}()
+
+	// Background registry refresher — only meaningful for the mTLS path,
+	// where MTLSAuthenticator implements RefreshRegistry against the IAB
+	// Tools Portal. DevAuthenticator's RefreshRegistry is a no-op.
+	if s.config.Agentic.RegistryURL != "" && !s.config.Agentic.AllowDevNoMTLS {
+		s.startRegistryRefreshLoop(auth)
+	}
+
 	log.Info().
 		Int("grpc_port", s.config.Agentic.InboundGRPCPort).
 		Bool("dev_no_mtls", s.config.Agentic.AllowDevNoMTLS).
+		Str("registry_url", s.config.Agentic.RegistryURL).
 		Msg("AAMP 2.0 inbound surface started")
 	return nil
+}
+
+// buildInboundAuthenticator constructs either a DevAuthenticator or an
+// MTLSAuthenticator depending on AllowDevNoMTLS, loading pins + registry
+// client + CA pool as needed.
+func (s *Server) buildInboundAuthenticator() (inbound.Authenticator, error) {
+	if s.config.Agentic.AllowDevNoMTLS {
+		// Empty allow-list at boot; ops add entries via DevAuthenticator.Add
+		// or by re-rolling with a populated config in mTLS mode.
+		return inbound.NewDevAuthenticator(nil), nil
+	}
+
+	caPool, err := inbound.LoadCAPool(s.config.Agentic.MTLSCAPath)
+	if err != nil {
+		return nil, fmt.Errorf("inbound: load CA pool: %w", err)
+	}
+	pins, err := inbound.LoadPinsFile(s.config.Agentic.InboundPinsPath)
+	if err != nil {
+		return nil, fmt.Errorf("inbound: load pins: %w", err)
+	}
+
+	cfg := inbound.MTLSConfig{
+		CARoots:    caPool,
+		OpenWindow: s.config.Agentic.RegistryOpenWindow,
+	}
+	if s.config.Agentic.RegistryURL != "" {
+		cfg.Registry = &inbound.HTTPRegistryClient{URL: s.config.Agentic.RegistryURL}
+	}
+	// Pins file rows double as the trusted-buyer allow-list. Each pinned
+	// agent_id is treated as DSP by default; Phase 2B will introduce a
+	// richer per-deal store.
+	cfg.AllowList = make([]inbound.AgentEntry, 0, len(pins))
+	for _, p := range pins {
+		cfg.AllowList = append(cfg.AllowList, inbound.AgentEntry{AgentID: p.AgentID, AgentType: "DSP"})
+	}
+
+	auth, err := inbound.NewMTLSAuthenticator(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("inbound: build MTLSAuthenticator: %w", err)
+	}
+	for _, p := range pins {
+		auth.AddPinned(p.AgentID, p.Current, p.Successor)
+	}
+	return auth, nil
+}
+
+// startRegistryRefreshLoop periodically calls auth.RefreshRegistry. The
+// first refresh happens immediately so prod boots with a populated
+// snapshot whenever the IAB endpoint is reachable; subsequent refreshes
+// are paced by AGENTIC_REGISTRY_REFRESH_SECONDS.
+func (s *Server) startRegistryRefreshLoop(auth inbound.Authenticator) {
+	log := logger.Log
+	interval := time.Duration(s.config.Agentic.RegistryRefreshSeconds) * time.Second
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := auth.RefreshRegistry(ctx); err != nil {
+			log.Warn().Err(err).Msg("inbound: initial registry refresh failed (open-window posture if enabled)")
+		} else {
+			log.Info().Msg("inbound: initial registry refresh succeeded")
+		}
+		cancel()
+
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for range t.C {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := auth.RefreshRegistry(ctx); err != nil {
+				log.Warn().Err(err).Msg("inbound: registry refresh failed; keeping last-known-good snapshot")
+			}
+			cancel()
+		}
+	}()
 }
 
 // initRedis initializes Redis client

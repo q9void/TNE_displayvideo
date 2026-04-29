@@ -76,6 +76,14 @@ type AgenticConfig struct {
 	InboundQPSPerAgent int
 	InboundQPSPerPub   int
 
+	// Phase 2A.1 — production auth wiring. Allow-list rows are derived from
+	// the pins file (one entry per pinned agent_id). Phase 2B will add a
+	// richer per-deal store; until then, AuthorizedDeals stays empty.
+	InboundPinsPath        string // SPKI pins JSON (per-buyer current/successor)
+	RegistryURL            string // IAB Tools Portal verified-seller endpoint; "" ⇒ skip cross-check
+	RegistryRefreshSeconds int    // how often to refresh; default 900s (15m)
+	RegistryOpenWindow     bool   // accept callers before first refresh succeeds (cold-start safety)
+
 	// Phase 2 reserved
 	GRPCPort   int
 	MCPEnabled bool
@@ -171,6 +179,10 @@ func ParseConfig() *ServerConfig {
 			AllowDevNoMTLS:          getEnvBoolOrDefault("AGENTIC_INBOUND_ALLOW_DEV_NO_MTLS", false),
 			InboundQPSPerAgent:      getEnvIntOrDefault("AGENTIC_INBOUND_QPS_PER_AGENT", 1000),
 			InboundQPSPerPub:        getEnvIntOrDefault("AGENTIC_INBOUND_QPS_PER_PUBLISHER", 200),
+			InboundPinsPath:         os.Getenv("AGENTIC_INBOUND_PINS_PATH"),
+			RegistryURL:             os.Getenv("AGENTIC_REGISTRY_URL"),
+			RegistryRefreshSeconds:  getEnvIntOrDefault("AGENTIC_REGISTRY_REFRESH_SECONDS", 900),
+			RegistryOpenWindow:      getEnvBoolOrDefault("AGENTIC_REGISTRY_OPEN_WINDOW", true),
 			GRPCPort:                getEnvIntOrDefault("AGENTIC_GRPC_PORT", 0),
 			MCPEnabled:              getEnvBoolOrDefault("AGENTIC_MCP_ENABLED", false),
 		}
@@ -434,9 +446,15 @@ func (c *ServerConfig) Validate() error {
 				if c.Agentic.MTLSCAPath == "" || c.Agentic.MTLSServerCertPath == "" || c.Agentic.MTLSServerKeyPath == "" {
 					return fmt.Errorf("AGENTIC_INBOUND_ENABLED requires AGENTIC_MTLS_{CA,CERT,KEY}_PATH unless AGENTIC_INBOUND_ALLOW_DEV_NO_MTLS=true")
 				}
+				if c.Agentic.InboundPinsPath == "" {
+					return fmt.Errorf("AGENTIC_INBOUND_ENABLED in mTLS mode requires AGENTIC_INBOUND_PINS_PATH")
+				}
 			}
 			if isProduction() && c.Agentic.AllowDevNoMTLS {
 				return fmt.Errorf("AGENTIC_INBOUND_ALLOW_DEV_NO_MTLS=true is not permitted in production")
+			}
+			if c.Agentic.RegistryRefreshSeconds < 30 {
+				return fmt.Errorf("AGENTIC_REGISTRY_REFRESH_SECONDS must be >= 30, got %d", c.Agentic.RegistryRefreshSeconds)
 			}
 		}
 	}

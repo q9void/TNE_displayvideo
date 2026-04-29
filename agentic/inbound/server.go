@@ -116,8 +116,17 @@ func (s *Server) Start() error {
 	opts := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(s.cfg.MaxRecvMsgBytes),
 	}
-	// Phase 2A.1 will add grpc.Creds(...) for mTLS termination here.
-	// Phase 2A ships dev-only and accepts plain TCP when AllowDevNoMTLS=true.
+	// Phase 2A.1: terminate mTLS in-process when AllowDevNoMTLS=false. The
+	// CA bundle drives client-cert verification at the handshake; the
+	// MTLSAuthenticator then layers SPKI pinning + registry cross-check on
+	// top via the verified leaf cert in the gRPC peer info.
+	if !s.cfg.AllowDevNoMTLS {
+		creds, err := LoadServerTLS(s.cfg.MTLSCAPath, s.cfg.MTLSServerCertPath, s.cfg.MTLSServerKeyPath)
+		if err != nil {
+			return fmt.Errorf("inbound: configure TLS: %w", err)
+		}
+		opts = append(opts, grpc.Creds(creds))
+	}
 	s.grpcServer = grpc.NewServer(opts...)
 
 	// RTBExtensionPoint — handler in rtb_handler.go
