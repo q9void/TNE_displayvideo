@@ -548,17 +548,15 @@ func (h *VideoHandler) HandleVASTWrapper(w http.ResponseWriter, r *http.Request)
 }
 
 // buildAuctionURL constructs the downstream /video/vast URL by forwarding
-// relevant query parameters from the wrapper request.
+// every query parameter from the wrapper request except `id`, which we set
+// from the wrapper's request ID so tracking pixels stay correlated.
 func (h *VideoHandler) buildAuctionURL(q url.Values, requestID string) string {
 	params := url.Values{}
-	for _, key := range []string{
-		"w", "h", "mindur", "maxdur", "skip", "skipafter",
-		"protocols", "mimes", "minbitrate", "maxbitrate",
-		"bidfloor", "site_id", "domain", "page", "placement",
-	} {
-		if v := q.Get(key); v != "" {
-			params.Set(key, v)
+	for key, vals := range q {
+		if key == "id" {
+			continue
 		}
+		params[key] = vals
 	}
 	params.Set("id", requestID)
 	return h.trackingBaseURL + "/video/vast?" + params.Encode()
