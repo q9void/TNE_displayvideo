@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/thenexusengine/tne_springwire/agentic"
 	agenticEndpoints "github.com/thenexusengine/tne_springwire/agentic/endpoints"
+	"github.com/thenexusengine/tne_springwire/agentic/inbound"
 	"github.com/thenexusengine/tne_springwire/internal/adapters"
 	"github.com/thenexusengine/tne_springwire/internal/adapters/appnexus"
 	// _ "github.com/thenexusengine/tne_springwire/internal/adapters/demo" // Disabled - no demo bids in production
@@ -58,6 +60,7 @@ type Server struct {
 	// Agentic (IAB ARTF v1.0). Populated only when AGENTIC_ENABLED=true.
 	agenticRegistry *agentic.Registry
 	agenticClient   *agentic.Client
+	agenticInbound  *inbound.Server
 }
 
 // NewServer creates a new PBS server instance
@@ -304,7 +307,58 @@ func (s *Server) initExchange() {
 			Int("tmax_ms", s.config.Agentic.TmaxMs).
 			Bool("shade_disabled", s.config.Agentic.DisableShadeIntent).
 			Msg("IAB ARTF agentic integration enabled")
+
+		// Phase 2A — inbound surface. Default-off behind AGENTIC_INBOUND_ENABLED.
+		// Independent of the outbound feature flag so we can ship Phase 2A
+		// without enabling outbound (or vice versa).
+		if s.config.Agentic.InboundEnabled {
+			if err := s.initAgenticInbound(reg, applier, stamper); err != nil {
+				log.Fatal().Err(err).Msg("Phase 2A inbound init failed")
+			}
+		}
 	}
+}
+
+// initAgenticInbound starts the AAMP 2.0 inbound gRPC server on
+// AGENTIC_INBOUND_GRPC_PORT (default 50051). The server reuses the
+// outbound Applier and Registry so Phase 1 and Phase 2A share a single
+// source of truth for capabilities and mutation whitelisting.
+//
+// Phase 2A ships dev-only DevAuthenticator. Production mTLS authenticator
+// lands in Phase 2A.1.
+func (s *Server) initAgenticInbound(reg *agentic.Registry, applier *agentic.Applier, stamper agentic.OriginatorStamper) error {
+	log := logger.Log
+
+	if !s.config.Agentic.AllowDevNoMTLS {
+		// Production mTLS path is Phase 2A.1; refuse to start in this build.
+		return fmt.Errorf("inbound: production mTLS authenticator not yet implemented (Phase 2A.1); set AGENTIC_INBOUND_ALLOW_DEV_NO_MTLS=true for dev/staging")
+	}
+
+	// DevAuthenticator: empty allow-list at boot. Ops onboard curators
+	// via runtime DevAuthenticator.Add OR via the Phase 2A.1 mTLS path.
+	auth := inbound.NewDevAuthenticator(nil)
+
+	srv, err := inbound.NewServer(inbound.ServerConfig{
+		Enabled:         true,
+		GRPCPort:        s.config.Agentic.InboundGRPCPort,
+		AllowDevNoMTLS:  s.config.Agentic.AllowDevNoMTLS,
+		QPSPerAgent:     s.config.Agentic.InboundQPSPerAgent,
+		QPSPerPublisher: s.config.Agentic.InboundQPSPerPub,
+	}, applier, reg, auth, stamper)
+	if err != nil {
+		return fmt.Errorf("inbound.NewServer: %w", err)
+	}
+	s.agenticInbound = srv
+	go func() {
+		if err := srv.Start(); err != nil {
+			log.Error().Err(err).Msg("agentic inbound server stopped")
+		}
+	}()
+	log.Info().
+		Int("grpc_port", s.config.Agentic.InboundGRPCPort).
+		Bool("dev_no_mtls", s.config.Agentic.AllowDevNoMTLS).
+		Msg("AAMP 2.0 inbound surface started")
+	return nil
 }
 
 // initRedis initializes Redis client
@@ -669,6 +723,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		} else {
 			log.Info().Msg("Event recorder flushed")
 		}
+	}
+
+	// Stop AAMP 2.0 inbound gRPC server (Phase 2A)
+	if s.agenticInbound != nil {
+		s.agenticInbound.Stop()
+		log.Info().Msg("AAMP 2.0 inbound surface stopped")
 	}
 
 	// Shutdown HTTP server
