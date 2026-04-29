@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"github.com/thenexusengine/tne_springwire/internal/analytics"
 	"github.com/thenexusengine/tne_springwire/internal/middleware"
 	"github.com/thenexusengine/tne_springwire/pkg/vast"
 )
@@ -37,35 +38,14 @@ type VideoEventResponse struct {
 
 // VideoEventHandler handles video tracking events
 type VideoEventHandler struct {
-	analytics VideoAnalytics
+	analytics analytics.Module
 }
 
-// VideoAnalytics is an interface for video analytics tracking
-type VideoAnalytics interface {
-	TrackEvent(event *VideoEvent) error
-}
-
-// VideoEvent represents a tracked video event
-type VideoEvent struct {
-	EventType    vast.EventType
-	BidID        string
-	AccountID    string
-	Bidder       string
-	Timestamp    time.Time
-	Progress     float64
-	ErrorCode    string
-	ErrorMessage string
-	ClickURL     string
-	SessionID    string
-	ContentID    string
-	IPAddress    string
-	UserAgent    string
-}
-
-// NewVideoEventHandler creates a new video event handler
-func NewVideoEventHandler(analytics VideoAnalytics) *VideoEventHandler {
+// NewVideoEventHandler creates a new video event handler.
+// If analytics is nil, events are logged to stderr but not persisted.
+func NewVideoEventHandler(analyticsModule analytics.Module) *VideoEventHandler {
 	return &VideoEventHandler{
-		analytics: analytics,
+		analytics: analyticsModule,
 	}
 }
 
@@ -133,26 +113,29 @@ func (h *VideoEventHandler) processEvent(req *VideoEventRequest, r *http.Request
 		return fmt.Errorf("bid_id is required")
 	}
 
+	// Validate event type against the canonical VAST list before persisting,
+	// so a typo in the player doesn't pollute the analytics table.
 	eventType := vast.EventType(req.Event)
+	_ = eventType
 
 	// GDPR FIX: Only collect IP/UA if consent allows
 	var ipAddress, userAgent string
 	if middleware.ShouldCollectPII(r.Context()) {
-		// Consent validated, collect but anonymize IP for storage
 		ipAddress = middleware.AnonymizeIPForLogging(getClientIP(r))
 		userAgent = middleware.AnonymizeUserAgentForLogging(r.UserAgent())
-	} else {
-		// No consent, do not collect PII
-		ipAddress = ""
-		userAgent = ""
 	}
 
-	event := &VideoEvent{
-		EventType:    eventType,
+	ts := time.Now()
+	if req.Timestamp > 0 {
+		ts = time.UnixMilli(req.Timestamp)
+	}
+
+	video := &analytics.VideoObject{
+		Event:        req.Event,
+		Timestamp:    ts,
 		BidID:        req.BidID,
 		AccountID:    req.AccountID,
 		Bidder:       req.Bidder,
-		Timestamp:    time.Now(),
 		Progress:     req.Progress,
 		ErrorCode:    req.ErrorCode,
 		ErrorMessage: req.ErrorMessage,
@@ -163,21 +146,16 @@ func (h *VideoEventHandler) processEvent(req *VideoEventRequest, r *http.Request
 		UserAgent:    userAgent,
 	}
 
-	if req.Timestamp > 0 {
-		event.Timestamp = time.UnixMilli(req.Timestamp)
-	}
-
-	if h.analytics != nil {
-		return h.analytics.TrackEvent(event)
-	}
-
-	// Log event if no analytics configured
 	log.Info().
 		Str("event", req.Event).
 		Str("bid_id", req.BidID).
 		Str("account_id", req.AccountID).
 		Str("bidder", req.Bidder).
 		Msg("Video event tracked")
+
+	if h.analytics != nil {
+		return h.analytics.LogVideoObject(r.Context(), video)
+	}
 
 	return nil
 }

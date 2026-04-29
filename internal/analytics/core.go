@@ -183,4 +183,18 @@ type VideoObject struct {
 	Muted     bool
 	Fullscreen bool
 	PlayerSize string
+
+	// Tracking-pixel event fields (populated by VideoEventHandler;
+	// adapters that only care about player telemetry can ignore these).
+	BidID        string
+	AccountID    string
+	Bidder       string
+	Progress     float64
+	ErrorCode    string
+	ErrorMessage string
+	ClickURL     string
+	SessionID    string
+	ContentID    string
+	IPAddress    string // anonymised at ingest, see middleware.AnonymizeIPForLogging
+	UserAgent    string
 }

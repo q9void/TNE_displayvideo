@@ -45,6 +45,7 @@ type Server struct {
 	httpServer        *http.Server
 	metrics           *metrics.Metrics
 	exchange          *exchange.Exchange
+	analytics         analytics.Module
 	rateLimiter       *middleware.RateLimiter
 	rawDB             *sql.DB
 	db                *storage.BidderStore
@@ -240,9 +241,8 @@ func (s *Server) initExchange() {
 	}
 
 	// Create multi-module broadcaster if any modules are enabled
-	var analyticsModule analytics.Module
 	if len(analyticsModules) > 0 {
-		analyticsModule = analytics.NewMultiModule(analyticsModules...)
+		s.analytics = analytics.NewMultiModule(analyticsModules...)
 		log.Info().
 			Int("adapter_count", len(analyticsModules)).
 			Msg("Analytics module initialized with multi-sink broadcasting")
@@ -251,7 +251,7 @@ func (s *Server) initExchange() {
 	// Create exchange config with currency converter and analytics
 	exchangeConfig := s.config.ToExchangeConfig()
 	exchangeConfig.CurrencyConverter = s.currencyConverter
-	exchangeConfig.Analytics = analyticsModule
+	exchangeConfig.Analytics = s.analytics
 
 	// Create exchange with default registry
 	s.exchange = exchange.New(adapters.DefaultRegistry, exchangeConfig)
@@ -338,7 +338,7 @@ func (s *Server) initHandlers() {
 
 	// Video handlers
 	videoHandler := endpoints.NewVideoHandler(s.exchange, s.config.HostURL, s.publisher)
-	videoEventHandler := endpoints.NewVideoEventHandler(nil) // Analytics can be added later
+	videoEventHandler := endpoints.NewVideoEventHandler(s.analytics)
 
 	log.Info().Msg("Video handlers initialized")
 

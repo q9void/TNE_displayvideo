@@ -29,9 +29,35 @@ func (a *Adapter) LogAuctionObject(ctx context.Context, auction *analytics.Aucti
 	return nil
 }
 
-// LogVideoObject is a no-op — video events are not persisted by this adapter.
-func (a *Adapter) LogVideoObject(_ context.Context, _ *analytics.VideoObject) error {
+// LogVideoObject persists a single video tracking event (impression, quartile,
+// complete, error, click, etc.) to the video_events table.
+// Runs asynchronously so the player's tracking pixel never blocks on DB latency.
+func (a *Adapter) LogVideoObject(_ context.Context, video *analytics.VideoObject) error {
+	if video == nil || video.Event == "" {
+		return nil
+	}
+	go a.persistVideoEvent(video)
 	return nil
+}
+
+func (a *Adapter) persistVideoEvent(v *analytics.VideoObject) {
+	_, err := a.db.Exec(`
+		INSERT INTO video_events (
+			bid_id, account_id, bidder, event, progress,
+			error_code, error_message, click_url, session_id, content_id,
+			ip_address, user_agent, timestamp
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+	`,
+		v.BidID, v.AccountID, v.Bidder, v.Event, v.Progress,
+		v.ErrorCode, v.ErrorMessage, v.ClickURL, v.SessionID, v.ContentID,
+		v.IPAddress, v.UserAgent, v.Timestamp,
+	)
+	if err != nil {
+		logger.Log.Error().Err(err).
+			Str("bid_id", v.BidID).
+			Str("event", v.Event).
+			Msg("postgres analytics: failed to insert video_event")
+	}
 }
 
 // Shutdown is a no-op — the shared *sql.DB pool is managed by the caller.

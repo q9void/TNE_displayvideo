@@ -2,6 +2,7 @@ package endpoints
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,23 +11,31 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/thenexusengine/tne_springwire/internal/analytics"
 	"github.com/thenexusengine/tne_springwire/internal/middleware"
 	"github.com/thenexusengine/tne_springwire/pkg/vast"
 )
 
-// mockVideoAnalytics implements VideoAnalytics interface for testing
+// mockVideoAnalytics implements analytics.Module — collects VideoObjects so
+// tests can assert on what reaches the analytics pipeline.
 type mockVideoAnalytics struct {
-	events      []*VideoEvent
+	events      []*analytics.VideoObject
 	shouldError bool
 }
 
-func (m *mockVideoAnalytics) TrackEvent(event *VideoEvent) error {
+func (m *mockVideoAnalytics) LogAuctionObject(_ context.Context, _ *analytics.AuctionObject) error {
+	return nil
+}
+
+func (m *mockVideoAnalytics) LogVideoObject(_ context.Context, video *analytics.VideoObject) error {
 	if m.shouldError {
 		return errors.New("tracking failed")
 	}
-	m.events = append(m.events, event)
+	m.events = append(m.events, video)
 	return nil
 }
+
+func (m *mockVideoAnalytics) Shutdown() error { return nil }
 
 func TestNewVideoEventHandler(t *testing.T) {
 	analytics := &mockVideoAnalytics{}
@@ -416,8 +425,8 @@ func TestHandleVideoStart(t *testing.T) {
 	}
 
 	event := analytics.events[0]
-	if event.EventType != vast.EventTypeStart {
-		t.Errorf("expected event type start, got %s", event.EventType)
+	if event.Event != string(vast.EventTypeStart) {
+		t.Errorf("expected event type start, got %s", event.Event)
 	}
 }
 
@@ -477,8 +486,8 @@ func TestHandleVideoComplete(t *testing.T) {
 	}
 
 	event := analytics.events[0]
-	if event.EventType != vast.EventTypeComplete {
-		t.Errorf("expected event type complete, got %s", event.EventType)
+	if event.Event != string(vast.EventTypeComplete) {
+		t.Errorf("expected event type complete, got %s", event.Event)
 	}
 }
 
@@ -564,8 +573,8 @@ func TestHandleVideoQuartile(t *testing.T) {
 			}
 
 			event := analytics.events[0]
-			if event.EventType != tt.expectedType {
-				t.Errorf("expected event type %s, got %s", tt.expectedType, event.EventType)
+			if event.Event != string(tt.expectedType) {
+				t.Errorf("expected event type %s, got %s", tt.expectedType, event.Event)
 			}
 		})
 	}
@@ -599,8 +608,8 @@ func TestHandleVideoClick(t *testing.T) {
 	}
 
 	event := analytics.events[0]
-	if event.EventType != vast.EventTypeClick {
-		t.Errorf("expected event type click, got %s", event.EventType)
+	if event.Event != string(vast.EventTypeClick) {
+		t.Errorf("expected event type click, got %s", event.Event)
 	}
 }
 
@@ -632,8 +641,8 @@ func TestHandleVideoPause(t *testing.T) {
 	}
 
 	event := analytics.events[0]
-	if event.EventType != vast.EventTypePause {
-		t.Errorf("expected event type pause, got %s", event.EventType)
+	if event.Event != string(vast.EventTypePause) {
+		t.Errorf("expected event type pause, got %s", event.Event)
 	}
 }
 
@@ -665,8 +674,8 @@ func TestHandleVideoResume(t *testing.T) {
 	}
 
 	event := analytics.events[0]
-	if event.EventType != vast.EventTypeResume {
-		t.Errorf("expected event type resume, got %s", event.EventType)
+	if event.Event != string(vast.EventTypeResume) {
+		t.Errorf("expected event type resume, got %s", event.Event)
 	}
 }
 
@@ -694,8 +703,8 @@ func TestHandleVideoError(t *testing.T) {
 	}
 
 	event := analytics.events[0]
-	if event.EventType != vast.EventTypeError {
-		t.Errorf("expected event type error, got %s", event.EventType)
+	if event.Event != string(vast.EventTypeError) {
+		t.Errorf("expected event type error, got %s", event.Event)
 	}
 	if event.ErrorCode != "400" {
 		t.Errorf("expected error code 400, got %s", event.ErrorCode)
@@ -847,8 +856,8 @@ func TestVideoEvent_AllFields(t *testing.T) {
 	event := analytics.events[0]
 
 	// Verify all fields
-	if event.EventType != vast.EventType("start") {
-		t.Errorf("expected EventType start, got %s", event.EventType)
+	if event.Event != "start" {
+		t.Errorf("expected Event start, got %s", event.Event)
 	}
 	if event.BidID != "bid-123" {
 		t.Errorf("expected BidID bid-123, got %s", event.BidID)
