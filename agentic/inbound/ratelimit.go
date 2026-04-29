@@ -42,7 +42,7 @@ func (r *RateLimiter) AllowAgent(agentID string) error {
 	defer r.mu.Unlock()
 
 	br := r.breakerForLocked(agentID)
-	if br.State() == "OPEN" {
+	if br.State() == idr.StateOpen {
 		return ErrCircuitOpen
 	}
 
