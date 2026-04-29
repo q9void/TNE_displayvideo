@@ -346,6 +346,8 @@ func (h *VideoHandler) parseVASTRequest(r *http.Request) (*openrtb.BidRequest, e
 		AT:   2, // Second-price auction
 	}
 
+	applyPrivacySignals(bidReq, q)
+
 	// Build content object if any content params are present (used by both Site and App)
 	var content *openrtb.Content
 	contentTitle := q.Get("content_title")
@@ -507,6 +509,58 @@ func parseStringArray(s string, defaultVal []string) []string {
 
 func generateRequestID() string {
 	return fmt.Sprintf("video-%d", time.Now().UnixNano())
+}
+
+// applyPrivacySignals maps GAM/IAB consent and privacy query params onto the
+// OpenRTB BidRequest. Bidders that gate on GDPR/CCPA/GPP will no-bid without
+// these, so EU/UK/CA traffic is unmonetisable until they're populated.
+func applyPrivacySignals(bidReq *openrtb.BidRequest, q url.Values) {
+	gdpr := q.Get("gdpr")
+	gdprConsent := q.Get("gdpr_consent")
+	addtlConsent := q.Get("addtl_consent")
+	usPrivacy := q.Get("us_privacy")
+	gpp := q.Get("gpp")
+	gppSID := q.Get("gpp_sid")
+	coppa := q.Get("coppa")
+
+	// Regs: GDPR flag, US privacy, GPP, COPPA
+	if gdpr != "" || usPrivacy != "" || gpp != "" || gppSID != "" || coppa != "" {
+		if bidReq.Regs == nil {
+			bidReq.Regs = &openrtb.Regs{}
+		}
+		if v := gdpr; v == "0" || v == "1" {
+			n, _ := strconv.Atoi(v)
+			bidReq.Regs.GDPR = &n
+		}
+		if usPrivacy != "" {
+			bidReq.Regs.USPrivacy = usPrivacy
+		}
+		if gpp != "" {
+			bidReq.Regs.GPP = gpp
+		}
+		if gppSID != "" {
+			bidReq.Regs.GPPSID = parseIntArray(gppSID, nil)
+		}
+		if coppa == "1" {
+			bidReq.Regs.COPPA = 1
+		}
+	}
+
+	// User: TCF consent string + Google Additional Consent (non-IAB vendors)
+	if gdprConsent != "" || addtlConsent != "" {
+		if bidReq.User == nil {
+			bidReq.User = &openrtb.User{}
+		}
+		if gdprConsent != "" {
+			bidReq.User.Consent = gdprConsent
+		}
+		if addtlConsent != "" {
+			ext := map[string]string{"consented_providers": addtlConsent}
+			if data, err := json.Marshal(ext); err == nil {
+				bidReq.User.Ext = data
+			}
+		}
+	}
 }
 
 // HandleVASTWrapper handles GET /video/wrapper requests.

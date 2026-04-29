@@ -887,3 +887,101 @@ func TestBuildAuctionURL_ForwardsAllParams(t *testing.T) {
 		t.Errorf("repeated protocols param not preserved; got %v", vals)
 	}
 }
+
+func TestApplyPrivacySignals_Full(t *testing.T) {
+	bidReq := &openrtb.BidRequest{}
+	q := url.Values{
+		"gdpr":          []string{"1"},
+		"gdpr_consent":  []string{"CPXxRfAPXxRfAAfKABENB-CgAAAAAAAAAAYgAAAAAAAA"},
+		"addtl_consent": []string{"1~1.35.41.101"},
+		"us_privacy":    []string{"1YNN"},
+		"gpp":           []string{"DBACNYA~CPXxRfAPXxRfAAfKABENB-CgAAAAAAAAAAYgAAAAAAAA"},
+		"gpp_sid":       []string{"2,6"},
+		"coppa":         []string{"1"},
+	}
+
+	applyPrivacySignals(bidReq, q)
+
+	if bidReq.Regs == nil {
+		t.Fatal("Regs not populated")
+	}
+	if bidReq.Regs.GDPR == nil || *bidReq.Regs.GDPR != 1 {
+		t.Errorf("GDPR = %v, want *1", bidReq.Regs.GDPR)
+	}
+	if bidReq.Regs.USPrivacy != "1YNN" {
+		t.Errorf("USPrivacy = %q", bidReq.Regs.USPrivacy)
+	}
+	if bidReq.Regs.GPP != "DBACNYA~CPXxRfAPXxRfAAfKABENB-CgAAAAAAAAAAYgAAAAAAAA" {
+		t.Errorf("GPP not set, got %q", bidReq.Regs.GPP)
+	}
+	if got := bidReq.Regs.GPPSID; len(got) != 2 || got[0] != 2 || got[1] != 6 {
+		t.Errorf("GPPSID = %v, want [2 6]", got)
+	}
+	if bidReq.Regs.COPPA != 1 {
+		t.Errorf("COPPA = %d, want 1", bidReq.Regs.COPPA)
+	}
+
+	if bidReq.User == nil {
+		t.Fatal("User not populated")
+	}
+	if bidReq.User.Consent != "CPXxRfAPXxRfAAfKABENB-CgAAAAAAAAAAYgAAAAAAAA" {
+		t.Errorf("Consent not forwarded, got %q", bidReq.User.Consent)
+	}
+	if bidReq.User.Ext == nil {
+		t.Fatal("User.Ext not populated for addtl_consent")
+	}
+	var ext map[string]string
+	if err := json.Unmarshal(bidReq.User.Ext, &ext); err != nil {
+		t.Fatalf("User.Ext is not valid JSON: %v", err)
+	}
+	if ext["consented_providers"] != "1~1.35.41.101" {
+		t.Errorf("addtl_consent not in User.Ext, got %v", ext)
+	}
+}
+
+func TestApplyPrivacySignals_Empty(t *testing.T) {
+	bidReq := &openrtb.BidRequest{}
+	applyPrivacySignals(bidReq, url.Values{})
+
+	if bidReq.Regs != nil {
+		t.Errorf("Regs should be nil when no privacy params present, got %+v", bidReq.Regs)
+	}
+	if bidReq.User != nil {
+		t.Errorf("User should be nil when no consent params present, got %+v", bidReq.User)
+	}
+}
+
+func TestApplyPrivacySignals_GDPRZero(t *testing.T) {
+	bidReq := &openrtb.BidRequest{}
+	applyPrivacySignals(bidReq, url.Values{"gdpr": []string{"0"}})
+
+	if bidReq.Regs == nil || bidReq.Regs.GDPR == nil {
+		t.Fatal("expected Regs.GDPR to be set even when 0")
+	}
+	if *bidReq.Regs.GDPR != 0 {
+		t.Errorf("GDPR = %d, want 0", *bidReq.Regs.GDPR)
+	}
+}
+
+func TestApplyPrivacySignals_PreservesUnsetExt(t *testing.T) {
+	// gdpr_consent alone (no addtl_consent) shouldn't leave User.Ext set.
+	bidReq := &openrtb.BidRequest{}
+	applyPrivacySignals(bidReq, url.Values{"gdpr_consent": []string{"abc"}})
+
+	if bidReq.User == nil || bidReq.User.Consent != "abc" {
+		t.Fatalf("User.Consent not set: %+v", bidReq.User)
+	}
+	if bidReq.User.Ext != nil {
+		t.Errorf("User.Ext should remain nil without addtl_consent, got %s", string(bidReq.User.Ext))
+	}
+}
+
+func TestApplyPrivacySignals_GDPRInvalidIgnored(t *testing.T) {
+	// Garbage gdpr value shouldn't crash or set the field.
+	bidReq := &openrtb.BidRequest{}
+	applyPrivacySignals(bidReq, url.Values{"gdpr": []string{"yes"}})
+
+	if bidReq.Regs != nil && bidReq.Regs.GDPR != nil {
+		t.Errorf("invalid gdpr value should be ignored, got %v", *bidReq.Regs.GDPR)
+	}
+}
