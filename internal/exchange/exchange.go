@@ -333,6 +333,19 @@ func (e *Exchange) WithAgentic(client *agentic.Client, applier *agentic.Applier,
 	return e
 }
 
+// AgenticApplier returns the wired agentic.Applier (or nil if WithAgentic
+// was never called). Phase 2A's inbound surface needs read access to reuse
+// the Phase 1 applier in inverse direction.
+func (e *Exchange) AgenticApplier() *agentic.Applier {
+	return e.agenticApplier
+}
+
+// AgenticStamper returns the wired OriginatorStamper. Phase 2A's inbound
+// surface uses it to stamp RTBResponse.metadata on the way out.
+func (e *Exchange) AgenticStamper() agentic.OriginatorStamper {
+	return e.agenticStamper
+}
+
 // Close shuts down the exchange and flushes pending events
 func (e *Exchange) Close() error {
 	// Close circuit breakers (wait for pending callbacks)

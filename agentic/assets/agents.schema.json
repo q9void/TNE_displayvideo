@@ -1,24 +1,57 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://thenexusengine.com/schemas/agents.v1.json",
+  "$id": "https://thenexusengine.com/schemas/agents.v2.json",
   "title": "TNE Catalyst agents.json",
-  "description": "Schema for the agent registry served at /.well-known/agents.json. See PRD §7.4.",
+  "description": "Schema for the agent registry served at /.well-known/agents.json. v2 adds optional capabilities + media_kits + product_catalogs blocks per AAMP 2.0; v1 docs continue to validate (additive change). See PRD §7.4 (Phase 1) + §7.2 (Phase 2).",
   "type": "object",
   "required": ["version", "seller_id", "seller_domain", "agents"],
   "additionalProperties": true,
   "properties": {
     "$schema":       {"type": "string"},
-    "version":       {"type": "string", "enum": ["1.0"]},
+    "version":       {"type": "string", "enum": ["1.0", "2.0"]},
     "seller_id":     {"type": "string", "minLength": 1, "maxLength": 64},
     "seller_domain": {"type": "string", "format": "hostname"},
     "contact":       {"type": "string"},
     "updated_at":    {"type": "string", "format": "date-time"},
+    "registry_ref":  {"type": "string"},
+    "capabilities":  {"$ref": "#/definitions/capabilities"},
+    "media_kits": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/asset_ref"}
+    },
+    "product_catalogs": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/asset_ref"}
+    },
     "agents": {
       "type": "array",
       "items": {"$ref": "#/definitions/agent"}
     }
   },
   "definitions": {
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "transports":               {"type": "array", "items": {"type": "string", "enum": ["grpc", "grpcs", "mcp", "http"]}},
+        "intents_inbound":          {"type": "array", "items": {"type": "string", "enum": ["ACTIVATE_SEGMENTS", "ACTIVATE_DEALS", "SUPPRESS_DEALS", "ADJUST_DEAL_FLOOR", "ADJUST_DEAL_MARGIN", "BID_SHADE", "ADD_METRICS", "ADD_CIDS"]}},
+        "intents_outbound":         {"type": "array", "items": {"type": "string", "enum": ["ACTIVATE_SEGMENTS", "ACTIVATE_DEALS", "SUPPRESS_DEALS", "ADJUST_DEAL_FLOOR", "ADJUST_DEAL_MARGIN", "BID_SHADE", "ADD_METRICS", "ADD_CIDS"]}},
+        "lifecycles":               {"type": "array", "items": {"type": "string", "enum": ["PUBLISHER_BID_REQUEST", "DSP_BID_RESPONSE"]}},
+        "opendirect_version":       {"type": "string"},
+        "adcom_version":            {"type": "string"},
+        "content_taxonomy_version": {"type": "string"},
+        "deal_types_accepted":      {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "asset_ref": {
+      "type": "object",
+      "required": ["id", "url"],
+      "additionalProperties": true,
+      "properties": {
+        "id":  {"type": "string", "minLength": 1},
+        "url": {"type": "string"}
+      }
+    },
     "agent": {
       "type": "object",
       "required": ["id", "role", "endpoints", "lifecycles", "intents"],

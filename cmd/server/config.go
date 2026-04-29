@@ -66,6 +66,16 @@ type AgenticConfig struct {
 	DisableShadeIntent      bool
 	AllowInsecureGRPC       bool
 
+	// Phase 2A — inbound surface
+	InboundEnabled     bool
+	InboundGRPCPort    int
+	MTLSCAPath         string
+	MTLSServerCertPath string
+	MTLSServerKeyPath  string
+	AllowDevNoMTLS     bool
+	InboundQPSPerAgent int
+	InboundQPSPerPub   int
+
 	// Phase 2 reserved
 	GRPCPort   int
 	MCPEnabled bool
@@ -153,6 +163,14 @@ func ParseConfig() *ServerConfig {
 			MaxIDsPerPayload:        getEnvIntOrDefault("AGENTIC_MAX_IDS_PER_PAYLOAD", 256),
 			DisableShadeIntent:      getEnvBoolOrDefault("AGENTIC_DISABLE_SHADE", true), // OQ3 default off
 			AllowInsecureGRPC:       getEnvBoolOrDefault("AGENTIC_ALLOW_INSECURE", false),
+			InboundEnabled:          getEnvBoolOrDefault("AGENTIC_INBOUND_ENABLED", false),
+			InboundGRPCPort:         getEnvIntOrDefault("AGENTIC_INBOUND_GRPC_PORT", 50051),
+			MTLSCAPath:              os.Getenv("AGENTIC_MTLS_CA_PATH"),
+			MTLSServerCertPath:      os.Getenv("AGENTIC_MTLS_CERT_PATH"),
+			MTLSServerKeyPath:       os.Getenv("AGENTIC_MTLS_KEY_PATH"),
+			AllowDevNoMTLS:          getEnvBoolOrDefault("AGENTIC_INBOUND_ALLOW_DEV_NO_MTLS", false),
+			InboundQPSPerAgent:      getEnvIntOrDefault("AGENTIC_INBOUND_QPS_PER_AGENT", 1000),
+			InboundQPSPerPub:        getEnvIntOrDefault("AGENTIC_INBOUND_QPS_PER_PUBLISHER", 200),
 			GRPCPort:                getEnvIntOrDefault("AGENTIC_GRPC_PORT", 0),
 			MCPEnabled:              getEnvBoolOrDefault("AGENTIC_MCP_ENABLED", false),
 		}
@@ -405,6 +423,21 @@ func (c *ServerConfig) Validate() error {
 		// In production, plain grpc:// must not be allowed.
 		if isProduction() && c.Agentic.AllowInsecureGRPC {
 			return fmt.Errorf("AGENTIC_ALLOW_INSECURE=true is not permitted in production")
+		}
+
+		// Phase 2A inbound surface validation.
+		if c.Agentic.InboundEnabled {
+			if c.Agentic.InboundGRPCPort < 1 || c.Agentic.InboundGRPCPort > 65535 {
+				return fmt.Errorf("AGENTIC_INBOUND_GRPC_PORT must be in [1, 65535], got %d", c.Agentic.InboundGRPCPort)
+			}
+			if !c.Agentic.AllowDevNoMTLS {
+				if c.Agentic.MTLSCAPath == "" || c.Agentic.MTLSServerCertPath == "" || c.Agentic.MTLSServerKeyPath == "" {
+					return fmt.Errorf("AGENTIC_INBOUND_ENABLED requires AGENTIC_MTLS_{CA,CERT,KEY}_PATH unless AGENTIC_INBOUND_ALLOW_DEV_NO_MTLS=true")
+				}
+			}
+			if isProduction() && c.Agentic.AllowDevNoMTLS {
+				return fmt.Errorf("AGENTIC_INBOUND_ALLOW_DEV_NO_MTLS=true is not permitted in production")
+			}
 		}
 	}
 

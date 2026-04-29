@@ -92,13 +92,37 @@ type Registry struct {
 }
 
 type registryDoc struct {
-	Schema       string          `json:"$schema,omitempty"`
-	Version      string          `json:"version"`
-	SellerID     string          `json:"seller_id"`
-	SellerDomain string          `json:"seller_domain"`
-	Contact      string          `json:"contact,omitempty"`
-	UpdatedAt    string          `json:"updated_at,omitempty"`
-	Agents       []AgentEndpoint `json:"agents"`
+	Schema          string          `json:"$schema,omitempty"`
+	Version         string          `json:"version"`
+	SellerID        string          `json:"seller_id"`
+	SellerDomain    string          `json:"seller_domain"`
+	Contact         string          `json:"contact,omitempty"`
+	UpdatedAt       string          `json:"updated_at,omitempty"`
+	RegistryRef     string          `json:"registry_ref,omitempty"`
+	Capabilities    Capabilities    `json:"capabilities,omitempty"`
+	MediaKits       []AssetRef      `json:"media_kits,omitempty"`
+	ProductCatalogs []AssetRef      `json:"product_catalogs,omitempty"`
+	Agents          []AgentEndpoint `json:"agents"`
+}
+
+// Capabilities describes what this Seller Agent can do per AAMP 2.0.
+// All fields optional; an empty Capabilities{} is valid (Phase 1 / v1.0 docs).
+type Capabilities struct {
+	Transports             []string `json:"transports,omitempty"`
+	IntentsInbound         []string `json:"intents_inbound,omitempty"`
+	IntentsOutbound        []string `json:"intents_outbound,omitempty"`
+	Lifecycles             []string `json:"lifecycles,omitempty"`
+	OpenDirectVersion      string   `json:"opendirect_version,omitempty"`
+	AdCOMVersion           string   `json:"adcom_version,omitempty"`
+	ContentTaxonomyVersion string   `json:"content_taxonomy_version,omitempty"`
+	DealTypesAccepted      []string `json:"deal_types_accepted,omitempty"`
+}
+
+// AssetRef is a reference to a media kit or product catalog (id + URL).
+// AAMP 2.0 buyer agents fetch the URL to inspect supported inventory.
+type AssetRef struct {
+	ID  string `json:"id"`
+	URL string `json:"url"`
 }
 
 // LoadRegistry reads agents.json and agents.schema.json from disk, validates
@@ -194,6 +218,37 @@ func (r *Registry) DocumentBytes() []byte {
 // AGENTIC_SELLER_ID env at boot.
 func (r *Registry) SellerID() string {
 	return r.parsed.SellerID
+}
+
+// SellerDomain returns the seller_domain field. Used by the Discovery
+// service so buyer-agents can verify the SSP they think they're talking to.
+func (r *Registry) SellerDomain() string {
+	return r.parsed.SellerDomain
+}
+
+// Capabilities returns the AAMP 2.0 capabilities block parsed from
+// agents.json. Empty (zero-value) for v1.0 documents.
+func (r *Registry) Capabilities() Capabilities {
+	return r.parsed.Capabilities
+}
+
+// MediaKits returns the seller-published media kit references. Reserved for
+// Phase 2C; Phase 2A registries return an empty slice.
+func (r *Registry) MediaKits() []AssetRef {
+	return r.parsed.MediaKits
+}
+
+// ProductCatalogs returns the seller-published product catalog references.
+// Reserved for Phase 2C.
+func (r *Registry) ProductCatalogs() []AssetRef {
+	return r.parsed.ProductCatalogs
+}
+
+// Version returns the schema version (e.g. "1.0", "2.0") of the loaded
+// agents.json. Useful for callers that branch behavior on the document
+// generation.
+func (r *Registry) Version() string {
+	return r.parsed.Version
 }
 
 // AgentCount returns the number of agents in the registry.

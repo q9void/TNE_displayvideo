@@ -113,7 +113,8 @@ generate-protos: ## Regenerate agentic/gen/ from agentic/proto/ (devs only; CI d
 	  --go-grpc_out=agentic/gen --go-grpc_opt=paths=source_relative \
 	  agentic/proto/iabtechlab/openrtb/v26/openrtb.proto \
 	  agentic/proto/iabtechlab/bidstream/mutation/v1/agenticrtbframework.proto \
-	  agentic/proto/iabtechlab/bidstream/mutation/v1/agenticrtbframeworkservices.proto
+	  agentic/proto/iabtechlab/bidstream/mutation/v1/agenticrtbframeworkservices.proto \
+	  agentic/proto/tne/v1/discovery.proto
 	@echo "✅ Protos regenerated. Commit agentic/gen/ with the proto changes."
 
 # Pre-commit checks

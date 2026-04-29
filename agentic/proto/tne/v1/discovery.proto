@@ -1,0 +1,54 @@
+edition = "2023";
+
+package com.thenexusengine.agentic.discovery.v1;
+
+option go_package = "github.com/thenexusengine/tne_springwire/agentic/gen/tne/discovery/v1;discoveryv1";
+
+// Discovery exposes our AAMP 2.0 capability manifest over gRPC so buyer
+// agents can introspect what we accept, what versions of OpenDirect /
+// AdCOM / Content Taxonomy we speak, and what deal types we'll honour.
+//
+// In Phase 2A we ship this as an in-house proto under the tne/v1 namespace
+// while waiting for the upstream IABTechLab/AAMP discovery proto to freeze.
+// When upstream stabilises, this file is replaced with a one-line vendor +
+// import shim — no callsite churn in agentic/inbound/discovery_handler.go.
+//
+// The CapabilitiesResponse includes the entire capabilities block as a
+// JSON string (capabilities_json) so we can extend the schema without
+// re-rolling the proto. Buyer agents parse the JSON against the published
+// agents.json schema; the proto fields above the JSON cover the stable
+// envelope.
+service Discovery {
+  // DescribeCapabilities returns the seller agent's capability manifest.
+  // Auth-light per PRD R7.3.1: requires valid mTLS / DevAuth credentials
+  // but no Registry cross-check or per-deal authorisation.
+  rpc DescribeCapabilities (DescribeCapabilitiesRequest) returns (CapabilitiesResponse);
+}
+
+message DescribeCapabilitiesRequest {
+  // Reserved for future filtering — e.g. "give me capabilities for the
+  // 'video' inventory subset only". Phase 2A returns the full manifest
+  // regardless.
+  string subset = 1;
+}
+
+message CapabilitiesResponse {
+  // Schema version of the underlying agents.json document; "1.0" or "2.0".
+  string version = 1;
+
+  // Catalyst's seller_id (e.g. "9131"). Matches /.well-known/sellers.json.
+  string seller_id = 2;
+
+  // Our DNS-stable seller domain.
+  string seller_domain = 3;
+
+  // The full agentic.Capabilities block serialised as JSON. Buyer agents
+  // parse against the published agents.json schema; this gives us a
+  // forward-compatible payload without re-rolling the proto whenever
+  // capabilities evolve.
+  string capabilities_json = 4;
+
+  // Stable hash of the capabilities content — buyer agents can use this
+  // to short-circuit re-fetches and detect when our manifest changes.
+  string etag = 5;
+}

@@ -1,9 +1,19 @@
 {
-  "$schema": "https://thenexusengine.com/schemas/agents.v1.json",
-  "version": "1.0",
+  "$schema": "https://thenexusengine.com/schemas/agents.v2.json",
+  "version": "2.0",
   "seller_id": "9131",
   "seller_domain": "thenexusengine.com",
   "contact": "agentic-ops@thenexusengine.com",
-  "updated_at": "2026-04-27T00:00:00Z",
+  "updated_at": "2026-04-28T00:00:00Z",
+  "capabilities": {
+    "transports":               ["grpc", "grpcs"],
+    "intents_inbound":          ["ACTIVATE_SEGMENTS", "ACTIVATE_DEALS", "SUPPRESS_DEALS", "ADJUST_DEAL_FLOOR", "ADJUST_DEAL_MARGIN", "BID_SHADE", "ADD_METRICS"],
+    "intents_outbound":         ["ACTIVATE_SEGMENTS", "ADJUST_DEAL_FLOOR", "BID_SHADE"],
+    "lifecycles":               ["PUBLISHER_BID_REQUEST", "DSP_BID_RESPONSE"],
+    "opendirect_version":       "2.1",
+    "adcom_version":            "1.0",
+    "content_taxonomy_version": "3.0",
+    "deal_types_accepted":      ["programmatic_pmp", "programmatic_guaranteed"]
+  },
   "agents": []
 }
