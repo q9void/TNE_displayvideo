@@ -42,7 +42,7 @@ func registerDiscoveryHandler(s *Server) {
 // NOT require IAB Tools Portal Registry cross-check or per-deal authorisation.
 //
 // The response payload is the agentic.Capabilities block from agents.json
-// serialised as JSON, plus an envelope (version + seller_id + seller_domain
+// serialized as JSON, plus an envelope (version + seller_id + seller_domain
 // + etag). Buyer agents parse the JSON against the published agents.json
 // schema; the etag lets them short-circuit re-fetches.
 func (h *discoveryHandler) DescribeCapabilities(ctx context.Context, _ *dpb.DescribeCapabilitiesRequest) (*dpb.CapabilitiesResponse, error) {

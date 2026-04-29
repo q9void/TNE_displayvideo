@@ -12,7 +12,7 @@ import (
 
 func TestDevAuthenticator_acceptsAllowListed(t *testing.T) {
 	auth := NewDevAuthenticator([]AgentEntry{
-		{AgentID: "curator.example.com", AgentType: "DSP", AuthorisedDeals: []string{"deal-1", "deal-2"}},
+		{AgentID: "curator.example.com", AgentType: "DSP", AuthorizedDeals: []string{"deal-1", "deal-2"}},
 	})
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-aamp-agent-id", "curator.example.com"))
 
@@ -21,7 +21,7 @@ func TestDevAuthenticator_acceptsAllowListed(t *testing.T) {
 	assert.Equal(t, "curator.example.com", id.AgentID)
 	assert.Equal(t, "DSP", id.AgentType)
 	assert.True(t, id.RegistryVerified) // DevAuth sets unconditionally
-	assert.ElementsMatch(t, []string{"deal-1", "deal-2"}, id.AuthorisedDeals)
+	assert.ElementsMatch(t, []string{"deal-1", "deal-2"}, id.AuthorizedDeals)
 }
 
 func TestDevAuthenticator_rejectsUnknown(t *testing.T) {
@@ -52,7 +52,7 @@ func TestDevAuthenticator_rejectsEmptyHeader(t *testing.T) {
 
 func TestDevAuthenticator_caseInsensitiveMetadataKey(t *testing.T) {
 	// gRPC metadata keys are normalised to lowercase by grpc-go; we exercise
-	// the path with a mixed-case input to confirm behaviour.
+	// the path with a mixed-case input to confirm behavior.
 	auth := NewDevAuthenticator([]AgentEntry{{AgentID: "curator.example.com", AgentType: "DSP"}})
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("X-AAMP-Agent-ID", "curator.example.com"))
 
@@ -85,12 +85,12 @@ func TestDevAuthenticator_RefreshRegistryNoOp(t *testing.T) {
 	assert.NoError(t, auth.RefreshRegistry(context.Background()))
 }
 
-func TestAgentIdentity_IsAuthorisedForDeal(t *testing.T) {
-	id := AgentIdentity{AuthorisedDeals: []string{"a", "b"}}
-	assert.True(t, id.IsAuthorisedForDeal("a"))
-	assert.True(t, id.IsAuthorisedForDeal("b"))
-	assert.False(t, id.IsAuthorisedForDeal("c"))
+func TestAgentIdentity_IsAuthorizedForDeal(t *testing.T) {
+	id := AgentIdentity{AuthorizedDeals: []string{"a", "b"}}
+	assert.True(t, id.IsAuthorizedForDeal("a"))
+	assert.True(t, id.IsAuthorizedForDeal("b"))
+	assert.False(t, id.IsAuthorizedForDeal("c"))
 
 	idEmpty := AgentIdentity{}
-	assert.False(t, idEmpty.IsAuthorisedForDeal("a"))
+	assert.False(t, idEmpty.IsAuthorizedForDeal("a"))
 }

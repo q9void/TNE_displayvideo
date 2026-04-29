@@ -10,7 +10,7 @@ import (
 
 // Authenticator resolves an inbound caller's AgentIdentity from the gRPC
 // context, OR returns ErrAuthFailed (or a more specific sentinel) if the
-// caller is not authorised. Implementations:
+// caller is not authorized. Implementations:
 //
 //   - DevAuthenticator — Phase 2A; identifies the caller via the static
 //     gRPC metadata header "x-aamp-agent-id". Dev/staging only.
@@ -35,7 +35,7 @@ type Authenticator interface {
 type AgentEntry struct {
 	AgentID         string
 	AgentType       string   // "DSP" | "PUBLISHER"
-	AuthorisedDeals []string // optional in 2A; populated in 2B
+	AuthorizedDeals []string // optional in 2A; populated in 2B
 }
 
 // DevAuthenticator is the no-mTLS authenticator used in dev and staging.
@@ -98,7 +98,7 @@ func (a *DevAuthenticator) Verify(ctx context.Context) (*AgentIdentity, error) {
 	return &AgentIdentity{
 		AgentID:          entry.AgentID,
 		AgentType:        agentType,
-		AuthorisedDeals:  entry.AuthorisedDeals,
+		AuthorizedDeals:  entry.AuthorizedDeals,
 		SPKIFingerprint:  "", // dev-only: no cert in this path
 		RegistryVerified: true,
 	}, nil

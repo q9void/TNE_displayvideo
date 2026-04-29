@@ -17,10 +17,10 @@ import (
 type RateLimiter struct {
 	cfg ServerConfig
 
-	mu             sync.Mutex
-	agentBuckets   map[string]*secondBucket
-	publisherBkts  map[string]*secondBucket
-	agentBreakers  map[string]*idr.CircuitBreaker
+	mu            sync.Mutex
+	agentBuckets  map[string]*secondBucket
+	publisherBkts map[string]*secondBucket
+	agentBreakers map[string]*idr.CircuitBreaker
 }
 
 // NewRateLimiter constructs a RateLimiter using cfg's QPSPerAgent +
@@ -79,21 +79,24 @@ func (r *RateLimiter) AllowPublisher(publisherID string) error {
 
 // RecordSuccess feeds a success into the per-agent breaker so it can
 // half-open. Called by handlers after a successful GetMutations.
+//
+// br.Execute returns the function's error (nil here) or ErrCircuitOpen.
+// We discard either — outcomes are recorded as a side effect inside the
+// breaker; the breaker state is the only thing we care about.
 func (r *RateLimiter) RecordSuccess(agentID string) {
 	r.mu.Lock()
 	br := r.breakerForLocked(agentID)
 	r.mu.Unlock()
-	// Drive the breaker via a no-op success Execute. The breaker's
-	// Execute() is the only way it observes outcomes.
-	_ = br.Execute(func() error { return nil })
+	br.Execute(func() error { return nil }) //nolint:errcheck // breaker outcome already side-effected on br.State; return value irrelevant
 }
 
-// RecordFailure feeds a failure into the per-agent breaker.
+// RecordFailure feeds a failure into the per-agent breaker. Same return
+// semantics as RecordSuccess.
 func (r *RateLimiter) RecordFailure(agentID string, err error) {
 	r.mu.Lock()
 	br := r.breakerForLocked(agentID)
 	r.mu.Unlock()
-	_ = br.Execute(func() error { return err })
+	br.Execute(func() error { return err }) //nolint:errcheck // see RecordSuccess
 }
 
 func (r *RateLimiter) breakerForLocked(agentID string) *idr.CircuitBreaker {

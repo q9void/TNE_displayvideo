@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// ServerConfig governs the inbound gRPC server's behaviour. All fields have
+// ServerConfig governs the inbound gRPC server's behavior. All fields have
 // sensible defaults filled in by defaults(); callers may pass a partial
 // ServerConfig and the zero values are populated.
 type ServerConfig struct {

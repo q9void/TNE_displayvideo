@@ -35,7 +35,7 @@ import (
 // curators a concrete endpoint to integrate against. Phase 2B's
 // OpenDirect is where curator-submitted deals turn into revenue.
 //
-// Behavioural contracts (PRD §5.1):
+// Behavioral contracts (PRD §5.1):
 //   - Auth via mTLS (Phase 2A.1) or DevAuth (Phase 2A.0)
 //   - Originator type ∈ {DSP, PUBLISHER}; SSP rejected (R5.1.4)
 //   - Rate limited per-agent + per-publisher
@@ -110,7 +110,7 @@ func (s *Server) GetMutations(ctx context.Context, req *pb.RTBRequest) (rsp *pb.
 
 	// 6. Build the response. Phase 2A is a no-op responder: we have no
 	// SSP-side mutations to suggest. Future phases (or specialised seller
-	// behaviours like proactive segment exposure) will populate Mutations.
+	// behaviors like proactive segment exposure) will populate Mutations.
 	lc := agentic.LifecycleFromProto(req.GetLifecycle())
 	apiVer := "1.0"
 	mv := buildVersionStamp()
@@ -195,11 +195,9 @@ func intersectIntents(callerIntents []pb.Intent, outboundAdvertised []string) []
 	}
 	out := make([]string, 0, len(callerIntents))
 	for _, i := range callerIntents {
-		name := strings.ToUpper(i.String())
-		// proto enum names are like "ACTIVATE_SEGMENTS"; trim any prefix.
-		if strings.HasPrefix(name, "INTENT_") {
-			name = strings.TrimPrefix(name, "INTENT_")
-		}
+		// proto enum names are like "ACTIVATE_SEGMENTS"; trim any
+		// "INTENT_" prefix (TrimPrefix is a no-op when absent).
+		name := strings.TrimPrefix(strings.ToUpper(i.String()), "INTENT_")
 		if advertised[name] {
 			out = append(out, name)
 		}
@@ -208,7 +206,7 @@ func intersectIntents(callerIntents []pb.Intent, outboundAdvertised []string) []
 }
 
 // buildVersionStamp returns a short build identifier emitted on every
-// RTBResponse so buyer-agents can correlate behavioural changes with
+// RTBResponse so buyer-agents can correlate behavioral changes with
 // our deploys. Phase 2A returns a static string; future phases can
 // substitute a generated package var seeded from the build SHA.
 func buildVersionStamp() string {

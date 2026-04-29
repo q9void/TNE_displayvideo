@@ -12,10 +12,10 @@ import (
 // calls return the cached instance so multiple Server constructions in a
 // single process don't duplicate-register (which Prometheus panics on).
 type Metrics struct {
-	CallDuration       *prometheus.HistogramVec
-	MutationTotal      *prometheus.CounterVec
-	AuthFailedTotal    *prometheus.CounterVec
-	RegistryFailures   prometheus.Counter
+	CallDuration         *prometheus.HistogramVec
+	MutationTotal        *prometheus.CounterVec
+	AuthFailedTotal      *prometheus.CounterVec
+	RegistryFailures     prometheus.Counter
 	IdempotencyCacheHits prometheus.Counter
 	PanicRecoveredTotal  prometheus.Counter
 }

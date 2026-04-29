@@ -98,9 +98,9 @@ func TestIntegration_endToEnd_GetMutations(t *testing.T) {
 	dsp := pb.Originator_TYPE_DSP
 	lc := pb.Lifecycle_LIFECYCLE_PUBLISHER_BID_REQUEST
 	req := &pb.RTBRequest{
-		Id:         proto.String("auction-integration"),
-		Originator: &pb.Originator{Type: &dsp, Id: proto.String("curator.example.com")},
-		Lifecycle:  &lc,
+		Id:                proto.String("auction-integration"),
+		Originator:        &pb.Originator{Type: &dsp, Id: proto.String("curator.example.com")},
+		Lifecycle:         &lc,
 		ApplicableIntents: []pb.Intent{pb.Intent_ACTIVATE_SEGMENTS},
 	}
 

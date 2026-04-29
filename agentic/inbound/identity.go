@@ -9,7 +9,7 @@ package inbound
 //     our trusted-buyer table and an entry in the IAB Tools Portal Registry)
 //   - AgentType is the AAMP Originator type — must be "DSP" or "PUBLISHER";
 //     "SSP" is rejected (only we emit that)
-//   - AuthorisedDeals is the set of deal IDs this caller may reference in
+//   - AuthorizedDeals is the set of deal IDs this caller may reference in
 //     ACTIVATE_DEALS / SUPPRESS_DEALS / ADJUST_DEAL_FLOOR mutations.
 //     Phase 2A ships with empty slices; Phase 2B populates from deal/Store.
 //   - SPKIFingerprint is the caller cert's Subject Public Key Info hash;
@@ -20,19 +20,19 @@ package inbound
 type AgentIdentity struct {
 	AgentID          string
 	AgentType        string
-	AuthorisedDeals  []string
+	AuthorizedDeals  []string
 	SPKIFingerprint  string
 	RegistryVerified bool
 }
 
-// IsAuthorisedForDeal returns true iff dealID is in the caller's
-// AuthorisedDeals set. Used by the RTB handler before applying any
+// IsAuthorizedForDeal returns true iff dealID is in the caller's
+// AuthorizedDeals set. Used by the RTB handler before applying any
 // deal-touching mutation (R5.1.10).
-func (a AgentIdentity) IsAuthorisedForDeal(dealID string) bool {
-	if a.AuthorisedDeals == nil {
+func (a AgentIdentity) IsAuthorizedForDeal(dealID string) bool {
+	if a.AuthorizedDeals == nil {
 		return false
 	}
-	for _, d := range a.AuthorisedDeals {
+	for _, d := range a.AuthorizedDeals {
 		if d == dealID {
 			return true
 		}

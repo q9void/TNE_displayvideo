@@ -67,14 +67,14 @@ type AgenticConfig struct {
 	AllowInsecureGRPC       bool
 
 	// Phase 2A — inbound surface
-	InboundEnabled       bool
-	InboundGRPCPort      int
-	MTLSCAPath           string
-	MTLSServerCertPath   string
-	MTLSServerKeyPath    string
-	AllowDevNoMTLS       bool
-	InboundQPSPerAgent   int
-	InboundQPSPerPub     int
+	InboundEnabled     bool
+	InboundGRPCPort    int
+	MTLSCAPath         string
+	MTLSServerCertPath string
+	MTLSServerKeyPath  string
+	AllowDevNoMTLS     bool
+	InboundQPSPerAgent int
+	InboundQPSPerPub   int
 
 	// Phase 2 reserved
 	GRPCPort   int

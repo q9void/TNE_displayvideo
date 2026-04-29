@@ -68,7 +68,7 @@ func TestComputeETag_lengthAndStability(t *testing.T) {
 // DevAuthenticator does) holds. With DevAuthenticator + an empty deal set,
 // Discovery still answers.
 func TestDescribeCapabilities_emptyDealSetStillAnswers(t *testing.T) {
-	srv := newTestServer(t, []AgentEntry{{AgentID: "curator", AuthorisedDeals: nil}})
+	srv := newTestServer(t, []AgentEntry{{AgentID: "curator", AuthorizedDeals: nil}})
 	h := &discoveryHandler{server: srv}
 
 	rsp, err := h.DescribeCapabilities(ctxWithAgent("curator"), &dpb.DescribeCapabilitiesRequest{})

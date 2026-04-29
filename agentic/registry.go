@@ -245,7 +245,7 @@ func (r *Registry) ProductCatalogs() []AssetRef {
 }
 
 // Version returns the schema version (e.g. "1.0", "2.0") of the loaded
-// agents.json. Useful for callers that branch behaviour on the document
+// agents.json. Useful for callers that branch behavior on the document
 // generation.
 func (r *Registry) Version() string {
 	return r.parsed.Version

@@ -19,8 +19,8 @@ var (
 	ErrAuthFailedSPKI = errors.New("inbound: SPKI fingerprint mismatch")
 
 	// ErrAuthFailedDealset indicates a mutation referenced a deal not in
-	// the caller's authorised deal set (R5.1.10).
-	ErrAuthFailedDealset = errors.New("inbound: deal not in caller's authorised set")
+	// the caller's authorized deal set (R5.1.10).
+	ErrAuthFailedDealset = errors.New("inbound: deal not in caller's authorized set")
 
 	// ErrRateLimitedPerAgent indicates the caller exceeded the per-agent
 	// QPS soft cap.
